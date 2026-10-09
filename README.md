@@ -24,6 +24,7 @@ Also:
 - **Network use.** The plugin talks only to the server address you enter: it uploads and downloads the files of your vault and their metadata (names, sizes, modification times). Without encryption the server stores your notes as they are; with encryption it stores only ciphertext.
 - **No telemetry.** The plugin sends nothing anywhere else.
 - **Files outside Obsidian's API.** On desktop the plugin reads and writes vault files directly through Node's file system module (atomic replacement, chunked reads of large files). On mobile it uses Obsidian's adapter API.
+- **WebAssembly inside `main.js`.** The sync core is Rust compiled to WebAssembly ([crates/selfsync-wasm](crates/selfsync-wasm)) and embedded into `main.js`, which is minified. Nothing is obfuscated or downloaded at runtime: release assets are built from this repository by the [release workflow](.github/workflows/release.yml) and carry GitHub build provenance attestations.
 - Deleted files go to Obsidian's trash (system or `.trash/`, as configured in Obsidian), never deleted permanently.
 
 ## How it works
