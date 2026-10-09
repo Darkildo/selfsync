@@ -5,7 +5,7 @@
 // Модуль fs передаётся снаружи: на мобильных `require("fs")` нет, и main.js не
 // должен тянуть его при загрузке.
 
-import type * as FsPromises from "node:fs/promises";
+type FsPromises = typeof import("node:fs/promises");
 
 import type { FileMeta } from "../types.ts";
 import { type FileBackend, joinPath, nameOf, parentOf, realName } from "./backend.ts";
@@ -25,7 +25,7 @@ export class NodeBackend implements FileBackend {
     private root: string,
     /** Абсолютный путь к хранилищу плагина (индекс, кэш, временные файлы). */
     private store: string,
-    private fsp: typeof FsPromises,
+    private fsp: FsPromises,
     private opts: NodeBackendOptions = {},
   ) {}
 
@@ -98,7 +98,7 @@ export class NodeBackend implements FileBackend {
       await this.fsp.rmdir(this.abs(path));
       return true;
     } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code;
+      const code = (e as { code?: string }).code;
       if (code === "ENOENT") return true;
       if (code === "ENOTEMPTY" || code === "EEXIST") return false;
       throw e;
@@ -163,13 +163,13 @@ export class NodeBackend implements FileBackend {
 
 /** Файла (или пути к нему) нет — `null`, остальные ошибки пробрасываются. */
 function missing(e: unknown): null {
-  const code = (e as NodeJS.ErrnoException).code;
+  const code = (e as { code?: string }).code;
   if (code === "ENOENT" || code === "ENOTDIR") return null;
   throw e;
 }
 
 /** Запись с fsync: после rename поверх старого файла не останется пустышки. */
-async function writeDurable(fsp: typeof FsPromises, file: string, data: Uint8Array): Promise<void> {
+async function writeDurable(fsp: FsPromises, file: string, data: Uint8Array): Promise<void> {
   const fh = await fsp.open(file, "w");
   try {
     await fh.write(data, 0, data.length, 0);
@@ -179,7 +179,7 @@ async function writeDurable(fsp: typeof FsPromises, file: string, data: Uint8Arr
   }
 }
 
-async function readRange(fsp: typeof FsPromises, file: string, offset: number, len?: number): Promise<Uint8Array | null> {
+async function readRange(fsp: FsPromises, file: string, offset: number, len?: number): Promise<Uint8Array | null> {
   const fh = await fsp.open(file, "r").catch(missing);
   if (!fh) return null;
   try {

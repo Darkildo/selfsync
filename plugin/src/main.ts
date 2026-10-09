@@ -7,7 +7,6 @@ import wasmBytes from "selfsync-wasm-bytes";
 import { initWasm, Runner } from "./engine.ts";
 import { Executor } from "./executor.ts";
 import { noticeText, setLanguage, stateText, t } from "./i18n.ts";
-import type { AdapterLike } from "./io/adapter.ts";
 import { AdapterBackend } from "./io/adapter.ts";
 import type { FileBackend } from "./io/backend.ts";
 import { ObsidianHttp } from "./io/http.ts";
@@ -94,7 +93,10 @@ export default class SelfsyncPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<Settings> | null) };
+    const saved = (await this.loadData()) as Partial<Settings> | null;
+    this.settings = { ...DEFAULT_SETTINGS, ...saved };
+    // Каталог настроек Obsidian не обязательно `.obsidian`: его можно переименовать.
+    if (!saved?.excludes) this.settings.excludes = [`${this.app.vault.configDir}/`];
     if (!this.settings.deviceName) this.settings.deviceName = defaultDeviceName();
   }
 
@@ -126,16 +128,15 @@ export default class SelfsyncPlugin extends Plugin {
 
   private backend(): FileBackend {
     const adapter = this.app.vault.adapter;
-    if (Platform.isDesktopApp && adapter instanceof FileSystemAdapter) {
-      // Node fs есть только на десктопе: подгружается здесь, а не при загрузке main.js.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
+    if (Platform.isDesktop && adapter instanceof FileSystemAdapter) {
+      // eslint-disable-next-line no-undef, @typescript-eslint/no-require-imports -- Node fs есть только в десктопном Obsidian (там у плагина CommonJS require): подгружается здесь, а не при загрузке main.js
       const fsp = require("fs/promises") as typeof import("node:fs/promises");
       return new NodeBackend(adapter.getBasePath(), adapter.getFullPath(this.pluginDir), fsp, {
         caseSensitive: Platform.isLinux,
         trash: (p) => this.trash(p),
       });
     }
-    return new AdapterBackend(adapter as unknown as AdapterLike, this.pluginDir, this.trashMode());
+    return new AdapterBackend(adapter, this.pluginDir, this.trashMode());
   }
 
   /** Как удаляет сам Obsidian: системная корзина или `.trash`; безвозвратно — никогда. */

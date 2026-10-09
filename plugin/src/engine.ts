@@ -27,7 +27,7 @@ const MAX_DELAY = 2 ** 31 - 1;
 
 export class Runner {
   private engine: WasmEngine;
-  private timer: ReturnType<typeof setTimeout> | undefined;
+  private timer: number | undefined;
   private timerAt = 0;
   private inflight = 0;
   private stopped = false;
@@ -104,10 +104,10 @@ export class Runner {
   }
 
   private schedule(at: number): void {
-    if (this.timer !== undefined) clearTimeout(this.timer);
+    if (this.timer !== undefined) window.clearTimeout(this.timer);
     this.timerAt = at;
     const delay = Math.min(MAX_DELAY, Math.max(0, at - this.clock()));
-    this.timer = setTimeout(() => {
+    this.timer = window.setTimeout(() => {
       this.timer = undefined;
       this.send({ type: "tick" });
     }, delay);
@@ -147,7 +147,7 @@ export class Runner {
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
-    if (this.timer !== undefined) clearTimeout(this.timer);
+    if (this.timer !== undefined) window.clearTimeout(this.timer);
     this.timer = undefined;
     for (const w of this.waiting.values()) w({ type: "error", code: "stopped", message: "синк остановлен" });
     this.waiting.clear();

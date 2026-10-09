@@ -6,6 +6,7 @@ import { type App, Modal, Notice, Setting } from "obsidian";
 import { formatBytes, t } from "../i18n.ts";
 import type SelfsyncPlugin from "../main.ts";
 import type { DeletedView } from "../types.ts";
+import { confirm } from "./confirm.ts";
 
 export class DeletedModal extends Modal {
   private selected = new Set<string>();
@@ -66,7 +67,7 @@ export class DeletedModal extends Modal {
     const paths = [...this.selected];
     const runner = this.plugin.runner;
     if (paths.length === 0 || !runner) return;
-    if (what === "purge" && !window.confirm(t("deleted.purgeConfirm", { n: paths.length }))) return;
+    if (what === "purge" && !(await confirm(this.app, t("deleted.purgeConfirm", { n: paths.length }), t("deleted.purge")))) return;
     const r = await runner.command(what === "restore" ? { type: "restoreDeleted", paths } : { type: "purgeDeleted", paths });
     if (r.type === "error") new Notice(r.message);
     else if (r.type === "restored") new Notice(t("deleted.restored", { n: r.count }));

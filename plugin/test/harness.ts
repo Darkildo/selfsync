@@ -9,10 +9,13 @@ import { join } from "node:path";
 
 import { Runner, initWasm } from "../src/engine.ts";
 import { type Connection, Executor } from "../src/executor.ts";
-import type { FileBackend } from "../src/io/backend.ts";
-import { FetchHttp } from "../src/io/http.ts";
+import type { FileBackend, HttpBackend, HttpResponse } from "../src/io/backend.ts";
+import { body, headerRecord } from "../src/io/http.ts";
 import { NodeBackend } from "../src/io/node.ts";
 import type { EngineConfig, Notice, SyncStatus } from "../src/types.ts";
+
+// Код плагина ставит таймеры через window (как требует Obsidian для всплывающих окон).
+(globalThis as Record<string, unknown>).window ??= globalThis;
 
 const ROOT = new URL("../..", import.meta.url).pathname;
 export const SERVER_BIN = process.env.SELFSYNC_BIN ?? join(ROOT, "target/debug/selfsync");
@@ -168,5 +171,20 @@ export class TestClient {
   async stop(): Promise<void> {
     this.runner?.stop();
     await fsp.rm(join(this.vault, ".."), { recursive: true, force: true });
+  }
+}
+
+/** HTTP в тестах — fetch из Node. */
+export class FetchHttp implements HttpBackend {
+  async request(url: string, method: string, headers: [string, string][], data: Uint8Array, timeoutMs: number): Promise<HttpResponse> {
+    const r = await fetch(url, {
+      method,
+      headers: headerRecord(headers),
+      body: body(data),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const out: [string, string][] = [];
+    r.headers.forEach((v, k) => out.push([k, v]));
+    return { status: r.status, headers: out, body: new Uint8Array(await r.arrayBuffer()) };
   }
 }

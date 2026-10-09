@@ -20,6 +20,7 @@ export class Notice {
 }
 
 export const Platform = {
+  isDesktop: true,
   isDesktopApp: true,
   isMobileApp: false,
   isLinux: true,

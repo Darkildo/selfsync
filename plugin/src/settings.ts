@@ -6,6 +6,7 @@ import { t } from "./i18n.ts";
 import type SelfsyncPlugin from "./main.ts";
 import { ConnectModal } from "./ui/connect.ts";
 import { JoinModal } from "./ui/join.ts";
+import { confirm } from "./ui/confirm.ts";
 import { ChangePasswordModal, PasswordModal } from "./ui/password.ts";
 
 export interface Settings {
@@ -27,7 +28,8 @@ export const DEFAULT_SETTINGS: Settings = {
   token: "",
   vault: "",
   deviceName: "",
-  excludes: [".obsidian/"],
+  // По умолчанию — каталог настроек vault'а, его подставляет loadSettings.
+  excludes: [],
   useWait: false,
   debounceSec: 2.5,
   pollActiveSec: 15,
@@ -223,7 +225,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
               .setButtonText(t("devices.revoke"))
               .setWarning()
               .onClick(async () => {
-                if (!window.confirm(t("devices.revokeConfirm", { name: d.name }))) return;
+                if (!(await confirm(this.app, t("devices.revokeConfirm", { name: d.name }), t("devices.revoke")))) return;
                 const res = await runner.command({ type: "revokeDevice", id: d.id });
                 if (res.type === "error") new Notice(res.message);
                 this.display();
