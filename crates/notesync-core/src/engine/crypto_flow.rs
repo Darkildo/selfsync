@@ -86,6 +86,7 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
                 cx.with_mut(|s| {
                     s.index.migration = Some(MigrationState {
                         key_version: vs.key_version,
+                        takeover: true,
                         ..Default::default()
                     });
                 });
@@ -286,7 +287,18 @@ pub(crate) async fn migrate(cx: &Ctx) -> SyncResult<()> {
     api::put_migration(cx, state.key_version).await?;
     loop {
         if !cx.with(|s| s.index.migration.as_ref().is_some_and(|m| m.uploaded)) {
-            upload_all(cx).await?;
+            let mut complete = false;
+            for _ in 0..5 {
+                if upload_all(cx).await? {
+                    complete = true;
+                    break;
+                }
+            }
+            if !complete {
+                // Без полной перезаливки purge стёр бы неперезалитое: повтор в
+                // следующем цикле.
+                return Err(SyncError::Io("миграция: перезалито не всё, повтор позже".into()));
+            }
         }
         let max_seq = cx.with(|s| s.index.migration.as_ref().map_or(0, |m| m.max_seq));
         if api::purge_plaintext(cx, max_seq).await? {
@@ -323,23 +335,22 @@ async fn plaintext_left(cx: &Ctx) -> SyncResult<bool> {
     }
 }
 
-async fn upload_all(cx: &Ctx) -> SyncResult<()> {
+/// Один проход перезаливки. Возвращает `true`, если перезалито всё: только тогда
+/// можно стирать открытые записи (purge снимает всё, что не новее `max_seq`).
+async fn upload_all(cx: &Ctx) -> SyncResult<bool> {
     let keys = cx.with(|s| s.keys.clone()).ok_or_else(|| SyncError::Paused("need_password".into()))?;
     // Все открытые живые записи сервера (не только локальные файлы: у других устройств
-    // могут быть свои исключения).
+    // могут быть свои исключения) и последние зашифрованные записи тех же путей.
     let mut cursor = 0;
     let mut plain: BTreeMap<String, pb::Entry> = BTreeMap::new();
-    // Пути, у которых уже есть зашифрованная запись. После записи ключа открытые
-    // записи заморожены (сервер их отклоняет), так что зашифрованная версия — либо
-    // перезалитая раньше, либо более новая правка: в обоих случаях её не трогаем.
-    let mut encrypted: BTreeSet<String> = BTreeSet::new();
+    let mut encrypted: BTreeMap<String, pb::Entry> = BTreeMap::new();
     loop {
         let resp = api::changes(cx, cursor, 1000).await?;
         for e in resp.entries {
             let Some(p) = e.path.as_ref() else { continue };
             if p.encrypted {
                 if let Ok(vp) = keys.decrypt_path(p) {
-                    encrypted.insert(vp.as_str().to_owned());
+                    encrypted.insert(vp.as_str().to_owned(), e);
                 }
                 continue;
             }
@@ -355,35 +366,32 @@ async fn upload_all(cx: &Ctx) -> SyncResult<()> {
             break;
         }
     }
-    let todo: Vec<(String, pb::Entry)> = cx.with_mut(|s| {
-        let Some(m) = s.index.migration.as_mut() else { return Vec::new() };
-        let mut todo = Vec::new();
-        for (k, e) in plain {
-            if m.done.get(&k) == Some(&e.seq) {
-                continue;
-            }
-            if encrypted.contains(&k) {
-                m.done.insert(k, e.seq);
-                m.max_seq = m.max_seq.max(e.seq);
-                continue;
-            }
-            todo.push((k, e));
-        }
-        todo
+    // Занятые имена (для копий) и блобы живых зашифрованных файлов.
+    let mut taken: BTreeSet<String> = plain.keys().chain(encrypted.keys()).cloned().collect();
+    let enc_blobs: BTreeSet<Vec<u8>> = encrypted.values().filter(|x| !x.deleted && !x.folder).map(|x| x.hash.clone()).collect();
+    let (todo, takeover): (Vec<(String, pb::Entry)>, bool) = cx.with(|s| {
+        let Some(m) = s.index.migration.as_ref() else { return (Vec::new(), false) };
+        (plain.into_iter().filter(|(k, e)| m.done.get(k) != Some(&e.seq)).collect(), m.takeover)
     });
     let total = u32::try_from(todo.len()).unwrap_or(u32::MAX);
+    let mut complete = true;
     let mut n = 0u32;
     for chunk in todo.chunks(50) {
         let mut ops = Vec::new();
-        let mut meta: Vec<(String, u64, Option<(Hash, u64)>)> = Vec::new();
+        let mut meta: Vec<(String, u64)> = Vec::new();
         for (k, e) in chunk {
             let vp = VaultPath::parse(k).map_err(|er| SyncError::Io(er.to_string()))?;
             let enc_path = keys.encrypt_path(&vp);
+            let enc = encrypted.get(k);
             if e.folder {
+                if enc.is_some_and(|x| x.folder && !x.deleted) {
+                    mark_done(cx, k, e.seq);
+                    continue;
+                }
                 ops.push(pb::Op {
                     kind: Some(pb::op::Kind::Mkdir(pb::Mkdir { path: Some(enc_path) })),
                 });
-                meta.push((k.clone(), e.seq, None));
+                meta.push((k.clone(), e.seq));
                 continue;
             }
             let Some(h) = Hash::from_slice(&e.hash) else { continue };
@@ -392,50 +400,83 @@ async fn upload_all(cx: &Ctx) -> SyncResult<()> {
                     Some(b) => b,
                     None => {
                         cx.log(LogLevel::Error, format!("миграция: не удалось перезалить {k}"));
+                        complete = false;
                         continue;
                     }
                 }
             } else {
                 let Some(plain) = plaintext_of(cx, k, &h).await? else {
-                    cx.log(LogLevel::Error, format!("миграция: не удалось получить {k}"));
+                    // Блоба нет на сервере: спасать нечего, purge не блокируем.
+                    cx.log(LogLevel::Error, format!("миграция: блоб {k} пропал на сервере"));
+                    mark_done(cx, k, e.seq);
                     continue;
                 };
                 let ph = Hash::of(&plain);
-                let b = prepare_small(&plain, ph, Some(&keys));
-                if !api::blobs_missing(cx, &[b.hash]).await?.is_empty() {
-                    super::transfer::upload_small(cx, &b).await?;
-                }
-                b
+                prepare_small(&plain, ph, Some(&keys))
             };
+            // Шифрование детерминированное: та же открытая версия даёт тот же блоб.
+            if let Some(x) = enc {
+                if !x.deleted && x.hash == b.hash.to_vec() {
+                    mark_done(cx, k, e.seq);
+                    continue;
+                }
+                // Своя миграция: зашифрованные записи пишем только мы, и раз блоб
+                // другой, это копия более старой открытой версии — перезаписать. Чужая
+                // брошенная: зашифрованная запись может быть правкой пользователя —
+                // главнее та, что записана позже.
+                if takeover && x.seq > e.seq {
+                    // Открытая версия уже бывала зашифрованной (в истории пути или в
+                    // другом файле) — её содержимое сохранено, purge ничего не теряет.
+                    let in_history = api::history(cx, &enc_path).await?.revisions.iter().any(|r| r.hash == b.hash.to_vec());
+                    if in_history || enc_blobs.contains(&b.hash.to_vec()) {
+                        mark_done(cx, k, e.seq);
+                        continue;
+                    }
+                }
+            }
+            let (put_path, base_rev) = match enc {
+                Some(x) if takeover && x.seq > e.seq => {
+                    // Обе версии могут нести правки, которых нет в другой: открытая
+                    // сохраняется зашифрованной копией рядом.
+                    let (date, _) = super::resolve::stamp(cx.now(), cx.with(|s| s.cfg.tz_offset_min));
+                    let copy = (1..100)
+                        .map(|n| if n == 1 { format!("plaintext {date}") } else { format!("plaintext {date} {n}") })
+                        .map(|l| vp.with_suffix(&l).as_str().to_owned())
+                        .find(|c| !taken.contains(c))
+                        .ok_or_else(|| SyncError::Io(format!("миграция: нет свободного имени для копии {k}")))?;
+                    cx.log(LogLevel::Warn, format!("миграция: открытая версия {k} сохранена копией {copy}"));
+                    taken.insert(copy.clone());
+                    let cp = VaultPath::parse(&copy).map_err(|er| SyncError::Io(er.to_string()))?;
+                    (keys.encrypt_path(&cp), 0)
+                }
+                _ => (enc_path, enc.map_or(0, |x| x.rev)),
+            };
+            if b.data.is_some() && !api::blobs_missing(cx, &[b.hash]).await?.is_empty() {
+                super::transfer::upload_small(cx, &b).await?;
+            }
             ops.push(pb::Op {
                 kind: Some(pb::op::Kind::Put(pb::Put {
-                    path: Some(enc_path),
-                    base_rev: 0,
+                    path: Some(put_path),
+                    base_rev,
                     hash: b.hash.to_vec(),
                     size: b.len,
                     mtime: e.mtime,
                 })),
             });
-            meta.push((k.clone(), e.seq, Some((b.hash, b.len))));
+            meta.push((k.clone(), e.seq));
         }
         if ops.is_empty() {
             continue;
         }
         let resp = api::ops(cx, ops).await?;
-        for ((k, seq, _), r) in meta.iter().zip(resp.results) {
+        for ((k, seq), r) in meta.iter().zip(resp.results) {
             match r.result {
-                // Conflict: зашифрованная запись появилась между листингом и Put — она
-                // главнее открытой.
-                Some(pb::op_result::Result::Applied(_) | pb::op_result::Result::Conflict(_)) => {
-                    cx.with_mut(|s| {
-                        if let Some(m) = &mut s.index.migration {
-                            m.done.insert(k.clone(), *seq);
-                            m.max_seq = m.max_seq.max(*seq);
-                        }
-                    });
-                }
+                Some(pb::op_result::Result::Applied(_)) => mark_done(cx, k, *seq),
                 other => {
-                    cx.log(LogLevel::Error, format!("миграция {k}: {other:?}"));
+                    // Conflict: зашифрованная запись сменилась после листинга —
+                    // разберёмся на следующем проходе.
+                    cx.log(LogLevel::Warn, format!("миграция {k}: {other:?}, повтор"));
+                    complete = false;
                 }
             }
         }
@@ -443,12 +484,24 @@ async fn upload_all(cx: &Ctx) -> SyncResult<()> {
         cx.save().await?;
         cx.notify(Notice::MigrationProgress { done: n, total });
     }
+    if complete {
+        cx.with_mut(|s| {
+            if let Some(m) = &mut s.index.migration {
+                m.uploaded = true;
+            }
+        });
+    }
+    cx.save().await?;
+    Ok(complete)
+}
+
+fn mark_done(cx: &Ctx, key: &str, seq: u64) {
     cx.with_mut(|s| {
         if let Some(m) = &mut s.index.migration {
-            m.uploaded = true;
+            m.done.insert(key.to_owned(), seq);
+            m.max_seq = m.max_seq.max(seq);
         }
     });
-    cx.save().await
 }
 
 /// Большой файл: перешифровать потоком — из локальной копии, если она совпадает с

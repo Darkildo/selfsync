@@ -205,7 +205,8 @@ pub async fn delete_migration(cx: &Ctx) -> SyncResult<()> {
         .map(|_| ())
 }
 
-/// Purge открытых записей. `Ok(false)` — открытые файлы изменились после снимка.
+/// Purge открытых записей (сервер заодно снимает маркер миграции). `Ok(false)` —
+/// открытые файлы изменились после снимка.
 pub async fn purge_plaintext(cx: &Ctx, max_seq: u64) -> SyncResult<bool> {
     let r = proto_req("POST", "/v1/vaultkey/migration/purge".into(), &pb::MigrationPurge { max_seq });
     let (status, _, body) = cx.http(r).await?;
@@ -213,10 +214,11 @@ pub async fn purge_plaintext(cx: &Ctx, max_seq: u64) -> SyncResult<bool> {
         200 => Ok(true),
         409 => {
             let e = pb::Error::decode(&body[..]).unwrap_or_default();
-            if e.code == "plaintext_changed" {
-                Ok(false)
-            } else {
-                Err(error_of(409, &body))
+            match e.code.as_str() {
+                "plaintext_changed" => Ok(false),
+                // Маркера уже нет: purge прошёл, а ответ потерялся.
+                "no_migration" => Ok(true),
+                _ => Err(error_of(409, &body)),
             }
         }
         s => Err(error_of(s, &body)),

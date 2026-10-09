@@ -523,7 +523,7 @@ impl World {
                 }
             }
         }
-        self.log(format!("c{c} USER write {path} ({} b)", data.len()));
+        self.log(format!("c{c} USER write {path} ({} b) {:?}", data.len(), tokens_in(&data)));
         self.clients[c].fs.user_write(path, data, now);
         self.emit(c, Event::Changed { path: path.to_owned() });
     }
@@ -580,7 +580,7 @@ impl World {
         let mut out = lines.join("\n");
         out.push('\n');
         let now = self.client_now(c);
-        self.log(format!("c{c} USER edit {path}"));
+        self.log(format!("c{c} USER edit {path} +{tok}"));
         self.clients[c].fs.user_write(path, out.into_bytes(), now);
         self.emit(c, Event::Changed { path: path.to_owned() });
     }

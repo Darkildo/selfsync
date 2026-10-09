@@ -140,6 +140,9 @@ pub struct MigrationState {
     pub max_seq: u64,
     /// Перезаливка закончена, остались purge и снятие маркера.
     pub uploaded: bool,
+    /// Доводим чужую брошенную миграцию: зашифрованные записи могут быть правками
+    /// пользователей, сделанными уже после перехода на шифрование.
+    pub takeover: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
