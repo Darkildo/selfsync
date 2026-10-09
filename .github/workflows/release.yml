@@ -1,0 +1,101 @@
+name: Release
+
+# Тег v* — сборка бинарей сервера и клиента (musl, x86_64 и aarch64), плагина,
+# SHA256SUMS и аттестаций происхождения; затем черновик релиза.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  CARGO_TERM_COLOR: always
+  WASM_BINDGEN: "0.2.129"
+  ZIGBUILD: "0.20.1"
+
+jobs:
+  binaries:
+    name: Бинари (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Тулчейн и zig
+        run: |
+          rustup target add ${{ matrix.target }}
+          pip install ziglang==0.13.0
+          cargo install cargo-zigbuild --version "$ZIGBUILD" --locked
+      - name: Воспроизводимая сборка
+        env:
+          # Время сборки и пути не попадают в бинарь: два прогона дают одинаковые байты.
+          SOURCE_DATE_EPOCH: "0"
+          RUSTFLAGS: "--remap-path-prefix=${{ github.workspace }}=. --remap-path-prefix=/home/runner/.cargo=cargo -C strip=symbols"
+        run: |
+          cargo zigbuild --release --locked --target ${{ matrix.target }} -p notesync-server -p notesync-cli
+          mkdir -p dist
+          for bin in notesync notesync-cli; do
+            cp "target/${{ matrix.target }}/release/$bin" "dist/$bin-${{ matrix.target }}"
+          done
+      - name: Проверка воспроизводимости (вторая сборка с нуля)
+        env:
+          SOURCE_DATE_EPOCH: "0"
+          RUSTFLAGS: "--remap-path-prefix=${{ github.workspace }}=. --remap-path-prefix=/home/runner/.cargo=cargo -C strip=symbols"
+        run: |
+          cargo clean --release --target ${{ matrix.target }}
+          cargo zigbuild --release --locked --target ${{ matrix.target }} -p notesync-server -p notesync-cli
+          for bin in notesync notesync-cli; do
+            cmp "target/${{ matrix.target }}/release/$bin" "dist/$bin-${{ matrix.target }}"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.target }}
+          path: dist/*
+
+  plugin:
+    name: Плагин
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: wasm-bindgen и wasm-opt
+        run: |
+          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked
+          sudo apt-get update && sudo apt-get install -y binaryen
+      - run: ./scripts/build-wasm.sh
+      - working-directory: plugin
+        run: |
+          npm ci
+          npm run build
+          mkdir -p ../dist
+          cp main.js manifest.json styles.css ../dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin
+          path: dist/*
+
+  release:
+    name: Черновик релиза
+    needs: [binaries, plugin]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
+      - name: Релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/* --draft --verify-tag --title "${{ github.ref_name }}" --repo "${{ github.repository }}"

@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  WASM_BINDGEN: "0.2.129"
+
+jobs:
+  rust:
+    name: Rust — fmt, clippy, тесты
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      # Тулчейн и компоненты — из rust-toolchain.toml.
+      - run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - name: Симуляция (2000 случайных прогонов)
+        run: cargo run --release --locked -p notesync-sim -- --runs 2000 --seed 1
+
+  plugin:
+    name: Плагин — WASM, типы, e2e против сервера
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+      - name: wasm-bindgen и wasm-opt
+        run: |
+          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked
+          sudo apt-get update && sudo apt-get install -y binaryen
+      - run: ./scripts/build-wasm.sh
+      - run: cargo build --locked -p notesync-server
+      - working-directory: plugin
+        run: |
+          npm ci
+          npm run build
+          npm test
