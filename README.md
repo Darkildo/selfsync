@@ -23,7 +23,8 @@ Also:
 - **You need your own selfsync server.** The plugin does nothing without one; there is no hosted service, account or subscription. Setup is described below.
 - **Network use.** The plugin talks only to the server address you enter: it uploads and downloads the files of your vault and their metadata (names, sizes, modification times). Without encryption the server stores your notes as they are; with encryption it stores only ciphertext.
 - **No telemetry.** The plugin sends nothing anywhere else.
-- **Files outside Obsidian's API.** On desktop the plugin reads and writes vault files directly through Node's file system module (atomic replacement, chunked reads of large files). On mobile it uses Obsidian's adapter API.
+- **Direct file system access on desktop.** Obsidian's review flags this, so here is why. On desktop the plugin reads and writes the files of your vault through Node's `fs` module instead of Obsidian's API: a downloaded file replaces the old one atomically and is flushed to disk (`fsync`), so a crash or power loss never leaves a half-written note, and large attachments are read and hashed in chunks instead of being loaded into memory whole. It only touches paths inside the vault folder (plus Obsidian's trash when a file is deleted). On mobile it uses Obsidian's adapter API.
+- **Clipboard.** The "Copy link" button in "Connect a new device" writes the one-time connect link to the clipboard. The plugin never reads the clipboard.
 - **WebAssembly inside `main.js`.** The sync core is Rust compiled to WebAssembly ([crates/selfsync-wasm](crates/selfsync-wasm)) and embedded into `main.js`, which is minified. Nothing is obfuscated or downloaded at runtime: release assets are built from this repository by the [release workflow](.github/workflows/release.yml) and carry GitHub build provenance attestations.
 - Deleted files go to Obsidian's trash (system or `.trash/`, as configured in Obsidian), never deleted permanently.
 
@@ -66,7 +67,7 @@ The server is a single `selfsync` binary that can run in several ways. They diff
 
 ### Installing the binary
 
-Static binaries (musl, x86_64 and aarch64) are attached to each release together with `SHA256SUMS` and build provenance attestations:
+Static binaries (musl, x86_64 and aarch64) are published in `server-X.Y.Z` releases together with `SHA256SUMS` and build provenance attestations (the `X.Y.Z` releases hold only the Obsidian plugin):
 
 ```sh
 sha256sum -c SHA256SUMS --ignore-missing

@@ -95,22 +95,37 @@ jobs:
           path: dist/*
 
   release:
-    name: Черновик релиза
+    name: Черновики релизов
     needs: [binaries, plugin]
     runs-on: ubuntu-24.04
     steps:
+      # Каталог Obsidian ждёт в релизе плагина только main.js, manifest.json и
+      # styles.css, поэтому бинари уходят в отдельный релиз server-x.y.z.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          path: dist
+          name: plugin
+          path: dist/plugin
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: bin-*
+          path: dist/server
           merge-multiple: true
       - name: SHA256SUMS
-        working-directory: dist
+        working-directory: dist/server
         run: sha256sum * > SHA256SUMS && cat SHA256SUMS
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: "dist/*"
-      - name: Релиз
+          subject-path: |
+            dist/plugin/*
+            dist/server/*
+      - name: Релизы
         env:
           GH_TOKEN: ${{ github.token }}
-        # Имя релиза — ровно версия: так требует Obsidian.
-        run: gh release create "${{ github.ref_name }}" dist/* --draft --verify-tag --title "${{ github.ref_name }}" --repo "${{ github.repository }}"
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        # Имя релиза плагина — ровно версия: так требует Obsidian. Тег server-x.y.z
+        # создаётся на том же коммите при публикации черновика.
+        run: |
+          gh release create "$TAG" dist/plugin/* --draft --verify-tag --title "$TAG" --repo "$REPO"
+          gh release create "server-$TAG" dist/server/* --draft --target "$GITHUB_SHA" --title "Server and CLI $TAG" --repo "$REPO" \
+            --notes "Static Linux binaries (musl) of the selfsync server and command-line client for x86_64 and aarch64. The Obsidian plugin is in release $TAG."
