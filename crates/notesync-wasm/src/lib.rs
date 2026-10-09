@@ -89,3 +89,19 @@ pub fn normalize_path(path: &str) -> Option<String> {
 pub fn protocol_version() -> u32 {
     notesync_core::proto::PROTO_VERSION
 }
+
+/// QR-код строки (ссылки подключения): `[ширина, модули…]`, модуль 1 — тёмный.
+/// Рисует интерфейс: так в WASM не попадает рендерер SVG/картинок.
+#[wasm_bindgen(js_name = qrModules)]
+pub fn qr_modules(text: &str) -> Result<Vec<u8>, JsError> {
+    let code = qrcode::QrCode::new(text.as_bytes()).map_err(|e| JsError::new(&e.to_string()))?;
+    let width = u8::try_from(code.width()).map_err(|_| JsError::new("QR-код слишком большой"))?;
+    let mut out = Vec::with_capacity(1 + code.width() * code.width());
+    out.push(width);
+    out.extend(
+        code.to_colors()
+            .into_iter()
+            .map(|c| u8::from(c == qrcode::Color::Dark)),
+    );
+    Ok(out)
+}

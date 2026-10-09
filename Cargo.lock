@@ -1083,6 +1083,7 @@ dependencies = [
  "console_error_panic_hook",
  "getrandom 0.4.3",
  "notesync-core",
+ "qrcode",
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",
