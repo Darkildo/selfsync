@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/notesync-proto",
     "crates/notesync-core",
+    "crates/notesync-server",
 ]
 
 [workspace.package]

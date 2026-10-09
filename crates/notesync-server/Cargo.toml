@@ -1,0 +1,50 @@
+[package]
+name = "notesync-server"
+description = "Сервер notesync: HTTP, SQLite, хранилище блобов, режимы cgi/socket/serve"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "notesync"
+path = "src/main.rs"
+
+[dependencies]
+notesync-proto.workspace = true
+notesync-core.workspace = true
+prost.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+http.workspace = true
+http-body.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+rusqlite.workspace = true
+r2d2.workspace = true
+r2d2_sqlite.workspace = true
+listenfd.workspace = true
+clap.workspace = true
+humantime.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+subtle.workspace = true
+sha2.workspace = true
+getrandom.workspace = true
+qrcode.workspace = true
+sd-notify.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
