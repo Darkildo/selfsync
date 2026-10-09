@@ -15,13 +15,23 @@ pub type Pool = r2d2::Pool<SqliteConnectionManager>;
 
 /// PRAGMA при каждом открытии. `busy_timeout` первым: переключение в WAL при
 /// одновременном старте нескольких CGI-процессов тоже должно ждать, а не падать.
+/// `secure_delete`: удалённые строки затираются нулями, а не остаются в свободных
+/// страницах — иначе открытые имена файлов переживали бы миграцию на шифрование.
 const PRAGMAS: &str = "PRAGMA busy_timeout = 5000;
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
-PRAGMA foreign_keys = ON;";
+PRAGMA foreign_keys = ON;
+PRAGMA secure_delete = ON;";
 
 pub fn init_conn(c: &mut Connection) -> rusqlite::Result<()> {
     c.execute_batch(PRAGMAS)
+}
+
+/// Перенести WAL в базу и обрезать его до нуля. В WAL лежат прежние версии страниц
+/// — с тем, что только что удалено (открытый текст после миграции, окончательно
+/// стёртые файлы); `secure_delete` их не касается. Ждёт читателей до `busy_timeout`.
+pub fn truncate_wal(c: &Connection) -> rusqlite::Result<()> {
+    c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
 }
 
 /// Открывает одно соединение (служебные команды).

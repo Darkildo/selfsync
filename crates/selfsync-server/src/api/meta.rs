@@ -66,6 +66,7 @@ pub async fn purge_deleted(
         .db(move |c, v| {
             let (n, hashes) = vault::purge_deleted(c, &keys)?;
             remove_unreferenced(c, &v.blobs, &hashes, None)?;
+            crate::db::truncate_wal(c)?;
             Ok(n)
         })
         .await?;
@@ -217,6 +218,7 @@ pub async fn purge_migration(
             if let PurgeOutcome::Done { hashes, .. } = &out {
                 // Открытые блобы стираются сразу: ждать gc незачем.
                 remove_unreferenced(c, &v.blobs, hashes, None)?;
+                crate::db::truncate_wal(c)?;
             }
             Ok(out)
         })

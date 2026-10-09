@@ -1296,6 +1296,33 @@ mod tests {
         );
     }
 
+    /// Открытые имена не должны оставаться ни в свободных страницах базы, ни в WAL:
+    /// иначе шифрование не скрыло бы их от того, у кого есть файлы сервера.
+    #[test]
+    fn purge_leaves_no_plaintext_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("meta.db");
+        let mut c = crate::db::open(&path).unwrap();
+        migrate_vault(&mut c).unwrap();
+        let name = "секретная-заметка.md";
+        run(&mut c, vec![put(name, 0, 1)]);
+        run(&mut c, vec![put(name, 1, 2)]);
+        assert_eq!(put_vault_key(&mut c, b"rec", 0).unwrap(), Some(1));
+        set_migration(&c, &pb::MigrationMarker::default()).unwrap();
+        assert!(matches!(
+            purge_plaintext(&mut c, 10).unwrap(),
+            PurgeOutcome::Done { .. }
+        ));
+        crate::db::truncate_wal(&c).unwrap();
+        for f in ["meta.db", "meta.db-wal"] {
+            let bytes = std::fs::read(dir.path().join(f)).unwrap_or_default();
+            assert!(
+                !bytes.windows(name.len()).any(|w| w == name.as_bytes()),
+                "имя осталось в {f}"
+            );
+        }
+    }
+
     #[test]
     fn sweep_removes_expired_tombstones() {
         let mut c = db();
