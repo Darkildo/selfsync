@@ -27,6 +27,7 @@ bytes.workspace = true
 futures-util.workspace = true
 rusqlite.workspace = true
 r2d2.workspace = true
+scheduled-thread-pool.workspace = true
 r2d2_sqlite.workspace = true
 listenfd.workspace = true
 clap.workspace = true

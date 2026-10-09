@@ -1030,6 +1030,7 @@ dependencies = [
  "r2d2",
  "r2d2_sqlite",
  "rusqlite",
+ "scheduled-thread-pool",
  "sd-notify",
  "serde",
  "serde_json",

@@ -4,10 +4,12 @@ pub mod server;
 pub mod vault;
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{Connection, TransactionBehavior};
+use scheduled_thread_pool::{OnPoolDropBehavior, ScheduledThreadPool};
 
 pub type Pool = r2d2::Pool<SqliteConnectionManager>;
 
@@ -30,9 +32,20 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
 }
 
 /// Пул соединений к файлу БД. Соединения создаются лениво.
+///
+/// Планировщик фоновых задач пула (открытие соединений, уборка простаивающих) по
+/// умолчанию при уничтожении пула ждёт запланированного запуска уборки — до 30 с
+/// живут три потока на пул. Здесь отложенные задачи отбрасываются, и потоки
+/// завершаются сразу: важно, когда пулы открываются и закрываются часто.
 pub fn pool(path: &Path, max_size: u32) -> Pool {
+    let workers = ScheduledThreadPool::builder()
+        .num_threads(3)
+        .thread_name_pattern("r2d2-worker-{}")
+        .on_drop_behavior(OnPoolDropBehavior::DiscardPendingScheduled)
+        .build();
     let manager = SqliteConnectionManager::file(path).with_init(init_conn);
     r2d2::Pool::builder()
+        .thread_pool(Arc::new(workers))
         .max_size(max_size)
         .min_idle(Some(0))
         .idle_timeout(Some(Duration::from_secs(300)))

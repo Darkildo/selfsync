@@ -58,6 +58,7 @@ hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
 bytes = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 r2d2 = "0.8"
+scheduled-thread-pool = "0.2"
 r2d2_sqlite = "0.35"
 listenfd = "1"
 clap = { version = "4", features = ["derive", "env"] }
