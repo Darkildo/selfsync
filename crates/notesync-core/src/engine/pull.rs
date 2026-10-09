@@ -368,6 +368,8 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
                 Ok(true)
             }
             None => {
+                // Файл меняют прямо сейчас: перечитать запись в следующем цикле.
+                hold(cx, it.e.seq);
                 cx.with_mut(|s| {
                     s.dirty.insert(key.clone());
                 });
@@ -422,6 +424,9 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
                     Ok(true)
                 }
                 None => {
+                    // Пока скачивали, здесь появился файл с тем же именем: перечитать
+                    // запись в следующем цикле, когда он будет в индексе.
+                    hold(cx, it.e.seq);
                     cx.with_mut(|s| {
                         s.dirty.insert(key.clone());
                     });
