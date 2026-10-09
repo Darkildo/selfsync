@@ -36,9 +36,9 @@ jobs:
           SOURCE_DATE_EPOCH: "0"
           RUSTFLAGS: "--remap-path-prefix=${{ github.workspace }}=. --remap-path-prefix=/home/runner/.cargo=cargo -C strip=symbols"
         run: |
-          cargo zigbuild --release --locked --target ${{ matrix.target }} -p notesync-server -p notesync-cli
+          cargo zigbuild --release --locked --target ${{ matrix.target }} -p selfsync-server -p selfsync-cli
           mkdir -p dist
-          for bin in notesync notesync-cli; do
+          for bin in selfsync selfsync-cli; do
             cp "target/${{ matrix.target }}/release/$bin" "dist/$bin-${{ matrix.target }}"
           done
       - name: Проверка воспроизводимости (вторая сборка с нуля)
@@ -47,8 +47,8 @@ jobs:
           RUSTFLAGS: "--remap-path-prefix=${{ github.workspace }}=. --remap-path-prefix=/home/runner/.cargo=cargo -C strip=symbols"
         run: |
           cargo clean --release --target ${{ matrix.target }}
-          cargo zigbuild --release --locked --target ${{ matrix.target }} -p notesync-server -p notesync-cli
-          for bin in notesync notesync-cli; do
+          cargo zigbuild --release --locked --target ${{ matrix.target }} -p selfsync-server -p selfsync-cli
+          for bin in selfsync selfsync-cli; do
             cmp "target/${{ matrix.target }}/release/$bin" "dist/$bin-${{ matrix.target }}"
           done
       - uses: actions/upload-artifact@v4

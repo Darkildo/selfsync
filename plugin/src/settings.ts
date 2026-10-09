@@ -3,7 +3,7 @@
 import { type App, Notice, PluginSettingTab, Setting } from "obsidian";
 
 import { t } from "./i18n.ts";
-import type NotesyncPlugin from "./main.ts";
+import type SelfsyncPlugin from "./main.ts";
 import { ConnectModal } from "./ui/connect.ts";
 import { JoinModal } from "./ui/join.ts";
 import { ChangePasswordModal, PasswordModal } from "./ui/password.ts";
@@ -38,10 +38,10 @@ export function normalizeServer(url: string): string {
   return url.trim().replace(/\/+$/, "");
 }
 
-export class NotesyncSettingTab extends PluginSettingTab {
+export class SelfsyncSettingTab extends PluginSettingTab {
   constructor(
     app: App,
-    private plugin: NotesyncPlugin,
+    private plugin: SelfsyncPlugin,
   ) {
     super(app, plugin);
   }
@@ -216,7 +216,7 @@ export class NotesyncSettingTab extends PluginSettingTab {
         const row = new Setting(list)
           .setName(d.current ? `${d.name} (${t("devices.current")})` : d.name)
           .setDesc(d.revoked ? t("devices.revoked") : t("devices.lastSeen", { when: seen }));
-        if (d.revoked) row.settingEl.addClass("notesync-device-revoked");
+        if (d.revoked) row.settingEl.addClass("selfsync-device-revoked");
         if (!d.current && !d.revoked) {
           row.addButton((b) =>
             b

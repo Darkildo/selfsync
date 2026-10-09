@@ -1,0 +1,22 @@
+[package]
+name = "selfsync-wasm"
+description = "Ядро selfsync для плагина Obsidian: движок синка через wasm-bindgen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+selfsync-core.workspace = true
+serde.workspace = true
+wasm-bindgen.workspace = true
+serde-wasm-bindgen.workspace = true
+console_error_panic_hook.workspace = true
+qrcode.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }

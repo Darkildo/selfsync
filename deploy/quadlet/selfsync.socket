@@ -1,0 +1,9 @@
+# Podman Quadlet: сокет держит systemd, контейнер поднимается по требованию.
+# Скопировать оба файла в ~/.config/containers/systemd/ (или /etc/containers/systemd/),
+# затем: systemctl --user daemon-reload && systemctl --user enable --now selfsync.socket
+# Podman передаёт активированный сокет в контейнер (LISTEN_FDS/LISTEN_PID).
+[Socket]
+ListenStream=127.0.0.1:8085
+
+[Install]
+WantedBy=sockets.target

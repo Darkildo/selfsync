@@ -1,16 +1,16 @@
-// Подключение по одноразовому коду: из ссылки obsidian://notesync-connect или
+// Подключение по одноразовому коду: из ссылки obsidian://selfsync-connect или
 // вручную. Код обменивается на токен устройства.
 
 import { type App, Modal, Notice, Setting } from "obsidian";
 
 import { t } from "../i18n.ts";
-import type NotesyncPlugin from "../main.ts";
+import type SelfsyncPlugin from "../main.ts";
 import { normalizeServer } from "../settings.ts";
 
 export class ConnectModal extends Modal {
   constructor(
     app: App,
-    private plugin: NotesyncPlugin,
+    private plugin: SelfsyncPlugin,
     private server: string,
     private code: string,
     private onDone?: () => void,

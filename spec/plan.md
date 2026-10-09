@@ -1,4 +1,4 @@
-# План реализации OneWaySync / notesync
+# План реализации selfsync
 
 Документ живой: отмечаем этапы по мере готовности, отклонения — в `decisions.md`.
 
@@ -6,9 +6,9 @@
 
 ```
 crates/
-  notesync-proto     build.rs: prost-build + protox (без системного protoc)
+  selfsync-proto     build.rs: prost-build + protox (без системного protoc)
                      lib.rs: pub mod v1 (сгенерированное), PROTO_VERSION = 1, HEADER_PROTO
-  notesync-core      sans-IO, no tokio, компилируется в wasm32
+  selfsync-core      sans-IO, no tokio, компилируется в wasm32
     path.rs          VaultPath (сегменты), NFC-валидация/нормализация, каноническое
                      кодирование для БД, имена конфликтных копий, casefold
     hash.rs          Hash([u8;32]), sha256-хелперы, hex
@@ -29,8 +29,8 @@ crates/
       conflict.rs    правила 8.4
       crypto_flow.rs ключ, пароль, смена пароля, миграция 9.4
       schedule.rs    debounce, адаптивный опрос, приоритеты
-  notesync-wasm      wasm-bindgen: WasmEngine { handle(event) -> actions }, утилиты
-  notesync-server    lib + bin `notesync`
+  selfsync-wasm      wasm-bindgen: WasmEngine { handle(event) -> actions }, утилиты
+  selfsync-server    lib + bin `selfsync`
     config.rs        env/TOML/CLI
     db/{server,vault,migrate}.rs  SQLite, PRAGMA, миграции user_version
     blobs.rs         хранилище по хэшу, uploads, Range
@@ -38,9 +38,9 @@ crates/
     modes/{cgi,socket,serve,idle}.rs
     cmd/{token,link,import,gc,sweep,backup,healthcheck,migrate,vault}.rs
     sweep.rs, joinpage.rs (HTML), qr.rs (терминал)
-  notesync-sim       N клиентов (Engine) + сервер in-process (Router::oneshot) +
+  selfsync-sim       N клиентов (Engine) + сервер in-process (Router::oneshot) +
                      фейковые ФС/сеть/часы, seed-управляемые сбои, инварианты
-  notesync-cli       (этап 9) нативный исполнитель для папки, notify
+  selfsync-cli       (этап 9) нативный исполнитель для папки, notify
 plugin/              TS: main, io (исполнитель), transport, scheduler, ui/*, i18n; esbuild
                      встраивает wasm в main.js; test/ — заглушка Obsidian + настоящий сервер
 ```
@@ -52,7 +52,7 @@ plugin/              TS: main, io (исполнитель), transport, scheduler
 2. [x] Режимы запуска: cgi, socket, idle-выход, sweeper, деплой, Docker; тесты 13.4.
    Docker-образ не собирался (на машине нет Docker).
 3. [x] Ядро синка: индекс, планировщик, diff3, правила 8.3–8.4, rename, корзина; все сценарии sim.
-   40 000 случайных прогонов без нарушений; сценарии 13.2 — `notesync-sim/tests/scenarios.rs`.
+   40 000 случайных прогонов без нарушений; сценарии 13.2 — `selfsync-sim/tests/scenarios.rs`.
    Большие файлы и шифрование в ядре уже есть (этапы 6–7 остаются за плагином).
 4. [x] Плагин MVP: wasm-сборка, исполнитель, ручное подключение, ручной синк.
 5. [x] Полный синк в плагине: debounce, опрос, wait, окна конфликтов/восстановления, статус-бар.

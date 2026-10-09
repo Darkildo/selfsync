@@ -1,0 +1,42 @@
+# Запускается selfsync.socket по требованию. Restart=always НЕ ставить: выход по
+# простою — штатное завершение с кодом 0, следующий запрос снова поднимет процесс.
+[Unit]
+Description=selfsync sync server (socket-activated)
+Requires=selfsync.socket
+After=selfsync.socket
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/selfsync socket
+Environment=SELFSYNC_IDLE_TIMEOUT=10m
+#Environment=SELFSYNC_PUBLIC_URL=https://notes.example.com
+DynamicUser=yes
+# Одинаковое имя у основного сервиса и sweeper'а: один и тот же динамический UID.
+User=selfsync
+Group=selfsync
+StateDirectory=selfsync
+StateDirectoryMode=0700
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077

@@ -2,7 +2,7 @@
 
 import { type App, Modal, Setting } from "obsidian";
 
-import { passwordStrength } from "../../pkg/notesync_wasm.js";
+import { passwordStrength } from "../../pkg/selfsync_wasm.js";
 import { t } from "../i18n.ts";
 
 /** Ниже этого — предупреждение о слабом пароле. */

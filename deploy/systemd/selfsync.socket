@@ -1,0 +1,16 @@
+# Сокет держит systemd; процесс selfsync поднимается при первом соединении
+# и сам выходит после простоя (SELFSYNC_IDLE_TIMEOUT, по умолчанию 10 минут).
+[Unit]
+Description=selfsync socket
+
+[Socket]
+ListenStream=127.0.0.1:8085
+# Вместо TCP можно слушать Unix-сокет (тогда в прокси: unix//run/selfsync/selfsync.sock):
+#ListenStream=/run/selfsync/selfsync.sock
+#SocketUser=caddy
+#SocketMode=0660
+#DirectoryMode=0755
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target

@@ -1,4 +1,4 @@
-// Обвязка e2e-тестов: настоящий сервер `notesync serve` во временном каталоге и
+// Обвязка e2e-тестов: настоящий сервер `selfsync serve` во временном каталоге и
 // клиенты плагина (Runner + Executor + бэкенд) без Obsidian.
 
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
@@ -15,12 +15,12 @@ import { NodeBackend } from "../src/io/node.ts";
 import type { EngineConfig, Notice, SyncStatus } from "../src/types.ts";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
-export const SERVER_BIN = process.env.NOTESYNC_BIN ?? join(ROOT, "target/debug/notesync");
+export const SERVER_BIN = process.env.SELFSYNC_BIN ?? join(ROOT, "target/debug/selfsync");
 
 let wasmLoaded = false;
 async function loadWasm(): Promise<void> {
   if (wasmLoaded) return;
-  initWasm(await fsp.readFile(join(ROOT, "plugin/pkg/notesync_wasm_bg.wasm")));
+  initWasm(await fsp.readFile(join(ROOT, "plugin/pkg/selfsync_wasm_bg.wasm")));
   wasmLoaded = true;
 }
 
@@ -45,9 +45,9 @@ export class TestServer {
 
   static async start(): Promise<TestServer> {
     await fsp.access(SERVER_BIN).catch(() => {
-      throw new Error(`нет бинаря сервера ${SERVER_BIN}: соберите cargo build -p notesync-server`);
+      throw new Error(`нет бинаря сервера ${SERVER_BIN}: соберите cargo build -p selfsync-server`);
     });
-    const data = await fsp.mkdtemp(join(tmpdir(), "notesync-e2e-"));
+    const data = await fsp.mkdtemp(join(tmpdir(), "selfsync-e2e-"));
     const port = await freePort();
     const proc = spawn(SERVER_BIN, ["--data", data, "serve", "--listen", `127.0.0.1:${port}`], {
       stdio: ["ignore", "ignore", "pipe"],
@@ -66,7 +66,7 @@ export class TestServer {
   /** Служебная команда сервера (token add, link…), stdout. */
   cli(...args: string[]): string {
     const r = spawnSync(SERVER_BIN, ["--data", this.data, ...args], { encoding: "utf8" });
-    if (r.status !== 0) throw new Error(`notesync ${args.join(" ")}: ${r.stderr}`);
+    if (r.status !== 0) throw new Error(`selfsync ${args.join(" ")}: ${r.stderr}`);
     return r.stdout;
   }
 
@@ -108,7 +108,7 @@ export class TestClient {
 
   static async create(server: TestServer, o: ClientOptions): Promise<TestClient> {
     await loadWasm();
-    const base = await fsp.mkdtemp(join(tmpdir(), `notesync-${o.name}-`));
+    const base = await fsp.mkdtemp(join(tmpdir(), `selfsync-${o.name}-`));
     const vault = join(base, "vault");
     const store = join(base, "store");
     await fsp.mkdir(vault, { recursive: true });

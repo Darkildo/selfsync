@@ -10,7 +10,7 @@ import type * as FsPromises from "node:fs/promises";
 import type { FileMeta } from "../types.ts";
 import { type FileBackend, joinPath, nameOf, parentOf, realName } from "./backend.ts";
 
-const TEMP_SUFFIX = ".notesync-tmp";
+const TEMP_SUFFIX = ".selfsync-tmp";
 
 export interface NodeBackendOptions {
   /** ФС различает регистр (Linux): настоящее имя можно не искать в каталоге. */

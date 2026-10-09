@@ -1,0 +1,21 @@
+[Unit]
+Description=selfsync (socket-activated container)
+Requires=selfsync.socket
+After=selfsync.socket
+
+[Container]
+Image=ghcr.io/selfsync/selfsync:latest
+Exec=socket --idle-timeout 10m
+Volume=%h/selfsync-data:/data:Z
+ReadOnly=true
+Tmpfs=/tmp
+DropCapability=ALL
+NoNewPrivileges=true
+Notify=true
+Environment=SELFSYNC_DATA_DIR=/data
+#Environment=SELFSYNC_PUBLIC_URL=https://notes.example.com
+
+[Service]
+# Выход по простою — штатное завершение.
+Restart=no
+TimeoutStartSec=60

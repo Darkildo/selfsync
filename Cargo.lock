@@ -1277,132 +1277,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
-name = "notesync-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "libc",
- "notesync-core",
- "notesync-server",
- "notify",
- "reqwest",
- "rustls",
- "serde",
- "tempfile",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "notesync-core"
-version = "0.1.0"
-dependencies = [
- "aes-gcm-siv",
- "aes-siv",
- "argon2",
- "futures-util",
- "getrandom 0.4.3",
- "hkdf",
- "hmac",
- "lz4_flex",
- "notesync-proto",
- "postcard",
- "proptest",
- "prost",
- "serde",
- "serde_bytes",
- "sha2",
- "similar",
- "subtle",
- "thiserror",
- "unicode-normalization",
- "zeroize",
-]
-
-[[package]]
-name = "notesync-proto"
-version = "0.1.0"
-dependencies = [
- "prost",
- "prost-build",
- "protox",
-]
-
-[[package]]
-name = "notesync-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "base64",
- "bytes",
- "clap",
- "futures-util",
- "getrandom 0.4.3",
- "http",
- "http-body",
- "http-body-util",
- "humantime",
- "libc",
- "listenfd",
- "notesync-core",
- "notesync-proto",
- "prost",
- "qrcode",
- "r2d2",
- "r2d2_sqlite",
- "rusqlite",
- "scheduled-thread-pool",
- "sd-notify",
- "serde",
- "serde_json",
- "sha2",
- "subtle",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-util",
- "toml",
- "tower",
- "tower-http 0.7.1",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "notesync-sim"
-version = "0.1.0"
-dependencies = [
- "axum",
- "http",
- "notesync-core",
- "notesync-proto",
- "notesync-server",
- "prost",
- "rusqlite",
- "tempfile",
- "tokio",
- "tower",
- "unicode-normalization",
-]
-
-[[package]]
-name = "notesync-wasm"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "getrandom 0.4.3",
- "notesync-core",
- "qrcode",
- "serde",
- "serde-wasm-bindgen",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "notify"
 version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2109,6 +1983,132 @@ checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
 dependencies = [
  "core-foundation-sys",
  "libc",
+]
+
+[[package]]
+name = "selfsync-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "libc",
+ "notify",
+ "reqwest",
+ "rustls",
+ "selfsync-core",
+ "selfsync-server",
+ "serde",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "selfsync-core"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm-siv",
+ "aes-siv",
+ "argon2",
+ "futures-util",
+ "getrandom 0.4.3",
+ "hkdf",
+ "hmac",
+ "lz4_flex",
+ "postcard",
+ "proptest",
+ "prost",
+ "selfsync-proto",
+ "serde",
+ "serde_bytes",
+ "sha2",
+ "similar",
+ "subtle",
+ "thiserror",
+ "unicode-normalization",
+ "zeroize",
+]
+
+[[package]]
+name = "selfsync-proto"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "prost-build",
+ "protox",
+]
+
+[[package]]
+name = "selfsync-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64",
+ "bytes",
+ "clap",
+ "futures-util",
+ "getrandom 0.4.3",
+ "http",
+ "http-body",
+ "http-body-util",
+ "humantime",
+ "libc",
+ "listenfd",
+ "prost",
+ "qrcode",
+ "r2d2",
+ "r2d2_sqlite",
+ "rusqlite",
+ "scheduled-thread-pool",
+ "sd-notify",
+ "selfsync-core",
+ "selfsync-proto",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "tower",
+ "tower-http 0.7.1",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "selfsync-sim"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "http",
+ "prost",
+ "rusqlite",
+ "selfsync-core",
+ "selfsync-proto",
+ "selfsync-server",
+ "tempfile",
+ "tokio",
+ "tower",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "selfsync-wasm"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "getrandom 0.4.3",
+ "qrcode",
+ "selfsync-core",
+ "serde",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
 ]
 
 [[package]]

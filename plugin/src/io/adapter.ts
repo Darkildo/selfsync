@@ -1,7 +1,7 @@
 // Бэкенд на vault.adapter Obsidian — для мобильных, где нет Node fs.
 //
 // adapter.rename не заменяет существующий файл, поэтому атомарная запись идёт по
-// протоколу из контракта Action::Write: X.notesync-tmp → X.commit.notesync-tmp
+// протоколу из контракта Action::Write: X.selfsync-tmp → X.commit.selfsync-tmp
 // (записан целиком) → удалить X → переименовать в X. Прерванную на любом шаге
 // запись ядро доведёт или повторит. readBinary читает файл целиком — отсюда
 // лимит размера файла на мобильных (README).
@@ -25,8 +25,8 @@ export interface AdapterLike {
   trashLocal(path: string): Promise<void>;
 }
 
-const TEMP_SUFFIX = ".notesync-tmp";
-const COMMIT_SUFFIX = ".commit.notesync-tmp";
+const TEMP_SUFFIX = ".selfsync-tmp";
+const COMMIT_SUFFIX = ".commit.selfsync-tmp";
 
 function buffer(data: Uint8Array): ArrayBuffer {
   return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
@@ -35,7 +35,7 @@ function buffer(data: Uint8Array): ArrayBuffer {
 export class AdapterBackend implements FileBackend {
   constructor(
     private a: AdapterLike,
-    /** Каталог плагина относительно vault'а (`.obsidian/plugins/notesync`). */
+    /** Каталог плагина относительно vault'а (`.obsidian/plugins/selfsync`). */
     private pluginDir: string,
     /** Куда убирать удалённое: системная корзина или `.trash` в vault'е. */
     private trashMode: "system" | "local" = "system",

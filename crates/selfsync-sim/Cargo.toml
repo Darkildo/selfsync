@@ -1,0 +1,27 @@
+[package]
+name = "selfsync-sim"
+description = "Детерминированная симуляция синка: N клиентов + настоящий сервер + сбои"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+selfsync-core.workspace = true
+selfsync-proto.workspace = true
+selfsync-server.workspace = true
+prost.workspace = true
+axum.workspace = true
+http.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tempfile.workspace = true
+unicode-normalization.workspace = true
+
+[[bin]]
+name = "selfsync-sim"
+path = "src/main.rs"
+
+[dev-dependencies]
+rusqlite.workspace = true

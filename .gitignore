@@ -3,5 +3,5 @@ node_modules/
 /plugin/main.js
 /plugin/pkg/
 /plugin/dist/
-*.notesync-tmp
+*.selfsync-tmp
 .DS_Store

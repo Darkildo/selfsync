@@ -42,12 +42,12 @@ interface LoadedPlugin {
 }
 
 test("main.js: синк при старте и по событиям vault'а", async () => {
-  const vault = await fsp.mkdtemp(join(tmpdir(), "notesync-plugin-"));
+  const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-"));
   await fsp.writeFile(join(vault, "hello.md"), "from obsidian\n");
   const app = obsidian.stubApp(vault, { server: server.url, token: server.token("plugin", "obsidian"), deviceName: "stub" });
   const require = Module.createRequire(import.meta.url);
   const Plugin = (require(join(PLUGIN, "main.js")) as { default: new (a: unknown, m: unknown) => LoadedPlugin }).default;
-  const plugin = new Plugin(app, { id: "notesync", dir: ".obsidian/plugins/notesync" });
+  const plugin = new Plugin(app, { id: "selfsync", dir: ".obsidian/plugins/selfsync" });
   await plugin.onload();
   // start() асинхронно читает индекс.
   for (let i = 0; i < 100 && !plugin.runner; i++) await new Promise((r) => setTimeout(r, 10));
@@ -71,10 +71,10 @@ test("main.js: синк при старте и по событиям vault'а", 
   assert.equal(await other.read("hello.md"), "from obsidian\nedited\n");
 
   // Индекс и кэш — в каталоге плагина, не в vault'е на сервере.
-  const stored = await fsp.readdir(join(vault, ".obsidian/plugins/notesync"));
+  const stored = await fsp.readdir(join(vault, ".obsidian/plugins/selfsync"));
   assert.ok(stored.includes("index.bin"), `${stored}`);
   await other.sync();
-  assert.ok(!(await other.files()).has(".obsidian/plugins/notesync/index.bin"));
+  assert.ok(!(await other.files()).has(".obsidian/plugins/selfsync/index.bin"));
 
   plugin.onunload();
   await other.stop();

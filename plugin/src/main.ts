@@ -3,7 +3,7 @@
 
 import { FileSystemAdapter, moment, Notice, Platform, Plugin, requestUrl, type TAbstractFile, TFile } from "obsidian";
 
-import wasmBytes from "notesync-wasm-bytes";
+import wasmBytes from "selfsync-wasm-bytes";
 import { initWasm, Runner } from "./engine.ts";
 import { Executor } from "./executor.ts";
 import { noticeText, setLanguage, stateText, t } from "./i18n.ts";
@@ -12,7 +12,7 @@ import { AdapterBackend } from "./io/adapter.ts";
 import type { FileBackend } from "./io/backend.ts";
 import { ObsidianHttp } from "./io/http.ts";
 import { NodeBackend } from "./io/node.ts";
-import { DEFAULT_SETTINGS, NotesyncSettingTab, type Settings } from "./settings.ts";
+import { DEFAULT_SETTINGS, SelfsyncSettingTab, type Settings } from "./settings.ts";
 import type { EngineConfig, LogLevel, Notice as EngineNotice, SyncStatus } from "./types.ts";
 import { ConflictsModal } from "./ui/conflicts.ts";
 import { ConnectModal } from "./ui/connect.ts";
@@ -20,10 +20,10 @@ import { DeletedModal } from "./ui/deleted.ts";
 import { HistoryModal } from "./ui/history.ts";
 import { PasswordModal } from "./ui/password.ts";
 
-const KEY_STORAGE = "notesync-master-key";
+const KEY_STORAGE = "selfsync-master-key";
 const LOG_LINES = 500;
 
-export default class NotesyncPlugin extends Plugin {
+export default class SelfsyncPlugin extends Plugin {
   override settings: Settings = { ...DEFAULT_SETTINGS };
   runner: Runner | undefined;
   private statusEl!: HTMLElement;
@@ -37,7 +37,7 @@ export default class NotesyncPlugin extends Plugin {
     initWasm(wasmBytes);
 
     this.statusEl = this.addStatusBarItem();
-    this.statusEl.addClass("notesync-status", "mod-clickable");
+    this.statusEl.addClass("selfsync-status", "mod-clickable");
     this.registerDomEvent(this.statusEl, "click", () => this.onStatusClick());
     this.renderStatus();
 
@@ -67,10 +67,10 @@ export default class NotesyncPlugin extends Plugin {
       }),
     );
     this.addCommand({ id: "log", name: t("cmd.log"), callback: () => this.showLog() });
-    this.addSettingTab(new NotesyncSettingTab(this.app, this));
+    this.addSettingTab(new SelfsyncSettingTab(this.app, this));
 
     // Ссылка со страницы /join/{code} сервера.
-    this.registerObsidianProtocolHandler("notesync-connect", (p) => {
+    this.registerObsidianProtocolHandler("selfsync-connect", (p) => {
       new ConnectModal(this.app, this, p.server ?? "", p.code ?? "").open();
     });
 
@@ -260,7 +260,7 @@ export default class NotesyncPlugin extends Plugin {
     if (level === "debug") return;
     this.log.push(`${new Date().toISOString()} ${level} ${message}`);
     if (this.log.length > LOG_LINES) this.log.splice(0, this.log.length - LOG_LINES);
-    if (level === "error" || level === "warn") console.warn(`notesync: ${message}`);
+    if (level === "error" || level === "warn") console.warn(`selfsync: ${message}`);
   }
 
   private showLog(): void {

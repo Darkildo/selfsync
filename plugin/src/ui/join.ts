@@ -1,9 +1,9 @@
 // «Подключить новое устройство»: одноразовая ссылка и её QR-код. Телефон открывает
-// ссылку камерой — страница сервера ведёт в obsidian://notesync-connect.
+// ссылку камерой — страница сервера ведёт в obsidian://selfsync-connect.
 
 import { type App, Modal, Setting } from "obsidian";
 
-import { qrModules } from "../../pkg/notesync_wasm.js";
+import { qrModules } from "../../pkg/selfsync_wasm.js";
 import { t } from "../i18n.ts";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -22,7 +22,7 @@ export function qrSvg(doc: Document, modules: Uint8Array): SVGSVGElement {
   const svg = doc.createElementNS(SVG, "svg");
   svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
   svg.setAttribute("shape-rendering", "crispEdges");
-  svg.classList.add("notesync-qr");
+  svg.classList.add("selfsync-qr");
   const bg = doc.createElementNS(SVG, "rect");
   bg.setAttribute("width", String(size));
   bg.setAttribute("height", String(size));

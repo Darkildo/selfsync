@@ -260,7 +260,7 @@ describe("настройки", () => {
     const join = await a.runner.command({ type: "createJoin", name: "tablet" });
     assert.equal(join.type, "join");
     if (join.type !== "join") return;
-    const { qrModules } = await import("../pkg/notesync_wasm.js");
+    const { qrModules } = await import("../pkg/selfsync_wasm.js");
     const m = qrModules(join.url);
     const width = m[0] ?? 0;
     assert.ok(width >= 21 && m.length === 1 + width * width, `ширина ${width}`);

@@ -1,7 +1,7 @@
 // Связка ядра (WASM) с исполнителем и таймерами: события → ядро → действия →
 // исполнитель → события. Вся логика синка — в ядре; здесь только доставка.
 
-import { initSync, WasmEngine } from "../pkg/notesync_wasm.js";
+import { initSync, WasmEngine } from "../pkg/selfsync_wasm.js";
 import type { Executor } from "./executor.ts";
 import type { Action, EngineConfig, EngineEvent, LogLevel, Notice, SyncStatus, UiCommand, UiResult } from "./types.ts";
 

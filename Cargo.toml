@@ -1,12 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/notesync-proto",
-    "crates/notesync-core",
-    "crates/notesync-wasm",
-    "crates/notesync-server",
-    "crates/notesync-sim",
-    "crates/notesync-cli",
+    "crates/selfsync-proto",
+    "crates/selfsync-core",
+    "crates/selfsync-wasm",
+    "crates/selfsync-server",
+    "crates/selfsync-sim",
+    "crates/selfsync-cli",
 ]
 
 [workspace.package]
@@ -14,12 +14,12 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.97"
-repository = "https://github.com/notesync/notesync"
+repository = "https://github.com/selfsync/selfsync"
 
 [workspace.dependencies]
-notesync-proto = { path = "crates/notesync-proto" }
-notesync-core = { path = "crates/notesync-core" }
-notesync-server = { path = "crates/notesync-server" }
+selfsync-proto = { path = "crates/selfsync-proto" }
+selfsync-core = { path = "crates/selfsync-core" }
+selfsync-server = { path = "crates/selfsync-server" }
 
 # Протокол
 prost = { version = "0.14", default-features = false, features = ["std", "derive"] }

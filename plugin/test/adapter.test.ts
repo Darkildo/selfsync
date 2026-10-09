@@ -20,7 +20,7 @@ after(async () => {
   await server.stop();
 });
 
-const PLUGIN_DIR = ".obsidian/plugins/notesync";
+const PLUGIN_DIR = ".obsidian/plugins/selfsync";
 
 async function mobileAndDesktop(vault: string): Promise<[TestClient, StubAdapter, TestClient]> {
   const stub = new StubAdapter(true);
@@ -40,7 +40,7 @@ test("адаптер: файлы, смена регистра, удаление 
   await phone.sync();
   await desk.sync();
   assert.equal(await desk.read("Note.md"), "hello\n");
-  assert.ok(!stub.names().some((n) => n.endsWith(".notesync-tmp")), "временных файлов не осталось");
+  assert.ok(!stub.names().some((n) => n.endsWith(".selfsync-tmp")), "временных файлов не осталось");
 
   await fsp.rename(join(desk.vault, "Note.md"), join(desk.vault, "note.md"));
   await desk.sync();

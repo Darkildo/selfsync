@@ -4,12 +4,12 @@
 import { type App, Modal, Notice, Setting } from "obsidian";
 
 import { formatBytes, t } from "../i18n.ts";
-import type NotesyncPlugin from "../main.ts";
+import type SelfsyncPlugin from "../main.ts";
 
 export class HistoryModal extends Modal {
   constructor(
     app: App,
-    private plugin: NotesyncPlugin,
+    private plugin: SelfsyncPlugin,
     private path: string,
   ) {
     super(app);

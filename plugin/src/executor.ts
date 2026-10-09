@@ -9,7 +9,7 @@ const INDEX_FILE = "index.bin";
 const CACHE_DIR = "cache";
 
 export interface Connection {
-  /** Базовый адрес сервера без завершающего «/», например `https://host/notesync`. */
+  /** Базовый адрес сервера без завершающего «/», например `https://host/selfsync`. */
   server: string;
   /** Токен устройства; без него запросы с `auth` уходят без заголовка. */
   token?: string;

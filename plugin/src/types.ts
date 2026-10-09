@@ -1,4 +1,4 @@
-// Типы событий и действий ядра — зеркало crates/notesync-core/src/engine/types.rs.
+// Типы событий и действий ядра — зеркало crates/selfsync-core/src/engine/types.rs.
 // Ядро отдаёт и принимает их как обычные объекты (serde → JS), байты — Uint8Array.
 
 export interface EngineConfig {

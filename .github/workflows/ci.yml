@@ -25,7 +25,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
       - name: Симуляция (2000 случайных прогонов)
-        run: cargo run --release --locked -p notesync-sim -- --runs 2000 --seed 1
+        run: cargo run --release --locked -p selfsync-sim -- --runs 2000 --seed 1
 
   plugin:
     name: Плагин — WASM, типы, e2e против сервера
@@ -43,7 +43,7 @@ jobs:
           cargo install wasm-bindgen-cli --version "$WASM_BINDGEN" --locked
           sudo apt-get update && sudo apt-get install -y binaryen
       - run: ./scripts/build-wasm.sh
-      - run: cargo build --locked -p notesync-server
+      - run: cargo build --locked -p selfsync-server
       - working-directory: plugin
         run: |
           npm ci

@@ -1,9 +1,9 @@
 {
-  "id": "notesync",
-  "name": "notesync",
+  "id": "selfsync",
+  "name": "selfsync",
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Синхронизация vault'а через свой сервер notesync: правки без потерь, конфликты, корзина, шифрование.",
-  "author": "notesync",
+  "description": "Синхронизация vault'а через свой сервер selfsync: правки без потерь, конфликты, корзина, шифрование.",
+  "author": "selfsync",
   "isDesktopOnly": false
 }

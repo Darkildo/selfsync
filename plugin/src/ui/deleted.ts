@@ -4,7 +4,7 @@
 import { type App, Modal, Notice, Setting } from "obsidian";
 
 import { formatBytes, t } from "../i18n.ts";
-import type NotesyncPlugin from "../main.ts";
+import type SelfsyncPlugin from "../main.ts";
 import type { DeletedView } from "../types.ts";
 
 export class DeletedModal extends Modal {
@@ -12,7 +12,7 @@ export class DeletedModal extends Modal {
 
   constructor(
     app: App,
-    private plugin: NotesyncPlugin,
+    private plugin: SelfsyncPlugin,
   ) {
     super(app);
   }

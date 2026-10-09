@@ -13,18 +13,18 @@ ARG SOURCE_DATE_EPOCH=0
 ENV SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} \
     RUSTFLAGS="--remap-path-prefix=/src=. --remap-path-prefix=/usr/local/cargo=cargo"
 COPY --from=planner /src/recipe.json recipe.json
-RUN cargo chef cook --release --locked --recipe-path recipe.json -p notesync-server
+RUN cargo chef cook --release --locked --recipe-path recipe.json -p selfsync-server
 COPY . .
-RUN cargo build --release --locked -p notesync-server --bin notesync \
- && strip target/release/notesync \
+RUN cargo build --release --locked -p selfsync-server --bin selfsync \
+ && strip target/release/selfsync \
  && mkdir -p /out/data
 
 FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=builder /src/target/release/notesync /usr/local/bin/notesync
+COPY --from=builder /src/target/release/selfsync /usr/local/bin/selfsync
 COPY --from=builder --chown=65532:65532 /out/data /data
-ENV NOTESYNC_DATA_DIR=/data
+ENV SELFSYNC_DATA_DIR=/data
 VOLUME ["/data"]
 EXPOSE 8085
-HEALTHCHECK --interval=30s --timeout=3s CMD ["/usr/local/bin/notesync", "healthcheck"]
-ENTRYPOINT ["/usr/local/bin/notesync"]
+HEALTHCHECK --interval=30s --timeout=3s CMD ["/usr/local/bin/selfsync", "healthcheck"]
+ENTRYPOINT ["/usr/local/bin/selfsync"]
 CMD ["serve", "--listen", "0.0.0.0:8085"]

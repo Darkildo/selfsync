@@ -1,4 +1,4 @@
-# notesync
+# selfsync
 
 Синхронизация vault'а Obsidian через свой сервер. Один небольшой бинарник на Rust, данные в SQLite и файлах, плагин для Obsidian на десктопе и телефоне, консольный клиент для серверов и NAS.
 
@@ -21,7 +21,7 @@
 ```
  Obsidian (десктоп, телефон)        папка на сервере/NAS
  ┌──────────────────────────┐       ┌──────────────────┐
- │ плагин (TypeScript)      │       │ notesync-cli     │
+ │ плагин (TypeScript)      │       │ selfsync-cli     │
  │  ввод-вывод и интерфейс  │       │  tokio + std::fs │
  │ ┌──────────────────────┐ │       │ ┌──────────────┐ │
  │ │ ядро синка (WASM)    │ │       │ │ ядро синка   │ │
@@ -30,18 +30,18 @@
               │      HTTP + protobuf         │
               └──────────────┬───────────────┘
                      ┌───────┴────────┐
-                     │ notesync       │  SQLite (метаданные, история)
+                     │ selfsync       │  SQLite (метаданные, история)
                      │ (сервер)       │  + блобы по хэшу
                      └────────────────┘
 ```
 
-Логика синка написана один раз — в ядре `notesync-core`. Плагин и консольный клиент только исполняют его действия: прочитать файл, записать, отправить запрос. Подробнее — в [spec/architecture.md](spec/architecture.md), протокол — в [spec/protocol.md](spec/protocol.md), принятые решения — в [spec/decisions.md](spec/decisions.md).
+Логика синка написана один раз — в ядре `selfsync-core`. Плагин и консольный клиент только исполняют его действия: прочитать файл, записать, отправить запрос. Подробнее — в [spec/architecture.md](spec/architecture.md), протокол — в [spec/protocol.md](spec/protocol.md), принятые решения — в [spec/decisions.md](spec/decisions.md).
 
 ## Сервер
 
 ### Какой режим выбрать
 
-Сервер — один бинарник `notesync`, который умеет работать по-разному. Различие в том, сколько он потребляет, когда никто не синхронизируется, и как быстро правка с одного устройства появляется на другом.
+Сервер — один бинарник `selfsync`, который умеет работать по-разному. Различие в том, сколько он потребляет, когда никто не синхронизируется, и как быстро правка с одного устройства появляется на другом.
 
 | Режим | Процесс между синками | Как узнаёт о чужих правках | Когда подходит |
 |---|---|---|---|
@@ -59,30 +59,30 @@
 
 ```sh
 sha256sum -c SHA256SUMS --ignore-missing
-gh attestation verify notesync-x86_64-unknown-linux-musl --repo <owner>/notesync
-sudo install -m 0755 notesync-x86_64-unknown-linux-musl /usr/local/bin/notesync
+gh attestation verify selfsync-x86_64-unknown-linux-musl --repo <owner>/selfsync
+sudo install -m 0755 selfsync-x86_64-unknown-linux-musl /usr/local/bin/selfsync
 ```
 
-Сборка из исходников: `cargo build --release -p notesync-server` (бинарник `target/release/notesync`).
+Сборка из исходников: `cargo build --release -p selfsync-server` (бинарник `target/release/selfsync`).
 
 ### systemd: запуск по требованию (socket)
 
 ```sh
-sudo cp deploy/systemd/notesync.{socket,service} deploy/systemd/notesync-sweep.{service,timer} /etc/systemd/system/
+sudo cp deploy/systemd/selfsync.{socket,service} deploy/systemd/selfsync-sweep.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now notesync.socket notesync-sweep.timer
+sudo systemctl enable --now selfsync.socket selfsync-sweep.timer
 ```
 
-Перед сервером нужен обратный прокси с TLS. Готовые конфиги: [deploy/caddy/Caddyfile.socket](deploy/caddy/Caddyfile.socket) и [deploy/nginx/notesync-proxy.conf](deploy/nginx/notesync-proxy.conf). Юнит запускается с `DynamicUser`, данные лежат в `/var/lib/notesync`. Служебные команды выполняются так:
+Перед сервером нужен обратный прокси с TLS. Готовые конфиги: [deploy/caddy/Caddyfile.socket](deploy/caddy/Caddyfile.socket) и [deploy/nginx/selfsync-proxy.conf](deploy/nginx/selfsync-proxy.conf). Юнит запускается с `DynamicUser`, данные лежат в `/var/lib/selfsync`. Служебные команды выполняются так:
 
 ```sh
-sudo systemd-run --pipe -p DynamicUser=yes -p User=notesync -p StateDirectory=notesync \
-  /usr/local/bin/notesync token add --vault notes --name laptop
+sudo systemd-run --pipe -p DynamicUser=yes -p User=selfsync -p StateDirectory=selfsync \
+  /usr/local/bin/selfsync token add --vault notes --name laptop
 ```
 
 ### CGI
 
-[deploy/caddy/Caddyfile.cgi](deploy/caddy/Caddyfile.cgi) (Caddy с плагином `caddy-cgi`) или [deploy/nginx/notesync-cgi.conf](deploy/nginx/notesync-cgi.conf) (nginx + fcgiwrap). Режим CGI включается сам по `GATEWAY_INTERFACE`. Каталог данных должен принадлежать пользователю, от которого запускается CGI, и служебные команды нужно выполнять от него же.
+[deploy/caddy/Caddyfile.cgi](deploy/caddy/Caddyfile.cgi) (Caddy с плагином `caddy-cgi`) или [deploy/nginx/selfsync-cgi.conf](deploy/nginx/selfsync-cgi.conf) (nginx + fcgiwrap). Режим CGI включается сам по `GATEWAY_INTERFACE`. Каталог данных должен принадлежать пользователю, от которого запускается CGI, и служебные команды нужно выполнять от него же.
 
 ### Docker
 
@@ -90,7 +90,7 @@ sudo systemd-run --pipe -p DynamicUser=yes -p User=notesync -p StateDirectory=no
 cd deploy
 mkdir -p data && sudo chown 65532:65532 data   # bind mount, не именованный volume
 docker compose --profile always up -d           # или --profile ondemand (Sablier)
-docker compose run --rm notesync token add --vault notes --name laptop
+docker compose run --rm selfsync token add --vault notes --name laptop
 ```
 
 Образ основан на distroless/static: в нём нет оболочки, файловая система только для чтения, процесс работает без привилегий. Данные хранятся в `./data` через bind mount, а не в именованном volume: именованный volume стирается командой `docker compose down -v` вместе со всеми заметками.
@@ -105,25 +105,25 @@ docker compose run --rm notesync token add --vault notes --name laptop
 
 | Переменная | По умолчанию | Что задаёт |
 |---|---|---|
-| `NOTESYNC_DATA_DIR` | `$STATE_DIRECTORY` или `/var/lib/notesync` | каталог данных |
-| `NOTESYNC_PUBLIC_URL` | из заголовков запроса | внешний адрес — для ссылок подключения |
-| `NOTESYNC_IDLE_TIMEOUT` | `10m` (socket) | выход после простоя, `0` — никогда |
-| `NOTESYNC_MAX_BLOB_SIZE` | 512 МиБ | наибольший файл |
-| `NOTESYNC_MAX_BODY_SIZE` | 16 МиБ | тело запроса (метаданные, часть загрузки); согласуйте с прокси |
-| `NOTESYNC_LOG` | `info` | уровень журнала (имена файлов в журнал не попадают) |
+| `SELFSYNC_DATA_DIR` | `$STATE_DIRECTORY` или `/var/lib/selfsync` | каталог данных |
+| `SELFSYNC_PUBLIC_URL` | из заголовков запроса | внешний адрес — для ссылок подключения |
+| `SELFSYNC_IDLE_TIMEOUT` | `10m` (socket) | выход после простоя, `0` — никогда |
+| `SELFSYNC_MAX_BLOB_SIZE` | 512 МиБ | наибольший файл |
+| `SELFSYNC_MAX_BODY_SIZE` | 16 МиБ | тело запроса (метаданные, часть загрузки); согласуйте с прокси |
+| `SELFSYNC_LOG` | `info` | уровень журнала (имена файлов в журнал не попадают) |
 
 ### Служебные команды
 
 ```sh
-notesync token add --vault notes --name laptop   # токен устройства (vault создаётся сам)
-notesync link --vault notes --name phone         # одноразовая ссылка + QR в терминале
-notesync token list | revoke --name phone
-notesync vault list
-notesync import --vault notes --from ~/Notes     # залить существующую папку
-notesync backup /backups/notesync-$(date +%F)    # консистентная копия на ходу
-notesync gc --vault notes                         # план сборки мусора; --yes — выполнить
-notesync sweep                                    # стереть удалённое старше окна хранения (таймер)
-notesync healthcheck
+selfsync token add --vault notes --name laptop   # токен устройства (vault создаётся сам)
+selfsync link --vault notes --name phone         # одноразовая ссылка + QR в терминале
+selfsync token list | revoke --name phone
+selfsync vault list
+selfsync import --vault notes --from ~/Notes     # залить существующую папку
+selfsync backup /backups/selfsync-$(date +%F)    # консистентная копия на ходу
+selfsync gc --vault notes                         # план сборки мусора; --yes — выполнить
+selfsync sweep                                    # стереть удалённое старше окна хранения (таймер)
+selfsync healthcheck
 ```
 
 Резервную копию делайте командой `backup`: она консистентна и при работающем сервере. Восстановление — просто вернуть каталог на место. Устройства заметят, что сервер «помолодел», и выполнят полную сверку, ничего не удаляя.
@@ -132,11 +132,11 @@ notesync healthcheck
 
 ### Установка
 
-Скопируйте `main.js`, `manifest.json` и `styles.css` из релиза в `<vault>/.obsidian/plugins/notesync/` и включите плагин в настройках Obsidian (раздел «Сторонние плагины»).
+Скопируйте `main.js`, `manifest.json` и `styles.css` из релиза в `<vault>/.obsidian/plugins/selfsync/` и включите плагин в настройках Obsidian (раздел «Сторонние плагины»).
 
 ### Подключение
 
-- **По ссылке или QR.** Выполните на сервере `notesync link …` или нажмите «Подключить новое устройство» в настройках уже подключённого Obsidian. Откройте ссылку на новом устройстве (камера телефона распознаёт QR): страница сервера откроет Obsidian с готовыми полями.
+- **По ссылке или QR.** Выполните на сервере `selfsync link …` или нажмите «Подключить новое устройство» в настройках уже подключённого Obsidian. Откройте ссылку на новом устройстве (камера телефона распознаёт QR): страница сервера откроет Obsidian с готовыми полями.
 - **По коду вручную** — команда «Подключиться к серверу».
 - **Токеном** — адрес сервера и токен в настройках.
 
@@ -158,42 +158,42 @@ Argon2id для пароля шифрования использует 64 МиБ
 
 ## Консольный клиент
 
-`notesync-cli` синхронизирует обычную папку тем же ядром: так можно держать копию vault'а на сервере или NAS или синхронизировать машину без Obsidian.
+`selfsync-cli` синхронизирует обычную папку тем же ядром: так можно держать копию vault'а на сервере или NAS или синхронизировать машину без Obsidian.
 
 ```sh
-notesync-cli connect --dir ~/notes --server https://notes.example.com --code КОД
-notesync-cli run --dir ~/notes            # следить за папкой до Ctrl-C
-notesync-cli run --dir ~/notes --once     # один цикл (cron); коды выхода: 1 — сеть, 2 — нужен пароль, 3 — устройство отозвано
-notesync-cli encrypt --dir ~/notes --password-file ~/.notes-pass
-notesync-cli status --dir ~/notes
+selfsync-cli connect --dir ~/notes --server https://notes.example.com --code КОД
+selfsync-cli run --dir ~/notes            # следить за папкой до Ctrl-C
+selfsync-cli run --dir ~/notes --once     # один цикл (cron); коды выхода: 1 — сеть, 2 — нужен пароль, 3 — устройство отозвано
+selfsync-cli encrypt --dir ~/notes --password-file ~/.notes-pass
+selfsync-cli status --dir ~/notes
 ```
 
-Служебные данные клиент хранит в `<папка>/.notesync/` (токен и ключ с правами 0600), удалённое кладёт в `<папка>/.trash/`. Чтобы клиент работал службой, есть [deploy/systemd/user/notesync-cli@.service](deploy/systemd/user/notesync-cli@.service): `systemctl --user enable --now notesync-cli@notes`.
+Служебные данные клиент хранит в `<папка>/.selfsync/` (токен и ключ с правами 0600), удалённое кладёт в `<папка>/.trash/`. Чтобы клиент работал службой, есть [deploy/systemd/user/selfsync-cli@.service](deploy/systemd/user/selfsync-cli@.service): `systemctl --user enable --now selfsync-cli@notes`.
 
 ## Шифрование
 
-Шифрование включается из настроек плагина или командой `notesync-cli encrypt` на уже работающем vault'е. Существующие файлы перезаливаются зашифрованными, после чего открытые копии на сервере стираются. Сервер видит только шифртекст содержимого и имён, размеры и время изменений. Пароль не восстанавливается: без него копию на сервере не прочитать (локальные файлы на устройствах остаются). Модель угроз и чего шифрование не скрывает — в [SECURITY.md](SECURITY.md).
+Шифрование включается из настроек плагина или командой `selfsync-cli encrypt` на уже работающем vault'е. Существующие файлы перезаливаются зашифрованными, после чего открытые копии на сервере стираются. Сервер видит только шифртекст содержимого и имён, размеры и время изменений. Пароль не восстанавливается: без него копию на сервере не прочитать (локальные файлы на устройствах остаются). Модель угроз и чего шифрование не скрывает — в [SECURITY.md](SECURITY.md).
 
 ## Разработка
 
 ```sh
 cargo test --workspace                                   # ядро, сервер, клиент, сценарии синка
-cargo run --release -p notesync-sim -- --runs 10000      # детерминированная симуляция со сбоями
+cargo run --release -p selfsync-sim -- --runs 10000      # детерминированная симуляция со сбоями
 ./scripts/build-wasm.sh                                  # ядро → plugin/pkg (бюджет 1,5 МБ)
-cargo build -p notesync-server
+cargo build -p selfsync-server
 cd plugin && npm ci && npm run build && npm test         # плагин: типы, сборка, e2e против сервера
 ```
 
-Падение симуляции воспроизводится по seed: `notesync-sim --seed N --runs 1`; полная трасса — с `SIM_FULL_TRACE=1`.
+Падение симуляции воспроизводится по seed: `selfsync-sim --seed N --runs 1`; полная трасса — с `SIM_FULL_TRACE=1`.
 
 ```
 crates/
-  notesync-proto   схема протокола (prost + protox, без системного protoc)
-  notesync-core    ядро синка без ввода-вывода: пути, блобы, шифрование, merge, индекс, движок
-  notesync-server  сервер: HTTP, SQLite, блобы, режимы cgi/socket/serve, служебные команды
-  notesync-wasm    ядро для плагина
-  notesync-cli     консольный клиент
-  notesync-sim     симуляция: клиенты + настоящий сервер + сбои; сценарии 13.2
+  selfsync-proto   схема протокола (prost + protox, без системного protoc)
+  selfsync-core    ядро синка без ввода-вывода: пути, блобы, шифрование, merge, индекс, движок
+  selfsync-server  сервер: HTTP, SQLite, блобы, режимы cgi/socket/serve, служебные команды
+  selfsync-wasm    ядро для плагина
+  selfsync-cli     консольный клиент
+  selfsync-sim     симуляция: клиенты + настоящий сервер + сбои; сценарии 13.2
 plugin/            плагин Obsidian (TypeScript, esbuild)
 deploy/            systemd, Caddy, nginx, Docker, Podman
 spec/              план, архитектура, протокол, решения

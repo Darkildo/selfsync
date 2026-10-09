@@ -1,0 +1,30 @@
+[package]
+name = "selfsync-cli"
+description = "Консольный клиент selfsync: синхронизация обычной папки (сервер, NAS, headless)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "selfsync-cli"
+path = "src/main.rs"
+
+[dependencies]
+selfsync-core.workspace = true
+tokio = { workspace = true }
+reqwest.workspace = true
+rustls.workspace = true
+notify.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+toml = { version = "0.9", default-features = false, features = ["std", "parse", "display", "serde"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+selfsync-server.workspace = true
+tempfile.workspace = true
