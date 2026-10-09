@@ -420,12 +420,21 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
                                     f.server_path = None;
                                     s.index.files.insert(sp.clone(), f);
                                 }
-                                sp
+                                Some(sp)
                             }
-                            _ => key.clone(),
+                            Some(sp) if sp != key => {
+                                // Старое место уже занято другим локальным файлом (создан
+                                // после переименования): серверную версию там сверит его
+                                // запись, а удалённой записи больше нечего делать.
+                                s.index.files.remove(&key);
+                                None
+                            }
+                            _ => Some(key.clone()),
                         }
                     });
-                    resolve_delete(cx, &target, remote).await?
+                    if let Some(target) = target {
+                        resolve_delete(cx, &target, remote).await?
+                    }
                 }
                 Item::Rename { key, .. } => resolve_rename(cx, &key, remote, c.at_destination).await?,
                 Item::Mkdir { key } => {
