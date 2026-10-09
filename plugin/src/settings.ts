@@ -1,10 +1,12 @@
 // Настройки плагина и их вкладка.
 
-import { type App, PluginSettingTab, Setting } from "obsidian";
+import { type App, Notice, PluginSettingTab, Setting } from "obsidian";
 
 import { t } from "./i18n.ts";
 import type NotesyncPlugin from "./main.ts";
 import { ConnectModal } from "./ui/connect.ts";
+import { JoinModal } from "./ui/join.ts";
+import { ChangePasswordModal, PasswordModal } from "./ui/password.ts";
 
 export interface Settings {
   /** Базовый адрес сервера без завершающего «/». */
@@ -128,6 +130,108 @@ export class NotesyncSettingTab extends PluginSettingTab {
     this.number(t("settings.debounce"), s.debounceSec, 0.5, 60, (v) => (s.debounceSec = v));
     this.number(t("settings.pollActive"), s.pollActiveSec, 5, 600, (v) => (s.pollActiveSec = v));
     this.number(t("settings.pollIdle"), s.pollIdleMaxMin, 1, 60, (v) => (s.pollIdleMaxMin = v));
+
+    // Остальное — только для подключённого устройства: это команды серверу.
+    if (!this.plugin.runner) return;
+    this.encryption();
+    this.retention();
+    this.devices();
+  }
+
+  private encryption(): void {
+    const runner = this.plugin.runner;
+    if (!runner) return;
+    const encrypted = runner.status().encrypted;
+    new Setting(this.containerEl).setName(t("encryption.heading")).setHeading();
+    const s = new Setting(this.containerEl).setDesc(encrypted ? t("encryption.on") : t("encryption.off"));
+    if (!encrypted) {
+      s.addButton((b) =>
+        b
+          .setButtonText(t("encryption.enable"))
+          .setWarning()
+          .onClick(() =>
+            new PasswordModal(
+              this.app,
+              { title: t("encryption.enable"), desc: t("encryption.enableDesc"), submit: t("encryption.enable"), showStrength: true },
+              (r) => {
+                runner.send({ type: "enableEncryption", password: r.password, remember: r.remember });
+                runner.send({ type: "syncNow" });
+              },
+            ).open(),
+          ),
+      );
+    } else {
+      s.addButton((b) =>
+        b.setButtonText(t("encryption.change")).onClick(() =>
+          new ChangePasswordModal(this.app, (old, next) => runner.send({ type: "changePassword", old, new: next })).open(),
+        ),
+      );
+    }
+  }
+
+  private retention(): void {
+    const runner = this.plugin.runner;
+    if (!runner) return;
+    const setting = new Setting(this.containerEl).setName(t("retention.name")).setDesc(t("retention.desc"));
+    setting.addText((x) => {
+      x.inputEl.type = "number";
+      x.setDisabled(true);
+      void runner.command({ type: "getRetention" }).then((r) => {
+        if (r.type !== "retention") return;
+        x.setValue(String(r.days)).setDisabled(false);
+      });
+      x.onChange(async (raw) => {
+        const days = Math.round(Number(raw));
+        if (!Number.isFinite(days) || days < 1 || days > 3650) return;
+        const r = await runner.command({ type: "setRetention", days });
+        if (r.type === "error") new Notice(r.message);
+      });
+    });
+  }
+
+  private devices(): void {
+    const runner = this.plugin.runner;
+    if (!runner) return;
+    new Setting(this.containerEl).setName(t("devices.heading")).setHeading();
+    let name = "";
+    new Setting(this.containerEl)
+      .setName(t("join.title"))
+      .setDesc(t("join.nameDesc"))
+      .addText((x) => x.setPlaceholder(t("join.namePlaceholder")).onChange((v) => (name = v.trim())))
+      .addButton((b) =>
+        b
+          .setButtonText(t("join.create"))
+          .setCta()
+          .onClick(async () => {
+            const r = await runner.command({ type: "createJoin", name: name || t("join.namePlaceholder") });
+            if (r.type === "join") new JoinModal(this.app, r).open();
+            else new Notice(r.type === "error" ? r.message : r.type);
+          }),
+      );
+    const list = this.containerEl.createDiv();
+    void runner.command({ type: "devices" }).then((r) => {
+      if (r.type !== "devices") return;
+      for (const d of r.devices) {
+        const seen = d.lastSeen > 0 ? new Date(d.lastSeen).toLocaleString() : "—";
+        const row = new Setting(list)
+          .setName(d.current ? `${d.name} (${t("devices.current")})` : d.name)
+          .setDesc(d.revoked ? t("devices.revoked") : t("devices.lastSeen", { when: seen }));
+        if (d.revoked) row.settingEl.addClass("notesync-device-revoked");
+        if (!d.current && !d.revoked) {
+          row.addButton((b) =>
+            b
+              .setButtonText(t("devices.revoke"))
+              .setWarning()
+              .onClick(async () => {
+                if (!window.confirm(t("devices.revokeConfirm", { name: d.name }))) return;
+                const res = await runner.command({ type: "revokeDevice", id: d.id });
+                if (res.type === "error") new Notice(res.message);
+                this.display();
+              }),
+          );
+        }
+      }
+    });
   }
 
   private number(name: string, value: number, min: number, max: number, set: (v: number) => void): void {

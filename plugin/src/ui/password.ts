@@ -61,3 +61,50 @@ export class PasswordModal extends Modal {
     this.contentEl.empty();
   }
 }
+
+/** Смена пароля: мастер-ключ тот же, перешифровывать ничего не нужно. */
+export class ChangePasswordModal extends Modal {
+  private old = "";
+  private next = "";
+
+  constructor(
+    app: App,
+    private onSubmit: (old: string, next: string) => void,
+  ) {
+    super(app);
+  }
+
+  override onOpen(): void {
+    const { contentEl } = this;
+    this.setTitle(t("encryption.changeTitle"));
+    const hint = contentEl.createEl("p", { cls: "setting-item-description" });
+    new Setting(contentEl).setName(t("encryption.oldPassword")).addText((x) => {
+      x.inputEl.type = "password";
+      x.onChange((v) => (this.old = v));
+    });
+    new Setting(contentEl).setName(t("encryption.newPassword")).addText((x) => {
+      x.inputEl.type = "password";
+      x.onChange((v) => {
+        this.next = v;
+        const bits = passwordStrength(v);
+        hint.setText(`${t("password.strength", { bits })}${bits < WEAK_BITS ? ` — ${t("password.weak")}` : ""}`);
+      });
+    });
+    new Setting(contentEl)
+      .addButton((b) => b.setButtonText(t("common.cancel")).onClick(() => this.close()))
+      .addButton((b) =>
+        b
+          .setButtonText(t("encryption.change"))
+          .setCta()
+          .onClick(() => {
+            if (this.old === "" || this.next === "") return;
+            this.close();
+            this.onSubmit(this.old, this.next);
+          }),
+      );
+  }
+
+  override onClose(): void {
+    this.contentEl.empty();
+  }
+}

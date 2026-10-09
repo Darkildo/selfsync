@@ -1,0 +1,10 @@
+.notesync-qr {
+  display: block;
+  width: min(260px, 70vw);
+  margin: 0 auto 1em;
+}
+
+.notesync-device-revoked .setting-item-name {
+  text-decoration: line-through;
+  opacity: 0.6;
+}

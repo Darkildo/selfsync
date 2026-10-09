@@ -112,6 +112,34 @@ const en = {
   "history.current": "current",
   "history.restore": "Restore",
   "history.restored": "Revision {rev} restored as a new version",
+
+  "encryption.heading": "Encryption",
+  "encryption.on": "The vault is end-to-end encrypted: the server stores only ciphertext.",
+  "encryption.off": "Off: the server stores notes as plain text.",
+  "encryption.enable": "Enable encryption",
+  "encryption.enableDesc": "All devices will need this password. It cannot be recovered: lose it and the server copy is unreadable (local files stay).",
+  "encryption.change": "Change password",
+  "encryption.changeTitle": "Change encryption password",
+  "encryption.oldPassword": "Current password",
+  "encryption.newPassword": "New password",
+
+  "retention.name": "Keep deleted files, days",
+  "retention.desc": "How long the server keeps deleted files for restoring (for the whole vault)",
+
+  "devices.heading": "Devices",
+  "devices.current": "this device",
+  "devices.revoked": "access revoked",
+  "devices.lastSeen": "last seen {when}",
+  "devices.revoke": "Revoke",
+  "devices.revokeConfirm": "Revoke access for «{name}»? It will stop syncing immediately.",
+
+  "join.title": "Connect a new device",
+  "join.nameDesc": "A one-time link (valid for a short time): open it on the new device or scan the QR code",
+  "join.namePlaceholder": "phone",
+  "join.create": "Create link",
+  "join.desc": "Scan with the new device's camera or open the link there. The link works once.",
+  "join.code": "Code for manual entry: {code} · valid until {until}",
+  "join.copy": "Copy link",
 };
 
 type Key = keyof typeof en;
@@ -225,6 +253,34 @@ const ru: Record<Key, string> = {
   "history.current": "текущая",
   "history.restore": "Вернуть",
   "history.restored": "Ревизия {rev} возвращена новой версией",
+
+  "encryption.heading": "Шифрование",
+  "encryption.on": "Vault зашифрован сквозным шифрованием: сервер хранит только шифртекст.",
+  "encryption.off": "Выключено: сервер хранит заметки открытым текстом.",
+  "encryption.enable": "Включить шифрование",
+  "encryption.enableDesc": "Этот пароль понадобится на всех устройствах. Восстановить его нельзя: без пароля копия на сервере не читается (локальные файлы остаются).",
+  "encryption.change": "Сменить пароль",
+  "encryption.changeTitle": "Смена пароля шифрования",
+  "encryption.oldPassword": "Текущий пароль",
+  "encryption.newPassword": "Новый пароль",
+
+  "retention.name": "Хранить удалённое, дней",
+  "retention.desc": "Сколько сервер хранит удалённые файлы для восстановления (для всего vault'а)",
+
+  "devices.heading": "Устройства",
+  "devices.current": "это устройство",
+  "devices.revoked": "доступ отозван",
+  "devices.lastSeen": "был в сети {when}",
+  "devices.revoke": "Отозвать",
+  "devices.revokeConfirm": "Отозвать доступ у «{name}»? Устройство сразу перестанет синхронизироваться.",
+
+  "join.title": "Подключить новое устройство",
+  "join.nameDesc": "Одноразовая ссылка (действует недолго): откройте её на новом устройстве или отсканируйте QR-код",
+  "join.namePlaceholder": "телефон",
+  "join.create": "Создать ссылку",
+  "join.desc": "Отсканируйте камерой нового устройства или откройте ссылку на нём. Ссылка срабатывает один раз.",
+  "join.code": "Код для ручного ввода: {code} · действует до {until}",
+  "join.copy": "Скопировать ссылку",
 };
 
 let lang: "ru" | "en" = "en";

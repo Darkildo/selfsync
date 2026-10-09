@@ -203,3 +203,73 @@ describe("команды окон", () => {
     await b.stop();
   });
 });
+
+describe("настройки", () => {
+  test("шифрование: включение, пароль на втором устройстве, смена пароля", async () => {
+    const [a, b] = await pair("ui-crypto");
+    await a.write("secret.md", "top secret\n");
+    await a.sync();
+    await b.sync();
+    a.runner.send({ type: "enableEncryption", password: "correct horse battery staple", remember: true });
+    await a.sync();
+    assert.ok(a.notices.some((n) => n.kind === "encryptionEnabled"), JSON.stringify(a.notices));
+    assert.equal(a.status?.encrypted, true);
+    assert.ok(a.rememberedKey, "ключ запомнен по просьбе пользователя");
+
+    await b.write("from-b.md", "b\n");
+    await b.sync();
+    assert.equal(b.status?.state, "needPassword");
+    b.runner.send({ type: "password", password: "correct horse battery staple", remember: false });
+    await b.runner.idle();
+    await b.sync();
+    await a.sync();
+    assert.equal(await a.read("from-b.md"), "b\n", "правка, сделанная до ввода пароля, дошла зашифрованной");
+
+    a.runner.send({ type: "changePassword", old: "correct horse battery staple", new: "another long passphrase here" });
+    await a.runner.idle();
+    assert.ok(a.notices.some((n) => n.kind === "passwordChanged"));
+    // Новое устройство входит уже с новым паролем.
+    const c = await TestClient.create(server, { name: "c", token: server.token("ui-crypto", "c") });
+    await c.sync();
+    c.runner.send({ type: "password", password: "another long passphrase here", remember: false });
+    await c.runner.idle();
+    await c.sync();
+    assert.equal(await c.read("secret.md"), "top secret\n");
+    await a.stop();
+    await b.stop();
+    await c.stop();
+  });
+
+  test("устройства: список и отзыв; окно хранения; ссылка подключения и QR", async () => {
+    const [a, b] = await pair("ui-devices");
+    await a.sync();
+    await b.sync();
+    const list = await a.runner.command({ type: "devices" });
+    assert.ok(list.type === "devices");
+    const devs = list.type === "devices" ? list.devices : [];
+    assert.deepEqual(devs.map((d) => d.name).sort(), ["a", "b"]);
+    assert.equal(devs.filter((d) => d.current).length, 1);
+    const bId = devs.find((d) => d.name === "b")?.id ?? -1;
+    assert.deepEqual(await a.runner.command({ type: "revokeDevice", id: bId }), { type: "ok" });
+    await b.sync();
+    assert.equal(b.status?.state, "blocked");
+
+    assert.deepEqual(await a.runner.command({ type: "setRetention", days: 45 }), { type: "retention", days: 45 });
+    assert.deepEqual(await a.runner.command({ type: "getRetention" }), { type: "retention", days: 45 });
+
+    const join = await a.runner.command({ type: "createJoin", name: "tablet" });
+    assert.equal(join.type, "join");
+    if (join.type !== "join") return;
+    const { qrModules } = await import("../pkg/notesync_wasm.js");
+    const m = qrModules(join.url);
+    const width = m[0] ?? 0;
+    assert.ok(width >= 21 && m.length === 1 + width * width, `ширина ${width}`);
+    // Код из ссылки действительно подключает.
+    const fresh = await TestClient.create(server, { name: "tablet" });
+    const r = await fresh.runner.command({ type: "redeem", code: join.code, name: "tablet" });
+    assert.equal(r.type, "token");
+    await a.stop();
+    await b.stop();
+    await fresh.stop();
+  });
+});
