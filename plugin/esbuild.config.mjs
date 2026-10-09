@@ -15,10 +15,14 @@ const ctx = await esbuild.context({
   outfile: "main.js",
   external: ["obsidian", "electron", ...builtinModules, ...builtinModules.map((m) => `node:${m}`)],
   loader: { ".wasm": "binary" },
+  alias: { "notesync-wasm-bytes": "./pkg/notesync_wasm_bg.wasm" },
   sourcemap: production ? false : "inline",
   minify: production,
   treeShaking: true,
   logLevel: "info",
+  // import.meta.url есть только в асинхронной загрузке обвязки wasm-bindgen, а мы
+  // инициализируем WASM синхронно из встроенных байтов.
+  logOverride: { "empty-import-meta": "silent" },
 });
 
 if (production) {
