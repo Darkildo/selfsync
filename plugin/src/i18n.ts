@@ -83,6 +83,35 @@ const en = {
   "password.weak": "Weak password: anyone with the server's files can try to guess it",
 
   "common.cancel": "Cancel",
+
+  "conflicts.title": "Unresolved conflicts",
+  "conflicts.none": "No unresolved conflicts",
+  "conflicts.desc": "The server version stays in place; yours was saved next to it.",
+  "conflicts.copy": "Your version: {copy} · {time}",
+  "conflicts.openServer": "Open the server version",
+  "conflicts.openMine": "Open your version",
+  "conflicts.keepBoth": "Keep both",
+  "conflicts.keepMine": "Keep mine",
+  "conflicts.keepServer": "Keep server's",
+  "conflicts.resolved": "{path}: conflict resolved",
+
+  "deleted.title": "Deleted files",
+  "deleted.none": "Nothing was deleted recently",
+  "deleted.restore": "Restore selected",
+  "deleted.purge": "Delete forever",
+  "deleted.meta": "{size} · deleted {when} · kept until {until}",
+  "deleted.purgeConfirm": "Delete {n} files forever? This cannot be undone.",
+  "deleted.restored": "Restored: {n}",
+
+  "history.title": "History of {path}",
+  "history.none": "The server has no history for this file",
+  "history.rev": "Revision {rev} · {when}",
+  "history.deleted": "deleted",
+  "history.renamed": "renamed from {from}",
+  "history.device": "device #{id}",
+  "history.current": "current",
+  "history.restore": "Restore",
+  "history.restored": "Revision {rev} restored as a new version",
 };
 
 type Key = keyof typeof en;
@@ -167,6 +196,35 @@ const ru: Record<Key, string> = {
   "password.weak": "Слабый пароль: его можно подобрать, имея файлы сервера",
 
   "common.cancel": "Отмена",
+
+  "conflicts.title": "Нерешённые конфликты",
+  "conflicts.none": "Нерешённых конфликтов нет",
+  "conflicts.desc": "Серверная версия осталась на месте, ваша сохранена рядом.",
+  "conflicts.copy": "Ваша версия: {copy} · {time}",
+  "conflicts.openServer": "Открыть серверную версию",
+  "conflicts.openMine": "Открыть свою версию",
+  "conflicts.keepBoth": "Оставить обе",
+  "conflicts.keepMine": "Оставить свою",
+  "conflicts.keepServer": "Оставить серверную",
+  "conflicts.resolved": "{path}: конфликт решён",
+
+  "deleted.title": "Удалённые файлы",
+  "deleted.none": "Недавно ничего не удаляли",
+  "deleted.restore": "Восстановить выбранные",
+  "deleted.purge": "Удалить навсегда",
+  "deleted.meta": "{size} · удалён {when} · хранится до {until}",
+  "deleted.purgeConfirm": "Удалить навсегда файлов: {n}? Отменить будет нельзя.",
+  "deleted.restored": "Восстановлено: {n}",
+
+  "history.title": "История {path}",
+  "history.none": "На сервере нет истории этого файла",
+  "history.rev": "Ревизия {rev} · {when}",
+  "history.deleted": "удалён",
+  "history.renamed": "переименован из {from}",
+  "history.device": "устройство №{id}",
+  "history.current": "текущая",
+  "history.restore": "Вернуть",
+  "history.restored": "Ревизия {rev} возвращена новой версией",
 };
 
 let lang: "ru" | "en" = "en";

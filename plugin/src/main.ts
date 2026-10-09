@@ -1,7 +1,7 @@
 // Плагин Obsidian: тонкий слой между vault'ом и ядром. Ядро решает, что и когда
 // синхронизировать; здесь — события vault'а, исполнитель, статус-бар и окна.
 
-import { FileSystemAdapter, moment, Notice, Platform, Plugin, requestUrl, type TAbstractFile } from "obsidian";
+import { FileSystemAdapter, moment, Notice, Platform, Plugin, requestUrl, type TAbstractFile, TFile } from "obsidian";
 
 import wasmBytes from "notesync-wasm-bytes";
 import { initWasm, Runner } from "./engine.ts";
@@ -14,7 +14,10 @@ import { ObsidianHttp } from "./io/http.ts";
 import { NodeBackend } from "./io/node.ts";
 import { DEFAULT_SETTINGS, NotesyncSettingTab, type Settings } from "./settings.ts";
 import type { EngineConfig, LogLevel, Notice as EngineNotice, SyncStatus } from "./types.ts";
+import { ConflictsModal } from "./ui/conflicts.ts";
 import { ConnectModal } from "./ui/connect.ts";
+import { DeletedModal } from "./ui/deleted.ts";
+import { HistoryModal } from "./ui/history.ts";
 import { PasswordModal } from "./ui/password.ts";
 
 const KEY_STORAGE = "notesync-master-key";
@@ -45,6 +48,24 @@ export default class NotesyncPlugin extends Plugin {
       callback: () => new ConnectModal(this.app, this, this.settings.server, "").open(),
     });
     this.addCommand({ id: "password", name: t("cmd.password"), callback: () => this.askPassword() });
+    this.addCommand({ id: "conflicts", name: t("cmd.conflicts"), callback: () => this.whenRunning(() => new ConflictsModal(this.app, this).open()) });
+    this.addCommand({ id: "deleted", name: t("cmd.deleted"), callback: () => this.whenRunning(() => new DeletedModal(this.app, this).open()) });
+    this.addCommand({
+      id: "history",
+      name: t("cmd.history"),
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || !this.runner) return false;
+        if (!checking) new HistoryModal(this.app, this, file.path).open();
+        return true;
+      },
+    });
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (!this.runner || !(file instanceof TFile)) return;
+        menu.addItem((i) => i.setTitle(t("cmd.history")).setIcon("history").onClick(() => new HistoryModal(this.app, this, file.path).open()));
+      }),
+    );
     this.addCommand({ id: "log", name: t("cmd.log"), callback: () => this.showLog() });
     this.addSettingTab(new NotesyncSettingTab(this.app, this));
 
@@ -158,6 +179,11 @@ export default class NotesyncPlugin extends Plugin {
     this.runner.send({ type: "start", key: saved ? fromBase64(saved) : null });
   }
 
+  private whenRunning(f: () => void): void {
+    if (this.runner) f();
+    else new ConnectModal(this.app, this, this.settings.server, "").open();
+  }
+
   syncNow(): void {
     if (this.runner) this.runner.send({ type: "syncNow" });
     else new ConnectModal(this.app, this, this.settings.server, "").open();
@@ -226,7 +252,8 @@ export default class NotesyncPlugin extends Plugin {
       this.migrationNotice?.hide();
       this.migrationNotice = undefined;
     }
-    new Notice(text, n.kind === "conflict" || n.kind === "wrongPassword" ? 0 : 8000);
+    const shown = new Notice(text, n.kind === "conflict" || n.kind === "wrongPassword" ? 0 : 8000);
+    if (n.kind === "conflict") shown.messageEl.onClickEvent(() => new ConflictsModal(this.app, this).open());
   }
 
   private addLog(level: LogLevel, message: string): void {

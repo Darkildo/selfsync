@@ -8,6 +8,7 @@ import { join } from "node:path";
 export const shown: string[] = [];
 
 export class Notice {
+  messageEl = { onClickEvent: (_cb: () => void) => {} };
   constructor(public message: string) {
     shown.push(message);
   }
@@ -120,6 +121,8 @@ export class Modal {
 
 export class Setting {}
 
+export class TFile {}
+
 export interface StubApp {
   pluginData: unknown;
   vault: {
@@ -130,7 +133,7 @@ export interface StubApp {
     emit(name: string, ...args: unknown[]): void;
     getConfig(k: string): unknown;
   };
-  workspace: { onLayoutReady(cb: () => void): void };
+  workspace: { onLayoutReady(cb: () => void): void; on(name: string, cb: Handler): unknown };
   storage: Record<string, unknown>;
   loadLocalStorage(k: string): unknown;
   saveLocalStorage(k: string, v: unknown): void;
@@ -154,7 +157,7 @@ export function stubApp(vaultDir: string, pluginData: unknown): StubApp {
       },
       getConfig: () => "local",
     },
-    workspace: { onLayoutReady: (cb) => cb() },
+    workspace: { onLayoutReady: (cb) => cb(), on: () => ({}) },
     storage,
     loadLocalStorage: (k) => storage[k] ?? null,
     saveLocalStorage: (k, v) => {

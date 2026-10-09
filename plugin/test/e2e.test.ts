@@ -137,3 +137,69 @@ describe("подключение", () => {
     await c.stop();
   });
 });
+
+describe("команды окон", () => {
+  test("конфликты: список и выбор своей версии", async () => {
+    const [a, b] = await pair("ui-conflicts");
+    await a.write("c.md", "x\ny\nz\n");
+    await a.sync();
+    await b.sync();
+    await a.write("c.md", "x\nA\nz\n");
+    await b.write("c.md", "x\nB\nz\n");
+    await a.sync();
+    await b.sync();
+    const r = await b.runner.command({ type: "conflicts" });
+    assert.equal(r.type, "conflicts");
+    assert.ok(r.type === "conflicts" && r.items.length === 1);
+    const c = r.type === "conflicts" ? r.items[0] : undefined;
+    assert.ok(c);
+    b.runner.send({ type: "resolve", id: c.id, choice: "keepMine" });
+    await b.runner.idle();
+    await b.sync();
+    await a.sync();
+    assert.equal(await a.read("c.md"), "x\nB\nz\n", "своя версия ушла на сервер");
+    assert.equal(await b.read(c.copy), null, "копия убрана");
+    const after = await b.runner.command({ type: "conflicts" });
+    assert.ok(after.type === "conflicts" && after.items.length === 0);
+    await a.stop();
+    await b.stop();
+  });
+
+  test("корзина сервера: восстановление удалённого", async () => {
+    const [a, b] = await pair("ui-deleted");
+    await a.write("gone.md", "keep me\n");
+    await a.sync();
+    await b.sync();
+    await fsp.rm(join(a.vault, "gone.md"));
+    await a.sync();
+    const list = await b.runner.command({ type: "listDeleted" });
+    assert.ok(list.type === "deleted" && list.items.some((d) => d.path === "gone.md"), JSON.stringify(list));
+    const r = await b.runner.command({ type: "restoreDeleted", paths: ["gone.md"] });
+    assert.deepEqual(r, { type: "restored", count: 1 });
+    await b.sync();
+    await a.sync();
+    assert.equal(await a.read("gone.md"), "keep me\n");
+    await a.stop();
+    await b.stop();
+  });
+
+  test("история: возврат старой ревизии", async () => {
+    const [a, b] = await pair("ui-history");
+    await a.write("h.md", "v1\n");
+    await a.sync();
+    await a.write("h.md", "v2\n");
+    await a.sync();
+    const h = await a.runner.command({ type: "history", path: "h.md" });
+    assert.ok(h.type === "history" && h.revisions.length === 2, JSON.stringify(h));
+    const oldest = h.type === "history" ? h.revisions[h.revisions.length - 1] : undefined;
+    assert.ok(oldest);
+    const r = await a.runner.command({ type: "restoreRevision", path: "h.md", rev: oldest.rev });
+    assert.notEqual(r.type, "error", JSON.stringify(r));
+    await a.sync();
+    await b.sync();
+    assert.equal(await a.read("h.md"), "v1\n");
+    assert.equal(await b.read("h.md"), "v1\n");
+    await a.stop();
+    await b.stop();
+  });
+});
