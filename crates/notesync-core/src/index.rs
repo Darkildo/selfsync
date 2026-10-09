@@ -232,6 +232,7 @@ impl Index {
 mod tests {
     use super::*;
 
+    /// Образец, в котором заполнено каждое поле формата.
     fn sample() -> Index {
         let mut i = Index::new();
         i.last_seq = 42;
@@ -257,7 +258,67 @@ mod tests {
                 ..Default::default()
             },
         );
+        i.files.insert(
+            "dir/b.png".into(),
+            FileState {
+                server_path: Some("old/b.png".into()),
+                rejected: Some(("too_large".into(), Hash::of(b"r"))),
+                transfer: Some(Transfer::Upload {
+                    blob: Hash::of(b"u"),
+                    upload_id: "up-1".into(),
+                    plain: Hash::of(b"p"),
+                }),
+                pending_put: Some(Hash::of(b"pp")),
+                ..Default::default()
+            },
+        );
+        i.files.insert(
+            "dir".into(),
+            FileState {
+                folder: true,
+                base_rev: 7,
+                ..Default::default()
+            },
+        );
+        i.conflicts.push(ConflictRecord {
+            id: 1,
+            path: "a.md".into(),
+            copy: "a (conflict 2026-10-09 14-30 dev).md".into(),
+            at: 1_791_556_200_000,
+        });
+        i.next_conflict_id = 1;
+        i.migration = Some(MigrationState {
+            key_version: 3,
+            done: [("a.md".to_owned(), 5)].into(),
+            max_seq: 5,
+            uploaded: true,
+            takeover: true,
+        });
+        i.cache = vec![(Hash::of(b"plain"), 5)];
+        i.rebaselined = true;
+        i.rebaseline_seen = ["a.md".to_owned()].into();
+        i.rewound = true;
         i
+    }
+
+    const FIXTURE_V1: &[u8] = include_bytes!("../tests/fixtures/index-v1.bin");
+
+    /// Замороженный снимок формата v1. Если тест упал, формат индекса изменился
+    /// несовместимо: поднимите INDEX_FORMAT и научите decode читать v1, а эталон
+    /// не перезаписывайте. (Новый эталон: NOTESYNC_WRITE_FIXTURES=1.)
+    #[test]
+    fn format_v1_fixture() {
+        if std::env::var_os("NOTESYNC_WRITE_FIXTURES").is_some() {
+            std::fs::write(
+                concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/index-v1.bin"),
+                sample().encode(),
+            )
+            .unwrap();
+            return;
+        }
+        assert_eq!(&FIXTURE_V1[..8], b"NSI\0\x01\x00\x00\x00");
+        assert_eq!(Index::decode(FIXTURE_V1).unwrap(), sample());
+        assert_eq!(sample().encode(), FIXTURE_V1, "кодирование v1 изменилось");
     }
 
     #[test]
@@ -275,18 +336,6 @@ mod tests {
         let mut c = sample().encode();
         c.truncate(12);
         assert_eq!(Index::decode(&c).unwrap_err(), IndexError::Corrupt);
-    }
-
-    /// Снимок формата v1, записанный при создании формата: новая версия кода обязана
-    /// его читать (обратная совместимость).
-    #[test]
-    fn format_v1_fixture_still_decodes() {
-        let fixture = sample().encode();
-        // Байты заголовка неизменны.
-        assert_eq!(&fixture[..8], b"NSI\0\x01\x00\x00\x00");
-        let decoded = Index::decode(&fixture).unwrap();
-        assert_eq!(decoded.last_seq, 42);
-        assert_eq!(decoded.files["a.md"].base_rev, 2);
     }
 
     #[test]
