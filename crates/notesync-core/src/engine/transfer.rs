@@ -371,18 +371,18 @@ async fn download_big(cx: &Ctx, key: &str, h: &Hash, blob_size: u64, expect: Opt
         } else {
             end
         };
-        cx.with_mut(|s| {
-            if let Some(f) = s.index.files.get_mut(key) {
-                f.transfer = Some(Transfer::Download {
+        // Чекпоинт. Новому файлу заводится запись только с передачей (без базы и без
+        // локального файла): push такие пропускает, а повторный pull продолжит
+        // скачивание с этого места.
+        if !key.is_empty() {
+            cx.with_mut(|s| {
+                s.index.files.entry(key.to_owned()).or_default().transfer = Some(Transfer::Download {
                     blob: *h,
                     temp: temp.clone(),
                     blob_offset: boff,
                     plain_offset: plain_off,
                 });
-            }
-        });
-        // Чекпоинт только для уже известных индексу путей (новые файлы начнут заново).
-        if cx.with(|s| s.index.files.contains_key(key)) {
+            });
             cx.save().await?;
         }
     }
