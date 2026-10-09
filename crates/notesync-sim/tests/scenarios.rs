@@ -523,3 +523,24 @@ fn migration_interrupted_halfway() {
     assert_eq!(plaintext_live(&w), 0, "миграция доведена после перезапуска");
     assert_eq!(w.server_files().len(), 120);
 }
+
+// Исполнитель без атомарной замены убит между удалением X и переименованием
+// `X.commit.notesync-tmp` в X: запись доводится, лишних копий нет.
+
+#[test]
+fn interrupted_commit_phase_is_completed() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    let ta = edit_line(&mut w, 0, "a.md", 0);
+    w.sync(0);
+    let fresh = w.server_files()["a.md"].clone();
+    let now = w.client_now(1);
+    w.clients[1]
+        .fs
+        .user_write("a.md.commit.notesync-tmp", fresh, now);
+    w.clients[1].fs.user_delete("a.md");
+    w.kill(1);
+    finish(&mut w);
+    assert!(String::from_utf8_lossy(w.clients[1].fs.read_file("a.md").unwrap()).contains(&ta));
+    assert!(conflict_copies(&w).is_empty(), "{:?}", conflict_copies(&w));
+}

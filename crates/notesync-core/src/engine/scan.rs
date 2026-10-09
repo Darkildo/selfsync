@@ -80,6 +80,21 @@ async fn canonical(cx: &Ctx, raw: &str, is_dir: bool) -> SyncResult<Option<Strin
 /// переименование доводится до конца, недописанная атомарная запись уходит в корзину.
 async fn recover_temp(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
     let base = &raw[..raw.len() - super::ctx::TEMP_SUFFIX.len()];
+    // Атомарная запись исполнителя без атомарной замены (мобильный adapter):
+    // `X.commit.notesync-tmp` уже записан целиком. Если X нет — убит между удалением
+    // X и переименованием: довести. Если X есть — до замены не дошло, а запись
+    // повторит следующий цикл (индекс её ещё не учёл).
+    if let Some(target) = base.strip_suffix(".commit") {
+        if cx.stat(target).await?.is_none() {
+            cx.log(
+                LogLevel::Warn,
+                format!("доведена прерванная запись: {target}"),
+            );
+            return Ok(cx.rename(raw, target).await?.map(|_| target.to_owned()));
+        }
+        cx.trash(raw, super::types::Expect::Any).await?;
+        return Ok(None);
+    }
     let target = base
         .strip_suffix(".case")
         .or_else(|| base.strip_suffix(".nfc"));
