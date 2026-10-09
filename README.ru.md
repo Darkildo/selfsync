@@ -1,5 +1,7 @@
 # selfsync
 
+[English](README.md) · **Русский**
+
 Синхронизация vault'а Obsidian через свой сервер. Один небольшой бинарник на Rust, данные в SQLite и файлах, плагин для Obsidian на десктопе и телефоне, консольный клиент для серверов и NAS.
 
 Главное обещание: **ни одна правка не теряется молча.**
@@ -59,7 +61,7 @@
 
 ```sh
 sha256sum -c SHA256SUMS --ignore-missing
-gh attestation verify selfsync-x86_64-unknown-linux-musl --repo <owner>/selfsync
+gh attestation verify selfsync-x86_64-unknown-linux-musl --repo Darkildo/selfsync
 sudo install -m 0755 selfsync-x86_64-unknown-linux-musl /usr/local/bin/selfsync
 ```
 
@@ -132,7 +134,7 @@ selfsync healthcheck
 
 ### Установка
 
-Скопируйте `main.js`, `manifest.json` и `styles.css` из релиза в `<vault>/.obsidian/plugins/selfsync/` и включите плагин в настройках Obsidian (раздел «Сторонние плагины»).
+Из каталога сторонних плагинов Obsidian (поиск «Selfsync») или вручную: скопируйте `main.js`, `manifest.json` и `styles.css` из релиза в `<vault>/.obsidian/plugins/selfsync/` и включите плагин в настройках Obsidian (раздел «Сторонние плагины»).
 
 ### Подключение
 
