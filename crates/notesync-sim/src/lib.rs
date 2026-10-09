@@ -132,6 +132,9 @@ pub struct Client {
     pub status: Option<notesync_core::engine::SyncStatus>,
     pub wake: Option<i64>,
     pub kills: u32,
+    /// Байты тел HTTP-запросов и ответов (проверка докачки).
+    pub sent_bytes: u64,
+    pub recv_bytes: u64,
 }
 
 /// Учёт токенов для инварианта.
@@ -183,6 +186,9 @@ pub struct World {
     pub encrypted_password: Option<String>,
     pub step_no: usize,
     pub faults_enabled: bool,
+    /// Точечные сбои для сценариев: первый HTTP-запрос, чьё «МЕТОД путь» начинается
+    /// с префикса, обрывается до (`false`) или после (`true`) применения на сервере.
+    pub planned_faults: VecDeque<(String, bool)>,
 }
 
 fn data_root() -> std::path::PathBuf {
@@ -217,6 +223,7 @@ impl World {
             encrypted_password: None,
             step_no: 0,
             faults_enabled: true,
+            planned_faults: VecDeque::new(),
         };
         for i in 0..cfg.clients {
             w.add_client(i);
@@ -256,6 +263,8 @@ impl World {
             status: None,
             wake: None,
             kills: 0,
+            sent_bytes: 0,
+            recv_bytes: 0,
         };
         self.clients.push(client);
         self.start_client(self.clients.len() - 1);
@@ -331,6 +340,7 @@ impl World {
         if req.auth {
             b = b.header("authorization", format!("Bearer {}", self.clients[c].token));
         }
+        self.clients[c].sent_bytes += req.body.len() as u64;
         let Ok(request) = b.body(Body::from(req.body)) else {
             return IoResult::Failed {
                 message: "bad request".into(),
@@ -348,6 +358,7 @@ impl World {
             let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.expect("body");
             (status, headers, body.to_vec())
         });
+        self.clients[c].recv_bytes += body.len() as u64;
         IoResult::Http { status, headers, body }
     }
 
@@ -357,7 +368,11 @@ impl World {
         let id = a.id()?;
         let res = match a {
             Action::Http { req, .. } => {
-                let fault = if self.faults_enabled && self.cfg.fault_rate > 0.0 && self.rng.chance(self.cfg.fault_rate) {
+                let line = format!("{} {}", req.method, req.path);
+                let planned = self.planned_faults.iter().position(|(p, _)| line.starts_with(p.as_str()));
+                let fault = if let Some(i) = planned {
+                    self.planned_faults.remove(i).map(|(_, after)| !after)
+                } else if self.faults_enabled && self.cfg.fault_rate > 0.0 && self.rng.chance(self.cfg.fault_rate) {
                     Some(self.rng.chance(0.5))
                 } else {
                     None
@@ -457,6 +472,26 @@ impl World {
             self.deliver(c, Event::Done { id, result });
         }
         true
+    }
+
+    /// Выполнить первое ожидающее действие клиента строго по порядку. Возвращает
+    /// его описание («HTTP PUT /v1/...», «Write a.md», «SaveIndex»…).
+    pub fn pump_one(&mut self, c: usize) -> Option<String> {
+        self.clients[c].engine.as_ref()?;
+        let a = self.clients[c].pending.pop_front()?;
+        let label = match &a {
+            Action::Http { req, .. } => format!("HTTP {} {}", req.method, req.path),
+            Action::Write { path, .. } => format!("Write {path}"),
+            Action::CommitTemp { path, .. } => format!("CommitTemp {path}"),
+            Action::Rename { from, to, .. } => format!("Rename {from} -> {to}"),
+            Action::Trash { path, .. } => format!("Trash {path}"),
+            Action::SaveIndex { .. } => "SaveIndex".to_owned(),
+            other => format!("{other:?}").split([' ', '{']).next().unwrap_or("").to_owned(),
+        };
+        if let Some((id, result)) = self.exec(c, a) {
+            self.deliver(c, Event::Done { id, result });
+        }
+        Some(label)
     }
 
     /// Доставить таймеры, если подошло время.

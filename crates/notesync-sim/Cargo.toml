@@ -22,3 +22,6 @@ unicode-normalization.workspace = true
 [[bin]]
 name = "notesync-sim"
 path = "src/main.rs"
+
+[dev-dependencies]
+rusqlite.workspace = true
