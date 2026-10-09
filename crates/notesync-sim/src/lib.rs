@@ -722,6 +722,8 @@ impl World {
             self.deliver(c, Event::Visible);
         }
         let mut last = String::new();
+        let mut prev_snap = self.snapshots();
+        let mut churn = String::new();
         for round in 0..30 {
             self.now += 20_000;
             for c in 0..self.clients.len() {
@@ -732,9 +734,37 @@ impl World {
             if sig == last && !pending && round > 0 {
                 return Ok(());
             }
+            let snap = self.snapshots();
+            if round >= 27 {
+                churn.push_str(&format!("\nраунд {round}: seq {}, pending {pending}", self.server_seq()));
+                for (c, (a, b)) in prev_snap.iter().zip(&snap).enumerate() {
+                    let changed: Vec<&String> = a.keys().chain(b.keys()).filter(|k| a.get(*k) != b.get(*k)).collect::<BTreeSet<_>>().into_iter().collect();
+                    if !changed.is_empty() {
+                        churn.push_str(&format!("\n  c{c} меняются {changed:?}"));
+                    }
+                    if let Some(e) = self.clients[c].engine.as_ref() {
+                        let idx = e.index();
+                        let pend: Vec<&String> = idx
+                            .files
+                            .iter()
+                            .filter(|(_, f)| f.content_dirty() || f.delete_pending() || f.server_path.is_some() || (f.folder && f.base_rev == 0 && f.local.is_some()))
+                            .map(|(k, _)| k)
+                            .collect();
+                        if !pend.is_empty() {
+                            churn.push_str(&format!("\n  c{c} ждут отправки {pend:?}"));
+                        }
+                    }
+                }
+            }
+            prev_snap = snap;
             last = sig;
         }
-        Err("не сошлось за 30 раундов".into())
+        let conv = self.check_converged().err().unwrap_or_default();
+        Err(format!("не сошлось за 30 раундов{churn}\n{conv}"))
+    }
+
+    fn snapshots(&self) -> Vec<BTreeMap<String, Vec<u8>>> {
+        self.clients.iter().map(|c| c.fs.snapshot()).collect()
     }
 
     /// Отпечаток состояния: ФС всех клиентов + seq сервера.
@@ -751,7 +781,7 @@ impl World {
     }
 
     pub fn server_seq(&self) -> u64 {
-        let v = notesync_server::state::open_vault(&self.state.config, "sim", 1).expect("vault");
+        let v = self.state.vault("sim").expect("vault");
         let c = v.pool.get().expect("conn");
         notesync_server::db::vault::current_seq(&c).unwrap_or(0)
     }
@@ -759,7 +789,7 @@ impl World {
     /// Ключи vault'а (если он зашифрован) — из записи на сервере и пароля.
     pub fn vault_keys(&self) -> Option<VaultKeys> {
         let pw = self.encrypted_password.as_ref()?;
-        let v = notesync_server::state::open_vault(&self.state.config, "sim", 1).ok()?;
+        let v = self.state.vault("sim").ok()?;
         let c = v.pool.get().ok()?;
         let rec = notesync_server::db::vault::meta_blob(&c, "vault_key").ok()??;
         crypto::open_master_key(&rec, pw).ok().map(|m| m.derive())
@@ -768,7 +798,7 @@ impl World {
     /// Живое состояние сервера: путь → открытый текст.
     pub fn server_files(&self) -> BTreeMap<String, Vec<u8>> {
         let keys = self.vault_keys();
-        let v = notesync_server::state::open_vault(&self.state.config, "sim", 1).expect("vault");
+        let v = self.state.vault("sim").expect("vault");
         let c = v.pool.get().expect("conn");
         let (entries, _) = notesync_server::db::vault::changes(&c, 0, 1_000_000).expect("changes");
         let mut out = BTreeMap::new();
@@ -800,7 +830,7 @@ impl World {
     /// Всё содержимое, которое когда-либо было на сервере (история).
     pub fn server_history_texts(&self) -> Vec<Vec<u8>> {
         let keys = self.vault_keys();
-        let v = notesync_server::state::open_vault(&self.state.config, "sim", 1).expect("vault");
+        let v = self.state.vault("sim").expect("vault");
         let c = v.pool.get().expect("conn");
         let mut st = c
             .prepare("SELECT hash FROM revisions WHERE hash IS NOT NULL UNION SELECT hash FROM files WHERE hash IS NOT NULL")
