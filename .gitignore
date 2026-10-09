@@ -1,0 +1,7 @@
+/target
+node_modules/
+/plugin/main.js
+/plugin/pkg/
+/plugin/dist/
+*.notesync-tmp
+.DS_Store

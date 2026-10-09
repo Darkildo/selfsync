@@ -1,0 +1,6 @@
+# Зафиксированный тулчейн: воспроизводимые сборки (раздел 12.6).
+[toolchain]
+channel = "1.97.1"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-unknown-unknown", "x86_64-unknown-linux-musl"]
+profile = "minimal"
