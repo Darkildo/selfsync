@@ -168,6 +168,25 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
     };
     // Свежее состояние локального файла.
     let Some(meta) = cx.stat(key).await? else {
+        // Локальный файл так и не попал на сервер и уже удалён: серверная версия —
+        // чужой файл, который здесь ещё не видели, а не повод для удаления.
+        if !f.maybe_on_server() && !r.deleted && !r.folder {
+            if let Some(h) = r.hash {
+                if let Some((obs, cache)) = download_to(cx, key, &h, r.size, Expect::Absent).await? {
+                    cx.with_mut(|s| {
+                        if let Some(f) = s.index.files.get_mut(key) {
+                            f.folder = false;
+                            f.local = Some(obs);
+                        }
+                    });
+                    adopt(cx, key, &r, obs.plain);
+                    if let Some(c) = cache {
+                        cx.cache_put(obs.plain, c).await;
+                    }
+                    return Ok(());
+                }
+            }
+        }
         cx.with_mut(|s| {
             if let Some(f) = s.index.files.get_mut(key) {
                 f.local = None;
