@@ -1,0 +1,16 @@
+# Сокет держит systemd; процесс notesync поднимается при первом соединении
+# и сам выходит после простоя (NOTESYNC_IDLE_TIMEOUT, по умолчанию 10 минут).
+[Unit]
+Description=notesync socket
+
+[Socket]
+ListenStream=127.0.0.1:8085
+# Вместо TCP можно слушать Unix-сокет (тогда в прокси: unix//run/notesync/notesync.sock):
+#ListenStream=/run/notesync/notesync.sock
+#SocketUser=caddy
+#SocketMode=0660
+#DirectoryMode=0755
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target

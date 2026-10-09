@@ -1,0 +1,21 @@
+[Unit]
+Description=notesync (socket-activated container)
+Requires=notesync.socket
+After=notesync.socket
+
+[Container]
+Image=ghcr.io/notesync/notesync:latest
+Exec=socket --idle-timeout 10m
+Volume=%h/notesync-data:/data:Z
+ReadOnly=true
+Tmpfs=/tmp
+DropCapability=ALL
+NoNewPrivileges=true
+Notify=true
+Environment=NOTESYNC_DATA_DIR=/data
+#Environment=NOTESYNC_PUBLIC_URL=https://notes.example.com
+
+[Service]
+# Выход по простою — штатное завершение.
+Restart=no
+TimeoutStartSec=60

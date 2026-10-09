@@ -1,0 +1,20 @@
+# Caddy перед notesync в режиме socket (systemd socket activation) или serve.
+notes.example.com {
+	request_body {
+		max_size 17MB
+	}
+
+	@notesync path /v1/* /join/*
+	reverse_proxy @notesync 127.0.0.1:8085 {
+		# или Unix-сокет: reverse_proxy @notesync unix//run/notesync/notesync.sock
+		# Long-poll /v1/wait держит запрос до 25 с — таймауты больше.
+		transport http {
+			read_timeout 60s
+			write_timeout 60s
+		}
+		# Range-ответы и большие тела — потоком.
+		flush_interval -1
+	}
+
+	respond 404
+}

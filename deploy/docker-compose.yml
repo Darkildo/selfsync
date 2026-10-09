@@ -1,0 +1,50 @@
+# Два профиля:
+#   docker compose --profile always up -d     — постоянный процесс
+#   docker compose --profile ondemand up -d   — по требованию через Sablier
+# Токен: docker compose run --rm notesync token add --vault notes --name laptop
+#
+# Данные — bind mount ./data, а НЕ именованный volume: именованный volume стирается
+# командой `docker compose down -v`, и вместе с ним — все заметки. Каталог должен
+# принадлежать uid 65532 (nonroot в distroless):
+#   mkdir -p data && sudo chown 65532:65532 data
+
+x-notesync: &notesync
+  image: ghcr.io/notesync/notesync:latest
+  build: .
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  mem_limit: 256m
+  cpus: 1.0
+  volumes:
+    - ./data:/data
+  environment:
+    NOTESYNC_DATA_DIR: /data
+    NOTESYNC_PUBLIC_URL: https://notes.example.com
+    NOTESYNC_LOG: info
+  # Порт наружу не публикуется: доступ только из сети обратного прокси.
+  networks: [proxy]
+
+services:
+  notesync:
+    <<: *notesync
+    profiles: ["always"]
+    restart: unless-stopped
+    command: ["serve", "--listen", "0.0.0.0:8085"]
+
+  notesync-ondemand:
+    <<: *notesync
+    profiles: ["ondemand"]
+    # Контейнер останавливает Sablier после простоя; сам он может выйти и раньше.
+    restart: "no"
+    command: ["serve", "--listen", "0.0.0.0:8085", "--idle-timeout", "10m"]
+    labels:
+      - sablier.enable=true
+      - sablier.group=notesync
+
+networks:
+  proxy:
+    external: true

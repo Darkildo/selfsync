@@ -1,0 +1,5 @@
+target
+plugin/node_modules
+plugin/main.js
+plugin/pkg
+.git
