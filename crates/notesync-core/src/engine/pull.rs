@@ -531,6 +531,9 @@ async fn apply_tombstone(cx: &Ctx, it: &Item) -> SyncResult<bool> {
                 s.index.files.remove(key);
             });
         } else {
+            // Файл изменился с последнего наблюдения: применить tombstone заново в
+            // следующем цикле (правка победит удаление, если содержимое другое).
+            hold(cx, it.e.seq);
             cx.with_mut(|s| {
                 s.dirty.insert(key.clone());
             });
