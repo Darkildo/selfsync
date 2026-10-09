@@ -34,6 +34,7 @@ pub(crate) fn rebaseline(cx: &Ctx, skip_tombstones: bool) {
         s.index.rebaseline_seen.clear();
         if skip_tombstones {
             s.index.initial_done = false;
+            s.index.rewound = true;
         }
         s.need_full_scan = true;
     });

@@ -77,6 +77,7 @@ pub(crate) async fn pull(cx: &Ctx) -> SyncResult<bool> {
             };
             if !has_more {
                 s.index.initial_done = true;
+                s.index.rewound = false;
                 if s.index.rebaselined && held.is_none() {
                     finish_rebaseline(s);
                 }
@@ -123,6 +124,7 @@ async fn full_reconcile(cx: &Ctx) -> SyncResult<()> {
     cx.with_mut(|s| {
         s.index.last_seq = cursor;
         s.index.initial_done = true;
+        s.index.rewound = false;
     });
     cx.save().await
 }
@@ -474,7 +476,7 @@ fn set_synced(cx: &Ctx, key: &str, r: &Remote, obs: LocalObs) {
 async fn apply_tombstone(cx: &Ctx, it: &Item) -> SyncResult<bool> {
     let key = &it.key;
     let r = &it.r;
-    let (initial_done, f) = cx.with(|s| (s.index.initial_done, s.index.files.get(key).cloned()));
+    let (initial_done, rewound, f) = cx.with(|s| (s.index.initial_done, s.index.rewound, s.index.files.get(key).cloned()));
     cx.log(
         LogLevel::Debug,
         format!(
@@ -484,10 +486,12 @@ async fn apply_tombstone(cx: &Ctx, it: &Item) -> SyncResult<bool> {
         ),
     );
     let Some(f) = f else { return Ok(false) };
-    // Первичная загрузка не удаляет локальные файлы. Но файл с известной серверной
-    // ревизией уже синхронизирован (например, скачан прерванной первой загрузкой) —
-    // к нему tombstone применяется как обычно.
-    if !initial_done && f.base_rev == 0 {
+    // Первичная загрузка не удаляет файлы, лежавшие в папке до подключения. Файл,
+    // который уже бывал синхронизирован (скачан прерванной первой загрузкой, отправлен
+    // отсюда; после сброса баз от этого остаётся base_plain), защищать не от чего —
+    // кроме случая откатившегося сервера.
+    let synced_before = f.base_rev > 0 || f.base_plain.is_some();
+    if !initial_done && (rewound || !synced_before) {
         return Ok(false);
     }
     if f.base_rev >= r.rev || f.server_path.is_some() {

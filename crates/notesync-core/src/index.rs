@@ -163,6 +163,9 @@ pub struct Index {
     pub rebaselined: bool,
     /// Пути, увиденные в дельте с момента сброса баз.
     pub rebaseline_seen: std::collections::BTreeSet<String>,
+    /// Сервер откатился (восстановлен из бэкапа): до конца полной сверки его
+    /// tombstone'ы не применяются вовсе — они могут быть старше наших версий.
+    pub rewound: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
