@@ -2,7 +2,8 @@
 //! без случайных сбоев, затем успокоение и проверка инвариантов (ни одна правка не
 //! потеряна, все клиенты совпадают с сервером) и ожидаемого исхода.
 
-use selfsync_core::engine::Event;
+use selfsync_core::engine::{Event, Notice};
+use selfsync_core::path::NameRules;
 use selfsync_sim::{PASSWORD, SimConfig, World, tokens_in};
 
 fn quiet(clients: usize) -> SimConfig {
@@ -19,7 +20,9 @@ fn quiet(clients: usize) -> SimConfig {
 
 /// Успокоение и оба инварианта.
 fn finish(w: &mut World) {
-    w.settle().unwrap();
+    if let Err(e) = w.settle() {
+        panic!("{e}\n{}", w.dump_trace());
+    }
     w.check_no_loss().unwrap();
     w.check_converged().unwrap();
 }
@@ -543,4 +546,200 @@ fn interrupted_commit_phase_is_completed() {
     finish(&mut w);
     assert!(String::from_utf8_lossy(w.clients[1].fs.read_file("a.md").unwrap()).contains(&ta));
     assert!(conflict_copies(&w).is_empty(), "{:?}", conflict_copies(&w));
+}
+
+// Имена, которые ФС устройства не может хранить (`?` в имени с Linux на Android).
+
+fn name_notices(w: &World, c: usize) -> (Vec<String>, Vec<String>) {
+    let mut unsupported = Vec::new();
+    let mut errors = Vec::new();
+    for n in &w.clients[c].notices {
+        match n {
+            Notice::UnsupportedName { path } => unsupported.push(path.clone()),
+            Notice::Error { message, .. } => errors.push(message.clone()),
+            _ => {}
+        }
+    }
+    (unsupported, errors)
+}
+
+#[test]
+fn unsupported_name_does_not_block_other_files() {
+    let mut cfg = quiet(2);
+    cfg.name_rules = vec![NameRules::Any, NameRules::Fat];
+    let mut w = World::new(cfg);
+    // Заметка с `?` меньше и в очереди pull стоит раньше остальных.
+    let tq = w.ledger.fresh(0);
+    w.user_write(0, "Мы живём ли?.md", format!("q {tq}\n").into_bytes());
+    let ta = base_note(&mut w, 0, "Добро пожаловать.md");
+    let tb = base_note(&mut w, 0, "Что?/внутри.md");
+    w.sync(0);
+    w.sync(1);
+    w.sync(1);
+
+    let fs1 = &w.clients[1].fs;
+    assert!(
+        String::from_utf8_lossy(fs1.read_file("Добро пожаловать.md").unwrap()).contains(&ta),
+        "остальные файлы дошли"
+    );
+    assert!(fs1.read_file("Мы живём ли?.md").is_none());
+    assert!(fs1.get("Что?").is_none());
+    let (unsupported, errors) = name_notices(&w, 1);
+    assert_eq!(
+        unsupported,
+        vec!["Что?".to_owned(), "Мы живём ли?.md".to_owned()],
+        "по одному уведомлению на недопустимое имя, даже после повторных циклов"
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // Телефон по-прежнему отправляет своё.
+    let tc = base_note(&mut w, 1, "с телефона.md");
+    w.sync(1);
+    w.sync(0);
+    assert!(
+        String::from_utf8_lossy(w.clients[0].fs.read_file("с телефона.md").unwrap()).contains(&tc)
+    );
+
+    // На ПК имя исправили — файл приходит.
+    assert!(w.user_rename(0, "Мы живём ли?.md", "Мы живём ли.md"));
+    assert!(w.user_rename(0, "Что?", "Что"));
+    w.sync(0);
+    w.sync(1);
+    let fs1 = &w.clients[1].fs;
+    assert!(String::from_utf8_lossy(fs1.read_file("Мы живём ли.md").unwrap()).contains(&tq));
+    assert!(String::from_utf8_lossy(fs1.read_file("Что/внутри.md").unwrap()).contains(&tb));
+    finish(&mut w);
+}
+
+#[test]
+fn rename_to_unsupported_name_keeps_local_edits() {
+    let mut cfg = quiet(2);
+    cfg.name_rules = vec![NameRules::Any, NameRules::Fat];
+    let mut w = World::new(cfg);
+    shared_note(&mut w, "a.md");
+    let t1 = edit_line(&mut w, 1, "a.md", 2);
+    assert!(w.user_rename(0, "a.md", "a?.md"));
+    w.sync(0);
+    w.sync(1);
+    finish(&mut w);
+    // Правка телефона не потеряна (finish проверил), и файл на сервере есть под
+    // именем, доступным телефону.
+    let server = w.server_files();
+    assert!(
+        server
+            .iter()
+            .any(|(p, d)| !p.contains('?') && String::from_utf8_lossy(d).contains(&t1)),
+        "{:?}",
+        server.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(name_notices(&w, 1).0, vec!["a?.md".to_owned()]);
+}
+
+#[test]
+fn local_write_failure_does_not_block_other_files() {
+    // Ядро о запрете не знает (правила `Any`), а ФС пишет с ошибкой: файл
+    // откладывается, остальные применяются, ошибка показывается один раз.
+    let mut w = World::new(quiet(2));
+    w.clients[1].fs.name_rules = NameRules::Fat;
+    let tq = w.ledger.fresh(0);
+    w.user_write(0, "q?.md", format!("q {tq}\n").into_bytes());
+    let ta = base_note(&mut w, 0, "after.md");
+    w.sync(0);
+    w.sync(1);
+    w.sync(1);
+    w.sync(1);
+    assert!(String::from_utf8_lossy(w.clients[1].fs.read_file("after.md").unwrap()).contains(&ta));
+    let (unsupported, errors) = name_notices(&w, 1);
+    assert!(unsupported.is_empty());
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].contains("q?.md"), "{errors:?}");
+
+    // Запрет сняли (например, исправили ФС) — отложенная запись применяется.
+    w.clients[1].fs.name_rules = NameRules::Any;
+    w.sync(1);
+    assert!(w.clients[1].fs.read_file("q?.md").is_some());
+    finish(&mut w);
+}
+
+#[test]
+fn non_portable_name_warns_once_on_upload() {
+    let mut w = World::new(quiet(1));
+    w.user_write(0, "why?.md", b"x\n".to_vec());
+    w.user_write(0, "CON.md", b"y\n".to_vec());
+    w.sync(0);
+    w.user_write(0, "why?.md", b"x2\n".to_vec());
+    w.sync(0);
+    let warned: Vec<String> = w.clients[0]
+        .notices
+        .iter()
+        .filter_map(|n| match n {
+            Notice::NonPortableName { path } => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(warned, vec!["CON.md".to_owned(), "why?.md".to_owned()]);
+    finish(&mut w);
+}
+
+// Одно и то же переименование на двух устройствах: ревизии нового пути
+// начинаются заново, и rev 1 нового пути — не база того, кто переименовал вторым.
+
+#[test]
+fn same_rename_on_both_sides_keeps_both_edits() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    // c1 правит и переименовывает, сервер видит обе операции.
+    let t1 = edit_line(&mut w, 1, "a.md", 1);
+    w.sync(1);
+    assert!(w.user_rename(1, "a.md", "b.md"));
+    w.sync(1);
+    // c0 ещё не видел правку: то же переименование и своя правка.
+    assert!(w.user_rename(0, "a.md", "b.md"));
+    let t0 = edit_line(&mut w, 0, "b.md", 3);
+    w.sync(0);
+    finish(&mut w);
+    let all: String = w
+        .server_files()
+        .values()
+        .map(|d| String::from_utf8_lossy(d).into_owned())
+        .collect();
+    assert!(all.contains(&t0), "правка c0 на месте: {all}");
+    assert!(all.contains(&t1), "правка c1 не вытеснена: {all}");
+}
+
+// Файл с тем же путём лежал локально (ещё не в индексе) и пропал между stat и
+// чтением: запись сервера не должна считаться применённой.
+
+#[test]
+fn local_file_vanishing_mid_pull_does_not_drop_server_file() {
+    let mut w = World::new(quiet(2));
+    w.sync(0);
+    let t = base_note(&mut w, 1, "n.md");
+    w.sync(1);
+    w.deliver(0, Event::SyncNow);
+    // Скан уже прошёл: файл, появившийся теперь, в индекс не попал.
+    while let Some(label) = w.pump_one(0) {
+        if label.starts_with("HTTP GET /v1/changes") && label.ends_with("limit=1000") {
+            break;
+        }
+    }
+    let now = w.client_now(0);
+    w.clients[0]
+        .fs
+        .user_write("n.md", b"local draft\n".to_vec(), now);
+    while let Some(label) = w.pump_one(0) {
+        if label == "Stat" {
+            break;
+        }
+    }
+    // Пользователь удалил файл, пока ядро сверяло его с серверным.
+    w.clients[0].fs.user_delete("n.md");
+    w.drain(0);
+    w.sync(0);
+    let got = w.clients[0].fs.read_file("n.md").cloned();
+    assert!(
+        got.is_some_and(|d| String::from_utf8_lossy(&d).contains(&t)),
+        "серверный файл пришёл"
+    );
+    finish(&mut w);
 }

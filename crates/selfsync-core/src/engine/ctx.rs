@@ -231,6 +231,27 @@ impl Ctx {
         self.hub.emit(Action::Notify { notice });
     }
 
+    /// Путь, которого ФС устройства не может хранить (`cfg.name_rules`): сообщает
+    /// о нём один раз за сессию и возвращает `true`. Сообщается часть пути до
+    /// недопустимого сегмента — одна на папку, а не на каждый файл в ней.
+    pub fn unsupported_name(&self, key: &str) -> bool {
+        let Some(bad) = self.with(|s| {
+            let rules = s.cfg.name_rules;
+            VaultPath::parse(key).ok().and_then(|p| rules.rejects(&p))
+        }) else {
+            return false;
+        };
+        let bad = bad.as_str().to_owned();
+        if self.with_mut(|s| s.notified.insert(format!("name:{bad}"))) {
+            self.log(
+                LogLevel::Warn,
+                format!("{bad}: имя недопустимо на этом устройстве — файл здесь не создаётся"),
+            );
+            self.notify(Notice::UnsupportedName { path: bad });
+        }
+        true
+    }
+
     pub async fn http(
         &self,
         req: HttpRequest,

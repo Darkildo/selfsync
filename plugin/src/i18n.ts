@@ -32,6 +32,8 @@ const en = {
   "notice.rejected": "Server refused {path} ({code})",
   "notice.caseCollision": "{path} differs from {existing} only by letter case — renamed on the server",
   "notice.tooLarge": "{path} is too large to sync ({size})",
+  "notice.unsupportedName": "{path}: this name is not allowed on this device — not synced here. Rename it on the device where it was created (for example, remove ? : * \" < > |)",
+  "notice.nonPortableName": "{path}: this name is not allowed on Windows and Android — the file will not appear there. Rename it (for example, remove ? : * \" < > |)",
   "notice.wrongPassword": "Wrong encryption password — sync stopped",
   "notice.needPassword": "This vault is encrypted: enter the password to sync",
   "notice.encryptionStarted": "Encryption is being enabled on another device — sync paused",
@@ -173,6 +175,8 @@ const ru: Record<Key, string> = {
   "notice.rejected": "Сервер не принял {path} ({code})",
   "notice.caseCollision": "{path} отличается от {existing} только регистром — переименован на сервере",
   "notice.tooLarge": "{path} слишком большой для синхронизации ({size})",
+  "notice.unsupportedName": "{path}: такое имя недопустимо на этом устройстве — сюда не синхронизируется. Переименуйте его на устройстве, где он создан (например, уберите ? : * \" < > |)",
+  "notice.nonPortableName": "{path}: такое имя недопустимо на Windows и Android — туда файл не попадёт. Переименуйте (например, уберите ? : * \" < > |)",
   "notice.wrongPassword": "Неверный пароль шифрования — синхронизация остановлена",
   "notice.needPassword": "Vault зашифрован: введите пароль, чтобы синхронизировать",
   "notice.encryptionStarted": "На другом устройстве включают шифрование — синхронизация на паузе",
@@ -324,6 +328,10 @@ export function noticeText(n: Notice): string | null {
       return t("notice.caseCollision", { path: n.path, existing: n.existing });
     case "tooLarge":
       return t("notice.tooLarge", { path: n.path, size: formatBytes(n.size) });
+    case "unsupportedName":
+      return t("notice.unsupportedName", { path: n.path });
+    case "nonPortableName":
+      return t("notice.nonPortableName", { path: n.path });
     case "wrongPassword":
       return t("notice.wrongPassword");
     case "needPassword":

@@ -300,6 +300,67 @@ impl fmt::Display for VaultPath {
     }
 }
 
+/// Символы, допустимые протоколом, но запрещённые в именах на Windows и в
+/// хранилище Android (FAT-совместимые имена). Остальное, что запрещает Windows
+/// (управляющие символы, `\`, пробел или точка в конце), отсекает сам протокол.
+pub const NON_PORTABLE_CHARS: [char; 7] = ['"', '*', ':', '<', '>', '?', '|'];
+
+/// Какие имена может хранить ФС устройства сверх общих правил протокола. Сервер
+/// их не навязывает: в зашифрованном vault'е он имён не видит, а пользователям
+/// только Linux и macOS `?` в имени не мешает.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NameRules {
+    /// Любые имена (Linux, macOS, iOS).
+    #[default]
+    Any,
+    /// Хранилище Android: без [`NON_PORTABLE_CHARS`].
+    Fat,
+    /// Windows: как [`NameRules::Fat`], плюс имена устройств (`CON`, `nul.md`, `COM1`…).
+    Windows,
+}
+
+impl NameRules {
+    /// Можно ли создать сегмент с таким именем.
+    pub fn allows(self, seg: &str) -> bool {
+        match self {
+            NameRules::Any => true,
+            NameRules::Fat => !seg.contains(NON_PORTABLE_CHARS),
+            NameRules::Windows => !seg.contains(NON_PORTABLE_CHARS) && !windows_device(seg),
+        }
+    }
+
+    /// Путь до первого недопустимого сегмента включительно (`Что?/a.md` → `Что?`),
+    /// если такой есть: по нему видно, что именно не создать.
+    pub fn rejects(self, p: &VaultPath) -> Option<VaultPath> {
+        let mut end = 0;
+        for seg in p.segments() {
+            end += seg.len();
+            if !self.allows(seg) {
+                return Some(VaultPath(p.0[..end].to_owned()));
+            }
+            end += 1;
+        }
+        None
+    }
+}
+
+/// Имя устройства Windows: `CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`
+/// (и с надстрочными цифрами) — с любым расширением и без учёта регистра.
+fn windows_device(seg: &str) -> bool {
+    let stem = seg.split('.').next().unwrap_or(seg).trim_end_matches(' ');
+    let upper = stem.to_ascii_uppercase();
+    if matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        return true;
+    }
+    let (Some(head), Some(last)) = (upper.get(..3), upper.chars().nth(3)) else {
+        return false;
+    };
+    matches!(head, "COM" | "LPT")
+        && upper.chars().count() == 4
+        && (last.is_ascii_digit() || matches!(last, '¹' | '²' | '³'))
+}
+
 /// `name.ext` → (`name`, `ext`); у `.hidden` и `noext` расширения нет.
 fn split_ext(name: &str) -> (&str, &str) {
     match name.rfind('.') {
@@ -312,7 +373,7 @@ fn sanitize_label(label: &str) -> String {
     let cleaned: String = label
         .nfc()
         .map(|c| {
-            if c == '/' || c == '\\' || c.is_control() || ":*?\"<>|".contains(c) {
+            if c == '/' || c == '\\' || c.is_control() || NON_PORTABLE_CHARS.contains(&c) {
                 '-'
             } else {
                 c
@@ -564,5 +625,52 @@ mod tests {
             encrypted: true,
         };
         assert!(validate_proto_path(&enc_bad).is_err());
+    }
+
+    #[test]
+    fn name_rules_by_platform() {
+        let p = |s: &str| VaultPath::parse(s).unwrap();
+        let rejects = |r: NameRules, s: &str| r.rejects(&p(s)).map(|v| v.0);
+
+        // Протокол это пропускает — значит, такое имя может прийти с Linux.
+        assert!(VaultPath::parse("Мы живём ли?.md").is_ok());
+        assert_eq!(rejects(NameRules::Any, "Мы живём ли?.md"), None);
+        assert_eq!(
+            rejects(NameRules::Fat, "Мы живём ли?.md").as_deref(),
+            Some("Мы живём ли?.md")
+        );
+        for s in ["a:b.md", "a*b", "a\"b", "a<b", "a>b", "a|b"] {
+            assert!(rejects(NameRules::Fat, s).is_some(), "{s}");
+            assert!(rejects(NameRules::Windows, s).is_some(), "{s}");
+        }
+        // Недопустим первый сегмент — его и показываем, а не каждый файл в папке.
+        assert_eq!(
+            rejects(NameRules::Fat, "Что?/где/a.md").as_deref(),
+            Some("Что?")
+        );
+        assert_eq!(
+            rejects(NameRules::Fat, "ok/Что?/a.md").as_deref(),
+            Some("ok/Что?")
+        );
+        assert_eq!(rejects(NameRules::Fat, "ok/fine.md"), None);
+
+        // Имена устройств запрещает только Windows.
+        for s in [
+            "CON", "con.md", "Nul.txt", "AUX", "prn.md", "COM1.md", "lpt9", "COM¹.md", "dir/NUL",
+        ] {
+            assert!(rejects(NameRules::Windows, s).is_some(), "{s}");
+            assert_eq!(rejects(NameRules::Fat, s), None, "{s}");
+        }
+        for s in [
+            "CONSOLE.md",
+            "COM10.md",
+            "COMA",
+            "icon.md",
+            "nul_.md",
+            "LPT",
+            "Конспект.md",
+        ] {
+            assert_eq!(rejects(NameRules::Windows, s), None, "{s}");
+        }
     }
 }

@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use selfsync_core::engine::{Expect, FileMeta, IoResult};
+use selfsync_core::path::{NameRules, VaultPath};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Node {
@@ -15,6 +16,8 @@ pub enum Node {
 #[derive(Debug, Clone, Default)]
 pub struct FakeFs {
     pub case_insensitive: bool,
+    /// Какие имена ФС может хранить (Android, Windows): остальные не создаются.
+    pub name_rules: NameRules,
     nodes: BTreeMap<String, (String, Node)>,
     /// Корзина: всё, что убрано движком (Trash), с версиями.
     pub trash: Vec<(String, Vec<u8>)>,
@@ -28,10 +31,22 @@ fn parent(p: &str) -> Option<&str> {
 }
 
 impl FakeFs {
-    pub fn new(case_insensitive: bool) -> FakeFs {
+    pub fn new(case_insensitive: bool, name_rules: NameRules) -> FakeFs {
         FakeFs {
             case_insensitive,
+            name_rules,
             ..Default::default()
+        }
+    }
+
+    /// Такое имя здесь не создать (`?` на Android и т.п.).
+    pub fn forbids(&self, p: &str) -> bool {
+        VaultPath::normalize(p).is_ok_and(|v| self.name_rules.rejects(&v).is_some())
+    }
+
+    fn bad_name() -> IoResult {
+        IoResult::Failed {
+            message: "invalid file name".into(),
         }
     }
 
@@ -248,6 +263,9 @@ impl FakeFs {
     }
 
     pub fn write(&mut self, p: &str, data: Vec<u8>, expect: &Expect, now: i64) -> IoResult {
+        if self.forbids(p) {
+            return Self::bad_name();
+        }
         if !self.check(p, expect) {
             return IoResult::Precondition;
         }
@@ -287,6 +305,9 @@ impl FakeFs {
     }
 
     pub fn commit_temp(&mut self, t: &str, p: &str, expect: &Expect, now: i64) -> IoResult {
+        if self.forbids(p) {
+            return Self::bad_name();
+        }
         if !self.check(p, expect) {
             return IoResult::Precondition;
         }
@@ -320,6 +341,9 @@ impl FakeFs {
         if self.get(from).is_none() {
             return IoResult::NotFound;
         }
+        if self.forbids(to) {
+            return Self::bad_name();
+        }
         if self.rename(from, to, now) {
             self.stat(to)
         } else {
@@ -328,6 +352,9 @@ impl FakeFs {
     }
 
     pub fn mkdir(&mut self, p: &str) -> IoResult {
+        if self.forbids(p) {
+            return Self::bad_name();
+        }
         if matches!(self.get(p), Some(Node::File { .. })) {
             return IoResult::Failed {
                 message: "file exists".into(),

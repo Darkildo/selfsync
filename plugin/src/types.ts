@@ -6,6 +6,8 @@ export interface EngineConfig {
   excludes?: string[];
   hardExcludes?: string[];
   caseInsensitive?: boolean;
+  /** Какие имена может хранить ФС устройства: записи с другими не скачиваются. */
+  nameRules?: NameRules;
   debounceMs?: number;
   pollActiveMs?: number;
   pollIdleMaxMs?: number;
@@ -15,6 +17,8 @@ export interface EngineConfig {
   baseCacheBytes?: number;
   tzOffsetMin?: number;
 }
+
+export type NameRules = "any" | "fat" | "windows";
 
 export interface FileMeta {
   path: string;
@@ -58,6 +62,8 @@ export type Notice =
   | { kind: "rejected"; path: string; code: string }
   | { kind: "caseCollision"; path: string; existing: string }
   | { kind: "tooLarge"; path: string; size: number }
+  | { kind: "unsupportedName"; path: string }
+  | { kind: "nonPortableName"; path: string }
   | { kind: "wrongPassword" }
   | { kind: "needPassword" }
   | { kind: "encryptionStarted" }

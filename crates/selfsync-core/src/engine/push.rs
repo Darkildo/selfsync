@@ -14,7 +14,7 @@ use super::types::{LogLevel, Notice};
 use crate::hash::Hash;
 use crate::index::{FileState, LocalObs};
 use crate::merge::mergeable;
-use crate::path::VaultPath;
+use crate::path::{NameRules, VaultPath};
 
 /// Максимум операций в одном запросе.
 const OPS_BATCH: usize = 200;
@@ -112,6 +112,7 @@ pub(crate) async fn push(cx: &Ctx) -> SyncResult<bool> {
         if items.is_empty() {
             break;
         }
+        warn_non_portable(cx, &items);
         did = true;
         let total = u32::try_from(items.len()).unwrap_or(u32::MAX);
         cx.set_status(|st| {
@@ -148,6 +149,36 @@ pub(crate) async fn push(cx: &Ctx) -> SyncResult<bool> {
         }
     }
     Ok(did)
+}
+
+/// Новое имя, которого не создать на Windows и Android: файл уйдёт на сервер, но
+/// туда не попадёт. Предупредить один раз за сессию.
+fn warn_non_portable(cx: &Ctx, items: &[Item]) {
+    for it in items {
+        let key = match it {
+            Item::Mkdir { key } | Item::Rename { key, .. } => key,
+            Item::Put { key }
+                if cx.with(|s| s.index.files.get(key).is_some_and(|f| f.base_rev == 0)) =>
+            {
+                key
+            }
+            Item::Put { .. } | Item::Delete { .. } => continue,
+        };
+        let Some(bad) = VaultPath::parse(key)
+            .ok()
+            .and_then(|p| NameRules::Windows.rejects(&p))
+        else {
+            continue;
+        };
+        let bad = bad.as_str().to_owned();
+        if cx.with_mut(|s| s.notified.insert(format!("portable:{bad}"))) {
+            cx.log(
+                LogLevel::Warn,
+                format!("{bad}: имя не создать на Windows и Android — туда файл не попадёт"),
+            );
+            cx.notify(Notice::NonPortableName { path: bad });
+        }
+    }
 }
 
 async fn prepare_put(
@@ -390,7 +421,10 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
                 if let Some(f) = s.index.files.get_mut(&key) {
                     f.server_path = None;
                     // Содержимое источника неизвестно (его меняли): сверить через Put.
-                    f.base_rev = if !f.folder && f.base_blob.is_none() {
+                    // `noop` — файл уже переименовало другое устройство, и ревизии
+                    // нового пути начинаются заново: его rev 1 — не наша база (там
+                    // могут быть чужие правки), Put по ней молча вытеснил бы их.
+                    f.base_rev = if !f.folder && (f.base_blob.is_none() || a.noop) {
                         0
                     } else {
                         a.rev

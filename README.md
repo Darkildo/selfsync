@@ -168,6 +168,10 @@ On mobile Obsidian can only read a file whole (`readBinary`), so very large atta
 
 Argon2id for the encryption password uses 64 MiB of memory. Modern phones handle it in seconds, but unlocking once per device takes noticeable time.
 
+### File names across platforms
+
+Linux and macOS allow `? : * " < > |` in file names, Windows and Android storage do not (Windows also reserves `CON`, `NUL`, `COM1` and the like). Such a file syncs between the devices that can hold it; on the others it is skipped with a notice, and the rest of the vault keeps syncing. The device that creates such a name also shows a warning. Rename the file to get it everywhere.
+
 ## Command-line client
 
 `selfsync-cli` syncs a plain folder with the same core: keep a copy of the vault on a server or NAS, or sync a machine without Obsidian.

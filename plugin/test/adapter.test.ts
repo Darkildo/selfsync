@@ -106,3 +106,32 @@ test("адаптер: конфликт сохраняет обе версии, �
   await phone.stop();
   await desk.stop();
 });
+
+test("адаптер: имя с `?` с Linux не останавливает синк на Android", async () => {
+  const stub = new StubAdapter(true);
+  const phone = await TestClient.create(server, {
+    name: "phone",
+    token: server.token("names", "phone"),
+    backend: () => new AdapterBackend(stub, PLUGIN_DIR, "system"),
+    config: { caseInsensitive: true, nameRules: "fat", hardExcludes: [".obsidian/"] },
+  });
+  const desk = await TestClient.create(server, { name: "desk", token: server.token("names", "desk") });
+  await fsp.writeFile(join(desk.vault, "Мы живём ли?.md"), "q\n");
+  await fsp.writeFile(join(desk.vault, "Добро пожаловать.md"), "hello, world\n");
+  await desk.sync();
+  await phone.sync();
+  assert.deepEqual(
+    stub.names().filter((n) => !n.startsWith(".obsidian")),
+    ["Добро пожаловать.md"],
+  );
+  assert.deepEqual(
+    phone.notices.filter((n) => n.kind === "unsupportedName"),
+    [{ kind: "unsupportedName", path: "Мы живём ли?.md" }],
+  );
+  assert.deepEqual(
+    desk.notices.filter((n) => n.kind === "nonPortableName"),
+    [{ kind: "nonPortableName", path: "Мы живём ли?.md" }],
+  );
+  await phone.stop();
+  await desk.stop();
+});

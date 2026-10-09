@@ -208,7 +208,9 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
         // Переименован на другом устройстве: правка следует за файлом.
         if let Some(to) = &r.renamed_to {
             let to = to.as_str().to_owned();
+            // Новое имя здесь не создать — тогда правка возвращает файл под старым.
             let free = to != key
+                && !cx.unsupported_name(&to)
                 && cx.with(|s| !s.index.files.contains_key(&to))
                 && cx.stat(&to).await?.is_none();
             if free && rename_local(cx, key, &to).await? {

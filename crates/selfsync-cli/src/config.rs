@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use selfsync_core::engine::EngineConfig;
+use selfsync_core::path::NameRules;
 use serde::{Deserialize, Serialize};
 
 /// Служебный каталог внутри папки (исключается из синка всегда).
@@ -72,6 +73,11 @@ impl Config {
             excludes: self.excludes.clone(),
             hard_excludes: vec![format!("{STATE_DIR}/"), format!("{TRASH_DIR}/")],
             case_insensitive: cfg!(any(target_os = "macos", target_os = "windows")),
+            name_rules: if cfg!(target_os = "windows") {
+                NameRules::Windows
+            } else {
+                NameRules::Any
+            },
             debounce_ms: self.debounce_ms,
             poll_active_ms: self.poll_active_ms,
             poll_idle_max_ms: self.poll_idle_max_ms,

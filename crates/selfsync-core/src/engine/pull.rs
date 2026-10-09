@@ -125,9 +125,15 @@ async fn full_reconcile(cx: &Ctx) -> SyncResult<()> {
             break;
         }
     }
+    cx.with_mut(|s| s.hold_seq = None);
     apply_batch(cx, entries, true).await?;
     cx.with_mut(|s| {
-        s.index.last_seq = cursor;
+        // Как в обычном pull: курсор не уходит за отложенную запись (иначе она
+        // потеряется — сверка следующего цикла пойдёт уже с курсора).
+        s.index.last_seq = match s.hold_seq.take() {
+            Some(h) => cursor.min(h.saturating_sub(1)),
+            None => cursor,
+        };
         s.index.initial_done = true;
         s.index.rewound = false;
     });
@@ -201,11 +207,15 @@ async fn apply_batch(cx: &Ctx, entries: Vec<pb::Entry>, full_listing: bool) -> S
     });
     let mut changed = false;
     for it in dirs {
-        changed |= apply_folder(cx, &it).await?;
+        if !unsupported_name(cx, &it) {
+            changed |= guard(cx, &it, apply_folder(cx, &it).await)?;
+        }
         done += 1;
     }
     for it in renames.into_iter().chain(files) {
-        changed |= guard(cx, &it, apply_file(cx, &it).await)?;
+        if !unsupported_name(cx, &it) {
+            changed |= guard(cx, &it, apply_file(cx, &it).await)?;
+        }
         done += 1;
         if done.is_multiple_of(16) {
             cx.set_status(|st| st.done = done);
@@ -223,22 +233,47 @@ async fn apply_batch(cx: &Ctx, entries: Vec<pb::Entry>, full_listing: bool) -> S
 }
 
 /// Ошибка одного файла не должна останавливать остальные (кроме сетевых и
-/// блокирующих — с ними цикл прерывается и повторится целиком).
+/// блокирующих — с ними цикл прерывается и повторится целиком). Запись
+/// откладывается и повторится в следующем цикле.
 fn guard(cx: &Ctx, it: &Item, r: SyncResult<bool>) -> SyncResult<bool> {
     let key = &it.key;
-    match r {
-        Ok(c) => Ok(c),
-        Err(e @ (SyncError::BlobGone | SyncError::Corrupt(_))) => {
-            hold(cx, it.e.seq);
-            cx.log(LogLevel::Error, format!("{key}: {e}"));
-            cx.notify(Notice::Error {
-                code: "download_failed".into(),
-                message: format!("{key}: {e}"),
-            });
-            Ok(false)
-        }
-        Err(e) => Err(e),
+    let e = match r {
+        Ok(c) => return Ok(c),
+        Err(e) => e,
+    };
+    let code = match e {
+        SyncError::BlobGone | SyncError::Corrupt(_) => "download_failed",
+        // Локальная запись не удалась (имя, которое ФС не принимает, нет места…).
+        SyncError::Io(_) => "write_failed",
+        _ => return Err(e),
+    };
+    hold(cx, it.e.seq);
+    cx.log(LogLevel::Error, format!("{key}: {e}"));
+    // Повтор каждый цикл: показать один раз за сессию.
+    if cx.with_mut(|s| s.notified.insert(format!("{code}:{key}"))) {
+        cx.notify(Notice::Error {
+            code: code.into(),
+            message: format!("{key}: {e}"),
+        });
     }
+    Ok(false)
+}
+
+/// Имя, которого ФС устройства не может хранить (`?` на Android и т.п.): запись
+/// пропускается, и курсор уходит дальше — она останется на сервере и на других
+/// устройствах. Повторять её каждый цикл бессмысленно, а останавливать на ней
+/// приём остальных нельзя.
+fn unsupported_name(cx: &Ctx, it: &Item) -> bool {
+    // Такой файл здесь уже есть — значит, ФС его всё-таки держит.
+    if cx.with(|s| {
+        s.index
+            .files
+            .get(&it.key)
+            .is_some_and(|f| f.local.is_some())
+    }) {
+        return false;
+    }
+    cx.unsupported_name(&it.key)
 }
 
 async fn apply_folder(cx: &Ctx, it: &Item) -> SyncResult<bool> {
@@ -447,6 +482,12 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
                 }
                 // Файл есть, но не в индексе (первичная загрузка): сначала сравнить.
                 let Some(content) = read_local(cx, key, &meta).await? else {
+                    // Файл пропал между stat и чтением: перечитать запись
+                    // в следующем цикле, иначе курсор уйдёт дальше и она потеряется.
+                    hold(cx, it.e.seq);
+                    cx.with_mut(|s| {
+                        s.dirty.insert(key.clone());
+                    });
                     return Ok(false);
                 };
                 cx.with_mut(|s| {

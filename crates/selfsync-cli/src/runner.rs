@@ -162,6 +162,12 @@ fn notify_user(n: &Notice) {
             tracing::warn!("{path} отличался от серверного: локальная версия сохранена как {copy}")
         }
         Notice::Error { message, .. } => tracing::error!("{message}"),
+        Notice::UnsupportedName { path } => {
+            tracing::warn!("{path}: имя недопустимо на этой системе — сюда не синхронизируется")
+        }
+        Notice::NonPortableName { path } => {
+            tracing::warn!("{path}: имя недопустимо на Windows и Android — туда файл не попадёт")
+        }
         Notice::MigrationProgress { done, total } => {
             tracing::info!("шифрование vault'а: {done}/{total}")
         }

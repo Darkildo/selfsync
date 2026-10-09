@@ -22,7 +22,7 @@ use selfsync_core::crypto::{self, KdfParams, VaultKeys};
 use selfsync_core::engine::{
     Action, Engine, EngineConfig, Event, HttpRequest, IoResult, LogLevel, Notice, SyncState,
 };
-use selfsync_core::path::{VaultPath, canonical_decode};
+use selfsync_core::path::{NameRules, VaultPath, canonical_decode};
 use selfsync_server::{AppState, Config, Mode, router};
 use tower::ServiceExt;
 
@@ -78,6 +78,10 @@ pub struct SimConfig {
     pub skew_ms: Vec<i64>,
     /// Регистронезависимая ФС у клиента.
     pub case_insensitive: Vec<bool>,
+    /// Какие имена ФС клиента может хранить (Android, Windows).
+    pub name_rules: Vec<NameRules>,
+    /// Вероятность сбоя локальной записи (запись, перенос, корзина, mkdir).
+    pub io_fault_rate: f64,
     /// Включить шифрование на этом шаге (клиент 0).
     pub encrypt_at: Option<usize>,
     /// Пропускать события Obsidian (правки «снаружи», ловятся полным сканом).
@@ -95,6 +99,8 @@ impl SimConfig {
             user_rate: 0.15,
             skew_ms: Vec::new(),
             case_insensitive: Vec::new(),
+            name_rules: Vec::new(),
+            io_fault_rate: 0.0,
             encrypt_at: None,
             skip_event_rate: 0.05,
         }
@@ -113,6 +119,17 @@ impl SimConfig {
             .map(|_| if r.chance(0.2) { 86_400_000 } else { 0 })
             .collect();
         c.case_insensitive = (0..clients).map(|_| r.chance(0.3)).collect();
+        c.name_rules = (0..clients)
+            .map(|_| {
+                [
+                    NameRules::Any,
+                    NameRules::Any,
+                    NameRules::Fat,
+                    NameRules::Windows,
+                ][r.idx(4)]
+            })
+            .collect();
+        c.io_fault_rate = [0.0, 0.0, 0.01, 0.05][r.idx(4)];
         c.encrypt_at = if r.chance(0.15) {
             Some(r.idx(c.steps))
         } else {
@@ -255,10 +272,12 @@ impl World {
                 .1
         };
         let ci = self.cfg.case_insensitive.get(i).copied().unwrap_or(false);
+        let rules = self.cfg.name_rules.get(i).copied().unwrap_or_default();
         let mut cfg = EngineConfig {
             device_name: name.clone(),
             excludes: vec![".trash/".into()],
             case_insensitive: ci,
+            name_rules: rules,
             use_wait: false,
             kdf: KdfParams::TEST,
             ..Default::default()
@@ -269,7 +288,7 @@ impl World {
             token,
             cfg,
             engine: None,
-            fs: FakeFs::new(ci),
+            fs: FakeFs::new(ci, rules),
             saved_index: None,
             remembered_key: None,
             pending: VecDeque::new(),
@@ -395,6 +414,19 @@ impl World {
     fn exec(&mut self, c: usize, a: Action) -> Option<(u64, IoResult)> {
         let now = self.client_now(c);
         let id = a.id()?;
+        if let Some(target) = local_write_target(&a)
+            && self.faults_enabled
+            && self.cfg.io_fault_rate > 0.0
+            && self.rng.chance(self.cfg.io_fault_rate)
+        {
+            self.log(format!("c{c} IO FAULT {target}"));
+            return Some((
+                id,
+                IoResult::Failed {
+                    message: "EIO".into(),
+                },
+            ));
+        }
         let res = match a {
             Action::Http { req, .. } => {
                 let line = format!("{} {}", req.method, req.path);
@@ -716,7 +748,7 @@ impl World {
     /// Случайная операция пользователя на клиенте.
     pub fn random_user_op(&mut self, c: usize) {
         let files = self.files_of(c);
-        const NAMES: [&str; 8] = [
+        const NAMES: [&str; 10] = [
             "a.md",
             "b.md",
             "notes/c.md",
@@ -725,10 +757,16 @@ impl World {
             "img/p.png",
             "deep/x/y.md",
             "e.md",
+            // Не создать на Android и Windows.
+            "why?.md",
+            "what?/z.md",
         ];
         let roll = self.rng.idx(100);
         if files.is_empty() || roll < 15 {
             let name = NAMES[self.rng.idx(NAMES.len())];
+            if self.clients[c].fs.forbids(name) {
+                return;
+            }
             if self.clients[c].fs.get(name).is_some() {
                 self.user_edit(c, name);
                 return;
@@ -766,9 +804,13 @@ impl World {
                     let base = vp
                         .as_ref()
                         .map_or("x.md".to_owned(), |p| p.file_name().to_owned());
-                    let dir = ["", "moved/", "notes/"][self.rng.idx(3)];
-                    format!("{dir}r{}-{base}", self.rng.below(5))
+                    let dir = ["", "moved/", "notes/", "q?/"][self.rng.idx(4)];
+                    let mark = if self.rng.chance(0.15) { "?" } else { "" };
+                    format!("{dir}r{}{mark}-{base}", self.rng.below(5))
                 };
+                if self.clients[c].fs.forbids(&to) {
+                    return;
+                }
                 self.user_rename(c, &f, &to);
             }
             _ => {
@@ -1064,6 +1106,12 @@ impl World {
         };
         for (i, cl) in self.clients.iter().enumerate() {
             let local = norm(cl.fs.snapshot());
+            // Чего ФС клиента не может хранить, того у него и не должно быть.
+            let server: BTreeMap<String, Vec<u8>> = server
+                .iter()
+                .filter(|(p, _)| !cl.fs.forbids(p))
+                .map(|(p, d)| (p.clone(), d.clone()))
+                .collect();
             if local != server {
                 let only_local: Vec<_> =
                     local.keys().filter(|k| !server.contains_key(*k)).collect();
@@ -1084,6 +1132,18 @@ impl World {
 
     pub fn dump_trace(&self) -> String {
         self.trace.iter().cloned().collect::<Vec<_>>().join("\n")
+    }
+}
+
+/// Путь действия, меняющего vault (для сбоев локальной записи).
+fn local_write_target(a: &Action) -> Option<String> {
+    match a {
+        Action::Write { path, .. }
+        | Action::CommitTemp { path, .. }
+        | Action::Trash { path, .. }
+        | Action::Mkdir { path, .. } => Some(path.clone()),
+        Action::Rename { from, to, .. } => Some(format!("{from} -> {to}")),
+        _ => None,
     }
 }
 

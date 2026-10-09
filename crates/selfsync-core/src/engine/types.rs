@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::KdfParams;
+use crate::path::NameRules;
 
 /// Настройки клиента.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,6 +20,8 @@ pub struct EngineConfig {
     pub hard_excludes: Vec<String>,
     /// Регистронезависимая ФС (Windows, macOS, iOS, Android-хранилище).
     pub case_insensitive: bool,
+    /// Какие имена может хранить ФС устройства: записи с другими не скачиваются.
+    pub name_rules: NameRules,
     /// Пауза после последней правки перед синком, мс.
     pub debounce_ms: u64,
     /// Интервал опроса при активности, мс.
@@ -51,6 +54,7 @@ impl Default for EngineConfig {
             excludes: Vec::new(),
             hard_excludes: Vec::new(),
             case_insensitive: false,
+            name_rules: NameRules::Any,
             debounce_ms: 2500,
             poll_active_ms: 15_000,
             poll_idle_max_ms: 300_000,
@@ -469,6 +473,16 @@ pub enum Notice {
     TooLarge {
         path: String,
         size: u64,
+    },
+    /// Имя недопустимо на этом устройстве (`?` на Android и т.п.): файл или папка
+    /// с другого устройства не скачаны. `path` — до недопустимого сегмента.
+    UnsupportedName {
+        path: String,
+    },
+    /// Имя отправленного отсюда файла не создать на Windows и Android: туда он не
+    /// попадёт. `path` — до недопустимого сегмента.
+    NonPortableName {
+        path: String,
     },
     /// Неверный пароль: синк остановлен.
     WrongPassword,

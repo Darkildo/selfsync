@@ -12,7 +12,7 @@ import type { FileBackend } from "./io/backend.ts";
 import { ObsidianHttp } from "./io/http.ts";
 import { NodeBackend } from "./io/node.ts";
 import { DEFAULT_SETTINGS, SelfsyncSettingTab, type Settings } from "./settings.ts";
-import type { EngineConfig, LogLevel, Notice as EngineNotice, SyncStatus } from "./types.ts";
+import type { EngineConfig, LogLevel, NameRules, Notice as EngineNotice, SyncStatus } from "./types.ts";
 import { ConflictsModal } from "./ui/conflicts.ts";
 import { ConnectModal } from "./ui/connect.ts";
 import { DeletedModal } from "./ui/deleted.ts";
@@ -120,6 +120,7 @@ export default class SelfsyncPlugin extends Plugin {
       // Каталог плагина (индекс, кэш, токен) и локальная корзина Obsidian — никогда.
       hardExcludes: [`${this.pluginDir}/`, ".trash/"],
       caseInsensitive: !Platform.isLinux,
+      nameRules: nameRules(),
       debounceMs: Math.round(this.settings.debounceSec * 1000),
       pollActiveMs: Math.round(this.settings.pollActiveSec * 1000),
       pollIdleMaxMs: Math.round(this.settings.pollIdleMaxMin * 60_000),
@@ -275,6 +276,13 @@ export default class SelfsyncPlugin extends Plugin {
     void navigator.clipboard?.writeText(this.log.join("\n"));
     new Notice(text, 15000);
   }
+}
+
+/** Каких имён не создать на этой платформе (`?` и т.п. — на Windows и в хранилище Android). */
+function nameRules(): NameRules {
+  if (Platform.isWin) return "windows";
+  if (Platform.isAndroidApp) return "fat";
+  return "any";
 }
 
 function defaultDeviceName(): string {
