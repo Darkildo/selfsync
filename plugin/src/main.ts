@@ -25,6 +25,7 @@ const LOG_LINES = 500;
 export default class SelfsyncPlugin extends Plugin {
   override settings: Settings = { ...DEFAULT_SETTINGS };
   runner: Runner | undefined;
+  private settingTab: SelfsyncSettingTab | undefined;
   private statusEl!: HTMLElement;
   private status: SyncStatus | null = null;
   private log: string[] = [];
@@ -66,7 +67,8 @@ export default class SelfsyncPlugin extends Plugin {
       }),
     );
     this.addCommand({ id: "log", name: t("cmd.log"), callback: () => this.showLog() });
-    this.addSettingTab(new SelfsyncSettingTab(this.app, this));
+    this.settingTab = new SelfsyncSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
 
     // Ссылка со страницы /join/{code} сервера.
     this.registerObsidianProtocolHandler("selfsync-connect", (p) => {
@@ -168,8 +170,12 @@ export default class SelfsyncPlugin extends Plugin {
     const index = await exec.loadIndex();
     this.runner = new Runner(this.engineConfig(), index, exec, {
       status: (s) => {
+        const wasEncrypted = this.status?.encrypted;
         this.status = s;
         this.renderStatus();
+        // Шифрование включили (здесь или на другом устройстве) — иначе в открытых
+        // настройках так и висела бы кнопка «Включить».
+        if (wasEncrypted !== undefined && wasEncrypted !== s.encrypted) this.settingTab?.refresh();
       },
       notice: (n) => this.showNotice(n),
       log: (level, m) => this.addLog(level, m),

@@ -12,7 +12,7 @@ const en = {
   "status.blocked": "Sync stopped",
   "status.notConfigured": "Not connected",
   "status.pending": "{n} pending",
-  "status.conflicts": "{n} conflicts",
+  "status.conflicts": "conflicts: {n}",
   "status.tooltip": "selfsync: {state}. Click to sync now.",
   "status.lastSync": "last sync {time}",
 

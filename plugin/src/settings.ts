@@ -48,6 +48,11 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     super(app, plugin);
   }
 
+  /** Перерисовать, если вкладка сейчас открыта. */
+  refresh(): void {
+    if (this.containerEl.isConnected) this.display();
+  }
+
   override display(): void {
     const { containerEl } = this;
     const s = this.plugin.settings;

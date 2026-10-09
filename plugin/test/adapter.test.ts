@@ -22,8 +22,7 @@ after(async () => {
 
 const PLUGIN_DIR = ".obsidian/plugins/selfsync";
 
-async function mobileAndDesktop(vault: string): Promise<[TestClient, StubAdapter, TestClient]> {
-  const stub = new StubAdapter(true);
+async function mobileAndDesktop(vault: string, stub = new StubAdapter(true)): Promise<[TestClient, StubAdapter, TestClient]> {
   const phone = await TestClient.create(server, {
     name: "phone",
     token: server.token(vault, "phone"),
@@ -67,6 +66,23 @@ test("адаптер: большой файл скачивается частя�
   assert.equal(got.length, size);
   assert.ok(Buffer.from(got).equals(Buffer.from(data)));
   assert.equal(stub.rewrites, 0, "временный файл не переписывался целиком");
+  await phone.stop();
+  await desk.stop();
+});
+
+test("адаптер: Obsidian до 1.12.3 (без appendBinary) докачивает перезаписью", async () => {
+  const old = new StubAdapter(true);
+  Object.defineProperty(old, "appendBinary", { value: undefined });
+  const [phone, stub, desk] = await mobileAndDesktop("adapter-old", old);
+  const size = 9 * 1024 * 1024;
+  const data = new Uint8Array(size);
+  for (let i = 0; i < size; i++) data[i] = (i * 2654435761) >>> 24;
+  await desk.write("media/old.bin", data);
+  await desk.sync();
+  await phone.sync();
+  const got = new Uint8Array(await stub.readBinary("media/old.bin"));
+  assert.ok(Buffer.from(got).equals(Buffer.from(data)));
+  assert.ok(stub.rewrites > 0, "без appendBinary временный файл переписывается");
   await phone.stop();
   await desk.stop();
 });

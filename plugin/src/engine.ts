@@ -53,6 +53,8 @@ export class Runner {
       actions = this.engine.handle(this.clock(), ev) as Action[];
     } catch (e) {
       this.hooks.log?.("error", `ядро отклонило событие ${ev.type}: ${String(e)}`);
+      // Иначе ждущий ответа на команду (окно интерфейса) повис бы навсегда.
+      if (ev.type === "command") this.reply(ev.req, { type: "error", code: "rejected", message: String(e) });
       return;
     }
     for (const a of actions) this.run(a);
@@ -83,12 +85,9 @@ export class Runner {
       case "forgetKey":
         this.hooks.forgetKey?.();
         return;
-      case "uiResult": {
-        const w = this.waiting.get(a.req);
-        this.waiting.delete(a.req);
-        w?.(a.result);
+      case "uiResult":
+        this.reply(a.req, a.result);
         return;
-      }
       default: {
         this.inflight++;
         void this.exec.perform(a).then((result) => {
@@ -114,6 +113,12 @@ export class Runner {
   }
 
   /** Команда интерфейса; ответ — UiResult. */
+  private reply(req: number, result: UiResult): void {
+    const w = this.waiting.get(req);
+    this.waiting.delete(req);
+    w?.(result);
+  }
+
   command(command: UiCommand): Promise<UiResult> {
     const req = this.nextReq++;
     return new Promise((resolve) => {

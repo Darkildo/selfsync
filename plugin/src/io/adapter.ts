@@ -16,7 +16,8 @@ export interface AdapterLike {
   list(path: string): Promise<{ files: string[]; folders: string[] }>;
   readBinary(path: string): Promise<ArrayBuffer>;
   writeBinary(path: string, data: ArrayBuffer): Promise<void>;
-  appendBinary(path: string, data: ArrayBuffer): Promise<void>;
+  /** Есть только с Obsidian 1.12.3; без него докачка переписывает временный файл целиком. */
+  appendBinary?(path: string, data: ArrayBuffer): Promise<void>;
   mkdir(path: string): Promise<void>;
   rmdir(path: string, recursive: boolean): Promise<void>;
   remove(path: string): Promise<void>;
@@ -133,12 +134,13 @@ export class AdapterBackend implements FileBackend {
       return;
     }
     const size = (await this.a.stat(f))?.size ?? 0;
-    if (size === offset) {
+    if (size === offset && this.a.appendBinary) {
       await this.a.appendBinary(f, buffer(data));
       return;
     }
     if (size < offset) throw new Error(`разрыв во временном файле ${name}: ${size} < ${offset}`);
-    // Хвост после смещения (повтор части после сбоя) — переписать.
+    // Хвост после смещения (повтор части после сбоя) или старый Obsidian без
+    // appendBinary — переписать файл целиком.
     const head = new Uint8Array(await this.a.readBinary(f)).subarray(0, offset);
     const all = new Uint8Array(offset + data.length);
     all.set(head, 0);
