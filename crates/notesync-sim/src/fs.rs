@@ -280,6 +280,9 @@ impl FakeFs {
     }
 
     pub fn trash(&mut self, p: &str, expect: &Expect) -> IoResult {
+        if self.get(p).is_none() {
+            return IoResult::NotFound;
+        }
         if !self.check(p, expect) {
             return IoResult::Precondition;
         }

@@ -138,6 +138,8 @@ pub enum Action {
     /// Удалить временный файл → `Done`.
     DeleteTemp { id: u64, temp: String },
     /// Убрать файл в корзину Obsidian (не стирать) → `Done` / `Precondition` / `NotFound`.
+    /// Файла нет — `NotFound` при любом `expect` (удалять нечего); `Precondition` —
+    /// только если файл есть, но изменился.
     Trash { id: u64, path: String, expect: Expect },
     /// Переименовать → `Stat` / `Precondition` (назначение занято) / `NotFound`.
     Rename { id: u64, from: String, to: String },
