@@ -1043,6 +1043,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "notesync-sim"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "http",
+ "notesync-core",
+ "notesync-proto",
+ "notesync-server",
+ "prost",
+ "tempfile",
+ "tokio",
+ "tower",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
