@@ -465,8 +465,10 @@ async fn apply_tombstone(cx: &Ctx, it: &Item) -> SyncResult<bool> {
         ),
     );
     let Some(f) = f else { return Ok(false) };
-    // Первичная загрузка не удаляет локальные файлы.
-    if !initial_done {
+    // Первичная загрузка не удаляет локальные файлы. Но файл с известной серверной
+    // ревизией уже синхронизирован (например, скачан прерванной первой загрузкой) —
+    // к нему tombstone применяется как обычно.
+    if !initial_done && f.base_rev == 0 {
         return Ok(false);
     }
     if f.base_rev >= r.rev || f.server_path.is_some() {
