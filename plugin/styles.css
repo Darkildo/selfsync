@@ -8,3 +8,10 @@
   text-decoration: line-through;
   opacity: 0.6;
 }
+
+/* Строка-контейнер со списком устройств: устройства идут друг под другом. */
+.setting-item.selfsync-devices {
+  display: block;
+  padding-top: 0;
+  padding-bottom: 0;
+}
