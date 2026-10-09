@@ -10,7 +10,11 @@
 
 x-notesync: &notesync
   image: ghcr.io/notesync/notesync:latest
-  build: .
+  # Контекст — корень репозитория (собирается весь workspace); исключения —
+  # в deploy/Dockerfile.dockerignore (BuildKit берёт файл рядом с Dockerfile).
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
   read_only: true
   tmpfs:
     - /tmp
