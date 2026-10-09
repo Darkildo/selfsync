@@ -909,6 +909,9 @@ pub fn purge_plaintext(c: &mut Connection, max_seq: u64) -> rusqlite::Result<Pur
     let purged = tx.execute("DELETE FROM files WHERE substr(path, 1, 1) = x'00'", [])?;
     tx.execute("DELETE FROM revisions WHERE substr(path, 1, 1) = x'00'", [])?;
     bump_purged_seq(&tx, u(max_purged))?;
+    // Маркер снимается в той же транзакции: иначе между purge и снятием маркера
+    // сервер ещё принимал бы открытые записи, и они остались бы навсегда.
+    clear_migration(&tx)?;
     tx.commit()?;
     Ok(PurgeOutcome::Done {
         purged: purged as u64,
@@ -1268,6 +1271,23 @@ mod tests {
         assert_eq!(e.len(), 1);
         assert!(e[0].path.as_ref().unwrap().encrypted);
         assert_eq!(vault_state(&c).unwrap().purged_seq, 1);
+    }
+
+    /// После purge маркера нет: открытая запись в окне «purge прошёл, маркер ещё
+    /// стоит» осталась бы на сервере навсегда.
+    #[test]
+    fn purge_clears_marker_and_closes_plaintext() {
+        let mut c = db();
+        run(&mut c, vec![put("a.md", 0, 1)]);
+        assert_eq!(put_vault_key(&mut c, b"rec", 0).unwrap(), Some(1));
+        set_migration(&c, &pb::MigrationMarker::default()).unwrap();
+        assert!(matches!(purge_plaintext(&mut c, 1).unwrap(), PurgeOutcome::Done { .. }));
+        assert!(meta_blob(&c, "migration").unwrap().is_none());
+        match &run(&mut c, vec![put("b.md", 0, 2)])[0] {
+            R::Rejected(r) => assert_eq!(r.code, "plaintext_in_encrypted_vault"),
+            o => panic!("{o:?}"),
+        }
+        assert_eq!(purge_plaintext(&mut c, 1).unwrap(), PurgeOutcome::NoMigration);
     }
 
     #[test]
