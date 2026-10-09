@@ -323,6 +323,7 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
                     if !unchanged {
                         cx.save().await?;
                         resolve_content(cx, key, r.clone()).await?;
+                        hold_unsettled(cx, key, it);
                     }
                     return Ok(true);
                 }
@@ -357,6 +358,7 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
         Some(f) if f.delete_pending() => {
             // Удалено здесь, изменено там: правка побеждает удаление.
             resolve_delete(cx, key, r.clone()).await?;
+            hold_unsettled(cx, key, it);
             Ok(true)
         }
         Some(f) if f.clean() => match download_to(cx, key, &hash, r.size, Expect::Stat { size: f.local.map_or(0, |l| l.size), mtime: f.local.map_or(0, |l| l.mtime) }).await? {
@@ -379,6 +381,7 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
         Some(f) if f.local.is_some() => {
             // Локальные правки (или неизвестная база): разрешение расхождения.
             resolve_content(cx, key, r.clone()).await?;
+            hold_unsettled(cx, key, it);
             Ok(true)
         }
         Some(_) | None => {
@@ -413,6 +416,7 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
                     return Ok(false);
                 }
                 resolve_content(cx, key, r.clone()).await?;
+                hold_unsettled(cx, key, it);
                 return Ok(true);
             }
             match download_to(cx, key, &hash, r.size, Expect::Absent).await? {
@@ -434,6 +438,16 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
                 }
             }
         }
+    }
+}
+
+/// Разрешение расхождения не довелось до конца (файл меняли посреди записи и т.п.),
+/// и серверная ревизия не принята в индекс: перечитать запись в следующем цикле.
+/// Запись, ушедшая с этого пути (переименование вслед за сервером, копия), считается
+/// разобранной.
+fn hold_unsettled(cx: &Ctx, key: &str, it: &Item) {
+    if cx.with(|s| s.index.files.get(key).is_some_and(|f| f.base_rev != it.r.rev)) {
+        hold(cx, it.e.seq);
     }
 }
 
