@@ -154,7 +154,7 @@ impl State {
     }
 
     /// Локальный путь → путь на сервере.
-    pub fn to_server(&self, p: &VaultPath) -> SyncResult<pb::Path> {
+    pub fn encode_path(&self, p: &VaultPath) -> SyncResult<pb::Path> {
         match self.content_keys()? {
             Some(k) => Ok(k.encrypt_path(p)),
             None => Ok(p.to_proto()),
@@ -163,7 +163,7 @@ impl State {
 
     /// Путь с сервера → локальный. Записи «не того» режима (остатки миграции)
     /// пропускаются.
-    pub fn from_server(&self, p: &pb::Path) -> Option<VaultPath> {
+    pub fn decode_path(&self, p: &pb::Path) -> Option<VaultPath> {
         if p.encrypted != self.encrypted() {
             return None;
         }

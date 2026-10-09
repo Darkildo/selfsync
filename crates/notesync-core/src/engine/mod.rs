@@ -281,11 +281,10 @@ impl Engine {
                 false
             }
         };
-        if changed {
-            if let Some(at) = wake {
+        if changed
+            && let Some(at) = wake {
                 self.hub.emit(Action::Wake { at });
             }
-        }
     }
 
     /// Текущий статус.
@@ -388,11 +387,10 @@ async fn sync_task(cx: Ctx) {
             }
         }
     });
-    if let Err(e) = &res {
-        if !matches!(e, SyncError::Network(_) | SyncError::Paused(_)) {
+    if let Err(e) = &res
+        && !matches!(e, SyncError::Network(_) | SyncError::Paused(_)) {
             cx.log(LogLevel::Warn, format!("синк: {e}"));
         }
-    }
     if let Some(n) = notice {
         cx.notify(n);
     }

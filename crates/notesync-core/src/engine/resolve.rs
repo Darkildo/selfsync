@@ -32,7 +32,7 @@ impl Remote {
         let renamed_to = e
             .renamed_to
             .as_ref()
-            .and_then(|p| cx.with(|s| s.from_server(p)));
+            .and_then(|p| cx.with(|s| s.decode_path(p)));
         Remote {
             rev: e.rev,
             hash: Hash::from_slice(&e.hash),
@@ -170,9 +170,9 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
     let Some(meta) = cx.stat(key).await? else {
         // Локальный файл так и не попал на сервер и уже удалён: серверная версия —
         // чужой файл, который здесь ещё не видели, а не повод для удаления.
-        if !f.maybe_on_server() && !r.deleted && !r.folder {
-            if let Some(h) = r.hash {
-                if let Some((obs, cache)) = download_to(cx, key, &h, r.size, Expect::Absent).await? {
+        if !f.maybe_on_server() && !r.deleted && !r.folder
+            && let Some(h) = r.hash
+                && let Some((obs, cache)) = download_to(cx, key, &h, r.size, Expect::Absent).await? {
                     cx.with_mut(|s| {
                         if let Some(f) = s.index.files.get_mut(key) {
                             f.folder = false;
@@ -185,8 +185,6 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
                     }
                     return Ok(());
                 }
-            }
-        }
         cx.with_mut(|s| {
             if let Some(f) = s.index.files.get_mut(key) {
                 f.local = None;
@@ -303,9 +301,9 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
             // Мы ничего не меняли: просто серверная версия.
             return write_remote(cx, key, &r, sb.clone(), local_obs).await;
         }
-        if let (Some(lb), true) = (&local_bytes, f.base_plain.is_some()) {
-            if mergeable(lb) && mergeable(sb) {
-                if let Some(base) = base_content(cx, &f).await {
+        if let (Some(lb), true) = (&local_bytes, f.base_plain.is_some())
+            && mergeable(lb) && mergeable(sb)
+                && let Some(base) = base_content(cx, &f).await {
                     match merge_bytes(&base, lb, sb) {
                         Some(Merge::Clean(m)) => {
                             let m = m.into_bytes();
@@ -317,8 +315,6 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
                         Some(Merge::Conflict) | None => {}
                     }
                 }
-            }
-        }
     }
     // Обе версии целиком.
     let initial = f.base_rev == 0 && f.base_plain.is_none();
@@ -556,7 +552,7 @@ pub(crate) async fn resolve_delete(cx: &Ctx, key: &str, r: Remote) -> SyncResult
             // Место занято файлом с другим регистром имени: вернуть серверную версию
             // сюда нельзя, она переименовывается на сервере.
             if let Some(existing) = case_twin(cx, key).await? {
-                let server = cx.with(|s| s.to_server(&VaultPath::parse(key).map_err(|e| SyncError::Io(e.to_string()))?))?;
+                let server = cx.with(|s| s.encode_path(&VaultPath::parse(key).map_err(|e| SyncError::Io(e.to_string()))?))?;
                 if split_case(cx, key, server, r.rev, &existing).await? {
                     cx.with_mut(|s| {
                         if s.index.files.get(key).is_some_and(|f| f.local.is_none()) {
@@ -652,7 +648,7 @@ pub(crate) async fn split_case(cx: &Ctx, key: &str, server: pb::Path, rev: u64, 
         format!("case {} {date}", cx.with(|s| s.cfg.device_name.clone()))
     };
     let copy = unique_copy(cx, key, &label).await?;
-    let to = cx.with(|s| s.to_server(&VaultPath::parse(&copy).map_err(|e| SyncError::Io(e.to_string()))?))?;
+    let to = cx.with(|s| s.encode_path(&VaultPath::parse(&copy).map_err(|e| SyncError::Io(e.to_string()))?))?;
     let resp = super::api::ops(
         cx,
         vec![pb::Op {

@@ -196,11 +196,11 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
         let _ = folder;
         let op = match &item {
             Item::Mkdir { key } => {
-                let path = cx.with(|s| s.to_server(&vp(key)?))?;
+                let path = cx.with(|s| s.encode_path(&vp(key)?))?;
                 pb::op::Kind::Mkdir(pb::Mkdir { path: Some(path) })
             }
             Item::Rename { key, from } => {
-                let (to_p, from_p) = cx.with(|s| Ok::<_, SyncError>((s.to_server(&vp(key)?)?, s.to_server(&vp(from)?)?)))?;
+                let (to_p, from_p) = cx.with(|s| Ok::<_, SyncError>((s.encode_path(&vp(key)?)?, s.encode_path(&vp(from)?)?)))?;
                 pb::op::Kind::Rename(pb::Rename {
                     from: Some(from_p),
                     to: Some(to_p),
@@ -209,14 +209,14 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
             }
             Item::Delete { key } => {
                 let target = cx.with(|s| s.index.files.get(key).and_then(|f| f.server_path.clone())).unwrap_or_else(|| key.clone());
-                let path = cx.with(|s| s.to_server(&vp(&target)?))?;
+                let path = cx.with(|s| s.encode_path(&vp(&target)?))?;
                 pb::op::Kind::Delete(pb::Delete { path: Some(path), base_rev })
             }
             Item::Put { key } => {
                 let Some((b, obs, cache, mtime)) = prepare_put(cx, key, keys.as_ref()).await? else {
                     continue;
                 };
-                let path = cx.with(|s| s.to_server(&vp(key)?))?;
+                let path = cx.with(|s| s.encode_path(&vp(key)?))?;
                 let op = pb::op::Kind::Put(pb::Put {
                     path: Some(path),
                     base_rev,
@@ -280,11 +280,10 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
         for p in &prepared {
             match &p.item {
                 Item::Put { key } => {
-                    if let (Some(f), Some((obs, _))) = (s.index.files.get_mut(key), &p.sent) {
-                        if f.base_rev == 0 {
+                    if let (Some(f), Some((obs, _))) = (s.index.files.get_mut(key), &p.sent)
+                        && f.base_rev == 0 {
                             f.pending_put = Some(obs.plain);
                         }
-                    }
                 }
                 Item::Mkdir { key } => {
                     if let Some(f) = s.index.files.get_mut(key) {
@@ -299,7 +298,7 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
     let ops: Vec<pb::Op> = prepared.iter().map(|p| p.op.clone()).collect();
     let resp = api::ops(cx, ops).await?;
     if let Some(vs) = &resp.vault {
-        cx.with_mut(|s| s.server_state = Some(vs.clone()));
+        cx.with_mut(|s| s.server_state = Some(*vs));
     }
     if resp.results.len() != prepared.len() {
         return Err(SyncError::Protocol("число результатов не совпадает с числом операций".into()));

@@ -49,7 +49,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             let mut items = Vec::new();
             for it in d.items {
                 let Some(e) = it.entry else { continue };
-                let Some(path) = e.path.as_ref().and_then(|p| cx.with(|s| s.from_server(p))) else { continue };
+                let Some(path) = e.path.as_ref().and_then(|p| cx.with(|s| s.decode_path(p))) else { continue };
                 items.push(DeletedView {
                     path: path.as_str().to_owned(),
                     deleted_at: e.deleted_at,
@@ -65,7 +65,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             let mut ops = Vec::new();
             for it in d.items {
                 let (Some(e), Some(last)) = (it.entry, it.last_live) else { continue };
-                let Some(path) = e.path.as_ref().and_then(|p| cx.with(|s| s.from_server(p))) else { continue };
+                let Some(path) = e.path.as_ref().and_then(|p| cx.with(|s| s.decode_path(p))) else { continue };
                 if !paths.iter().any(|p| p == path.as_str()) {
                     continue;
                 }
@@ -99,7 +99,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             let mut sp = Vec::new();
             for p in paths {
                 let v = vp(&p)?;
-                sp.push(cx.with(|s| s.to_server(&v))?);
+                sp.push(cx.with(|s| s.encode_path(&v))?);
             }
             let r = api::purge_deleted(cx, sp).await?;
             Ok(UiResult::Restored {
@@ -108,7 +108,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
         }
         UiCommand::History { path } => {
             let v = vp(&path)?;
-            let sp = cx.with(|s| s.to_server(&v))?;
+            let sp = cx.with(|s| s.encode_path(&v))?;
             let h = api::history(cx, &sp).await?;
             let revisions = h
                 .revisions
@@ -123,7 +123,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                     renamed_from: r
                         .renamed_from
                         .as_ref()
-                        .and_then(|p| cx.with(|s| s.from_server(p)))
+                        .and_then(|p| cx.with(|s| s.decode_path(p)))
                         .map(|p| p.as_str().to_owned()),
                 })
                 .collect();
@@ -202,7 +202,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
 async fn restore_revision(cx: &Ctx, path: &str, rev: u64) -> SyncResult<UiResult> {
     let v = vp(path)?;
     let key = v.as_str().to_owned();
-    let sp = cx.with(|s| s.to_server(&v))?;
+    let sp = cx.with(|s| s.encode_path(&v))?;
     let h = api::history(cx, &sp).await?;
     let Some(r) = h.revisions.into_iter().find(|r| r.rev == rev && !r.deleted) else {
         return Err(SyncError::Http {

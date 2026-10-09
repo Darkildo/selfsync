@@ -40,7 +40,7 @@ fn main() -> std::process::ExitCode {
                         }
                     }
                     let d = done.fetch_add(1, Ordering::SeqCst) + 1;
-                    if d % 500 == 0 {
+                    if d.is_multiple_of(500) {
                         eprintln!("{d}/{runs} прогонов, {:.0?}", t0.elapsed());
                     }
                 }

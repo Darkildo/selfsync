@@ -55,17 +55,16 @@ fn pause(cx: &Ctx, reason: &str, notice: Option<Notice>) -> SyncError {
         s.paused = Some(reason.to_owned());
         first
     });
-    if first {
-        if let Some(n) = notice {
+    if first
+        && let Some(n) = notice {
             cx.notify(n);
         }
-    }
     SyncError::Paused(reason.to_owned())
 }
 
 /// Сверяет режим vault'а на сервере с локальным.
 pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()> {
-    cx.with_mut(|s| s.server_state = Some(vs.clone()));
+    cx.with_mut(|s| s.server_state = Some(*vs));
     let (mode, has_keys, migrating_here) = cx.with(|s| (s.index.mode, s.keys.is_some(), s.index.migration.is_some()));
     match mode {
         VaultMode::Plain => {
@@ -535,13 +534,11 @@ async fn reencrypt_big(cx: &Ctx, key: &str, h: &Hash, size: u64, keys: &crate::c
 /// Открытый текст записи: из локального файла, если он совпадает, иначе с сервера.
 async fn plaintext_of(cx: &Ctx, key: &str, h: &Hash) -> SyncResult<Option<Vec<u8>>> {
     let local = cx.with(|s| s.index.files.get(key).filter(|f| f.clean() && f.base_blob == Some(*h)).and_then(|f| f.base_plain));
-    if let Some(plain_hash) = local {
-        if let Some(d) = cx.read(key, 0, None).await? {
-            if Hash::of(&d) == plain_hash {
+    if let Some(plain_hash) = local
+        && let Some(d) = cx.read(key, 0, None).await?
+            && Hash::of(&d) == plain_hash {
                 return Ok(Some(d));
             }
-        }
-    }
     match fetch_small(cx, h).await {
         Ok(d) => Ok(Some(d)),
         Err(SyncError::BlobGone) => Ok(None),

@@ -270,11 +270,10 @@ fn detect_renames(cx: &Ctx, delta: &ScanDelta) {
         }
         let mut new_by_hash: BTreeMap<Hash, Vec<String>> = BTreeMap::new();
         for n in &delta.new {
-            if let Some(f) = s.index.files.get(n) {
-                if let (Some(l), false, 0) = (&f.local, f.folder, f.base_rev) {
+            if let Some(f) = s.index.files.get(n)
+                && let (Some(l), false, 0) = (&f.local, f.folder, f.base_rev) {
                     new_by_hash.entry(l.plain).or_default().push(n.clone());
                 }
-            }
         }
         for (h, gone) in gone_by_hash {
             let Some(news) = new_by_hash.get(&h) else { continue };
@@ -350,11 +349,10 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
                     // Регистронезависимая ФС: по этому имени нашёлся файл с другим
                     // регистром — запрошенного пути нет, наблюдаем настоящее имя.
                     let actual = if m.path.is_empty() { raw.clone() } else { m.path.clone() };
-                    if actual != raw {
-                        if let Ok(vp) = VaultPath::normalize(&raw) {
+                    if actual != raw
+                        && let Ok(vp) = VaultPath::normalize(&raw) {
                             mark_gone(cx, vp.as_str(), &mut delta);
                         }
-                    }
                     if let Some(p) = canonical(cx, &actual, m.dir).await? {
                         observe(cx, &p, &m, &mut delta).await?;
                     }

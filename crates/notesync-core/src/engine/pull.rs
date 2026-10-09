@@ -40,7 +40,7 @@ pub(crate) async fn pull(cx: &Ctx) -> SyncResult<bool> {
         let mut first = true;
         loop {
             let resp = api::changes(cx, cursor, PAGE).await?;
-            let vs = resp.vault.clone().unwrap_or_default();
+            let vs = resp.vault.unwrap_or_default();
             if first {
                 first = false;
                 check_state(cx, &vs).await?;
@@ -135,7 +135,7 @@ fn decode(cx: &Ctx, entries: Vec<pb::Entry>) -> Vec<Item> {
     // Последняя запись пути побеждает (путь мог измениться между страницами).
     for e in entries.into_iter().rev() {
         let Some(p) = e.path.as_ref() else { continue };
-        let Some(vp) = cx.with(|s| s.from_server(p)) else {
+        let Some(vp) = cx.with(|s| s.decode_path(p)) else {
             if p.encrypted == cx.with(|s| s.encrypted()) {
                 cx.log(LogLevel::Warn, format!("запись seq {} не расшифровывается — пропущена", e.seq));
             }
@@ -193,7 +193,7 @@ async fn apply_batch(cx: &Ctx, entries: Vec<pb::Entry>, full_listing: bool) -> S
     for it in renames.into_iter().chain(files) {
         changed |= guard(cx, &it, apply_file(cx, &it).await)?;
         done += 1;
-        if done % 16 == 0 {
+        if done.is_multiple_of(16) {
             cx.set_status(|st| st.done = done);
         }
         cx.save().await?;
@@ -283,22 +283,21 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
             "pull file {key} rev {} seq {} from {:?}; index {:?}",
             r.rev,
             it.e.seq,
-            it.e.renamed_from.as_ref().and_then(|p| cx.with(|s| s.from_server(p))),
+            it.e.renamed_from.as_ref().and_then(|p| cx.with(|s| s.decode_path(p))),
             f.as_ref().map(|f| (f.base_rev, f.local.is_some(), f.clean(), f.server_path.clone()))
         ),
     );
     // Своё эхо или уже применено.
-    if let Some(f) = &f {
-        if r.hash.is_some() && f.base_rev == r.rev && f.base_blob == r.hash {
+    if let Some(f) = &f
+        && r.hash.is_some() && f.base_rev == r.rev && f.base_blob == r.hash {
             return Ok(false);
         }
-    }
     // Переименование файла, который у нас есть: локальный rename без скачивания.
-    if let Some(from) = it.e.renamed_from.as_ref().and_then(|p| cx.with(|s| s.from_server(p))) {
+    if let Some(from) = it.e.renamed_from.as_ref().and_then(|p| cx.with(|s| s.decode_path(p))) {
         let from = from.as_str().to_owned();
         let src = cx.with(|s| s.index.files.get(&from).cloned());
-        if let Some(src) = src {
-            if from != *key && f.is_none() && src.local.is_some() && src.server_path.is_none() && r.hash.is_some() {
+        if let Some(src) = src
+            && from != *key && f.is_none() && src.local.is_some() && src.server_path.is_none() && r.hash.is_some() {
                 // На регистронезависимой ФС stat нового имени при смене только регистра
                 // находит сам источник — это не занятое место.
                 let free = match cx.stat(key).await? {
@@ -330,7 +329,6 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
                     return Ok(true);
                 }
             }
-        }
     }
     // Регистронезависимая ФС: другой файл с тем же именем без учёта регистра.
     if cx.with(|s| s.cfg.case_insensitive) && f.is_none() {

@@ -88,11 +88,10 @@ impl FileState {
     pub fn content_dirty(&self) -> bool {
         match (&self.local, self.folder) {
             (Some(l), false) => {
-                if let Some((_, h)) = &self.rejected {
-                    if *h == l.plain {
+                if let Some((_, h)) = &self.rejected
+                    && *h == l.plain {
                         return false;
                     }
-                }
                 match (self.base_rev, self.base_plain) {
                     // Новый файл.
                     (0, None) => true,

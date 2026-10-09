@@ -496,12 +496,11 @@ impl World {
 
     /// Доставить таймеры, если подошло время.
     pub fn tick(&mut self, c: usize) {
-        if let Some(at) = self.clients[c].wake {
-            if at <= self.client_now(c) {
+        if let Some(at) = self.clients[c].wake
+            && at <= self.client_now(c) {
                 self.clients[c].wake = None;
                 self.deliver(c, Event::Tick);
             }
-        }
     }
 
     /// Прогнать клиента, пока у него есть действия (без продвижения времени).
@@ -526,14 +525,13 @@ impl World {
             .status
             .as_ref()
             .is_some_and(|s| s.state == SyncState::NeedPassword);
-        if need {
-            if let Some(pw) = self.encrypted_password.clone() {
+        if need
+            && let Some(pw) = self.encrypted_password.clone() {
                 self.deliver(c, Event::Password { password: pw, remember: true });
                 self.drain(c);
                 self.deliver(c, Event::SyncNow);
                 self.drain(c);
             }
-        }
     }
 
     // -------------------------------------------------------------------------
@@ -689,14 +687,13 @@ impl World {
     pub fn step(&mut self) {
         self.step_no += 1;
         self.now += i64::try_from(self.rng.below(400)).unwrap_or(0);
-        if let Some(at) = self.cfg.encrypt_at {
-            if at == self.step_no && self.encrypted_password.is_none() {
+        if let Some(at) = self.cfg.encrypt_at
+            && at == self.step_no && self.encrypted_password.is_none() {
                 self.log("ENABLE ENCRYPTION on c0".into());
                 self.encrypted_password = Some(PASSWORD.to_owned());
                 let remember = self.rng.chance(0.5);
                 self.deliver(0, Event::EnableEncryption { password: PASSWORD.into(), remember });
             }
-        }
         let c = self.rng.idx(self.clients.len());
         let roll = self.rng.next_u64() % 1000;
         if (roll as f64) < self.cfg.kill_rate * 1000.0 {
@@ -732,12 +729,11 @@ impl World {
                 .status
                 .as_ref()
                 .is_some_and(|s| s.state == SyncState::NeedPassword);
-            if need {
-                if let Some(pw) = self.encrypted_password.clone() {
+            if need
+                && let Some(pw) = self.encrypted_password.clone() {
                     let remember = self.rng.chance(0.5);
                     self.deliver(c, Event::Password { password: pw, remember });
                 }
-            }
         }
     }
 
