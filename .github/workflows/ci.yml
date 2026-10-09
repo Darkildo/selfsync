@@ -17,23 +17,30 @@ jobs:
     name: Rust — fmt, clippy, тесты
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Тулчейн и компоненты — из rust-toolchain.toml.
       - run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
       - name: Симуляция (2000 случайных прогонов)
         run: cargo run --release --locked -p selfsync-sim -- --runs 2000 --seed 1
 
-  plugin:
-    name: Плагин — WASM, типы, e2e против сервера
+  versions:
+    name: Версии и манифест
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: node scripts/version.mjs check
+
+  plugin:
+    name: Плагин — WASM, типы, линт Obsidian, e2e против сервера
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 24
           cache: npm
@@ -47,5 +54,6 @@ jobs:
       - working-directory: plugin
         run: |
           npm ci
+          npm run lint
           npm run build
           npm test
