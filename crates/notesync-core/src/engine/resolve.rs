@@ -577,7 +577,9 @@ pub(crate) async fn resolve_delete(cx: &Ctx, key: &str, r: Remote) -> SyncResult
 /// Наше переименование отклонено.
 pub(crate) async fn resolve_rename(cx: &Ctx, key: &str, r: Remote, at_destination: bool) -> SyncResult<()> {
     if at_destination {
-        // На месте назначения другой файл: наш уходит в копию, серверный скачает pull.
+        // На месте назначения другой файл: наш уходит в копию (на сервере его
+        // переименование пойдёт уже в копию), серверный скачивается сразу — pull мог
+        // пройти эту запись раньше.
         let copy = unique_copy(cx, key, &conflict_label(cx, false)).await?;
         if rename_local(cx, key, &copy).await? {
             cx.with_mut(|s| {
@@ -586,6 +588,30 @@ pub(crate) async fn resolve_rename(cx: &Ctx, key: &str, r: Remote, at_destinatio
                 }
             });
             add_conflict(cx, key, &copy, false);
+            cx.save().await?;
+            if let (false, false, Some(h)) = (r.deleted, r.folder, r.hash) {
+                if let Some((obs, cache)) = download_to(cx, key, &h, r.size, Expect::Absent).await? {
+                    cx.with_mut(|s| {
+                        s.index.files.insert(
+                            key.to_owned(),
+                            FileState {
+                                local: Some(obs),
+                                base_rev: r.rev,
+                                base_blob: r.hash,
+                                base_plain: Some(obs.plain),
+                                ..Default::default()
+                            },
+                        );
+                    });
+                    if let Some(c) = cache {
+                        cx.cache_put(obs.plain, c).await;
+                    }
+                } else {
+                    cx.with_mut(|s| {
+                        s.dirty.insert(key.to_owned());
+                    });
+                }
+            }
         }
         return Ok(());
     }
