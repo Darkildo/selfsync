@@ -1,0 +1,118 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/notesync-proto",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.97"
+repository = "https://github.com/notesync/notesync"
+
+[workspace.dependencies]
+notesync-proto = { path = "crates/notesync-proto" }
+notesync-core = { path = "crates/notesync-core" }
+notesync-server = { path = "crates/notesync-server" }
+
+# Протокол
+prost = { version = "0.14", default-features = false, features = ["std", "derive"] }
+prost-build = "0.14"
+protox = "0.10"
+
+# Ядро
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+sha2 = "0.11"
+hmac = "0.13"
+hkdf = "0.13"
+argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
+aes-gcm-siv = { version = "0.12", default-features = false, features = ["alloc", "aes"] }
+aes-siv = { version = "0.8", default-features = false, features = ["alloc"] }
+getrandom = "0.4"
+subtle = "2.6"
+unicode-normalization = "0.1"
+similar = { version = "3", default-features = false, features = ["std"] }
+lz4_flex = { version = "0.14", default-features = false, features = ["safe-encode", "safe-decode", "std"] }
+zeroize = { version = "1", features = ["derive"] }
+thiserror = "2"
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await-macro"] }
+
+# Сервер
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query", "json", "tracing"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "fs", "io-util", "io-std", "signal", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["trace", "limit"] }
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
+bytes = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.35"
+listenfd = "1"
+clap = { version = "4", features = ["derive", "env"] }
+humantime = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+anyhow = "1"
+base64 = "0.23"
+hex = "0.4"
+serde_json = "1"
+toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+qrcode = { version = "0.14", default-features = false }
+sd-notify = "0.5"
+libc = "0.2"
+
+# Тесты и симуляция
+tempfile = "3"
+rand = { version = "0.10", default-features = false, features = ["std"] }
+rand_chacha = "0.10"
+proptest = "1"
+
+# WASM
+wasm-bindgen = "0.2.129"
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+
+# CLI
+notify = "8"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Профиль для WASM: размер важнее скорости, кроме криптографии (ниже).
+[profile.wasm]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+
+[profile.wasm.package.argon2]
+opt-level = 3
+[profile.wasm.package.blake2]
+opt-level = 3
+[profile.wasm.package.aes]
+opt-level = 3
+
+# Тесты с криптографией (Argon2 64 МиБ) в debug невыносимо медленные.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.aes-gcm-siv]
+opt-level = 3
+[profile.dev.package.polyval]
+opt-level = 3

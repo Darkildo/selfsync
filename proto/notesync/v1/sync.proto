@@ -1,0 +1,294 @@
+// Единственный источник схемы протокола notesync v1.
+//
+// Правила эволюции: номера полей не переиспользуются, новые поля только добавляются,
+// неизвестные поля игнорируются обеими сторонами. Несовместимое изменение — это
+// новый пакет notesync.v2 и новый мажор в заголовке X-Notesync-Proto.
+syntax = "proto3";
+package notesync.v1;
+
+// ---------------------------------------------------------------------------
+// Общие типы
+// ---------------------------------------------------------------------------
+
+// Путь в vault'е как последовательность сегментов.
+//
+// encrypted = false: каждый сегмент — UTF-8 в NFC, сервер валидирует строго.
+// encrypted = true: каждый сегмент — шифротекст AES-SIV, сервер проверяет только
+// длину и непустоту. Оба вида путей могут сосуществовать во время миграции.
+message Path {
+  repeated bytes segments = 1;
+  bool encrypted = 2;
+}
+
+// Текущее состояние записи файла на сервере (строка таблицы files).
+message Entry {
+  uint64 seq = 1;
+  Path path = 2;
+  uint64 rev = 3;
+  bytes hash = 4;            // 32 байта sha256 хранимого блоба; пусто у tombstone и папок
+  uint64 size = 5;
+  int64 mtime = 6;           // мс, время правки на клиенте (информативно)
+  bool deleted = 7;
+  bool folder = 8;
+  Path renamed_from = 9;     // задан, если последняя операция — переименование
+  uint32 updated_by = 10;    // id устройства
+  int64 deleted_at = 11;     // мс, серверное время удаления (только у tombstone)
+  Path renamed_to = 12;      // у tombstone источника переименования — куда переехал файл
+}
+
+// Сводка состояния vault'а, приходит вместе с дельтой и из /v1/wait.
+message VaultState {
+  uint64 seq = 1;            // текущая голова лога
+  uint64 key_version = 2;    // 0 — vault не зашифрован (нет записи ключа)
+  bool migration = 3;        // идёт миграция на шифрование
+  uint32 retention_days = 4;
+  // Наибольший seq строки, которую сервер стёр окончательно (sweeper, gc, purge).
+  // Клиент с last_seq < purged_seq мог пропустить tombstone и делает полную сверку.
+  uint64 purged_seq = 5;
+}
+
+message Error {
+  string code = 1;           // машинный код: unauthorized, bad_request, conflict, ...
+  string message = 2;        // для людей; без внутренних деталей сервера
+  uint32 supported_proto = 3;// заполняется при 426
+}
+
+// ---------------------------------------------------------------------------
+// Дельта
+// ---------------------------------------------------------------------------
+
+message ChangesResponse {
+  repeated Entry entries = 1;   // по возрастанию seq
+  uint64 next_seq = 2;          // курсор для следующего запроса
+  bool has_more = 3;
+  VaultState vault = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Операции
+// ---------------------------------------------------------------------------
+
+message Put {
+  Path path = 1;
+  uint64 base_rev = 2;       // 0 — новый файл (допустимо и поверх tombstone)
+  bytes hash = 3;
+  uint64 size = 4;
+  int64 mtime = 5;
+}
+
+message Delete {
+  Path path = 1;
+  uint64 base_rev = 2;
+}
+
+message Rename {
+  Path from = 1;
+  Path to = 2;
+  uint64 base_rev = 3;       // ревизия источника
+}
+
+message Mkdir {
+  Path path = 1;
+}
+
+message Op {
+  oneof kind {
+    Put put = 1;
+    Delete delete = 2;
+    Rename rename = 3;
+    Mkdir mkdir = 4;
+  }
+}
+
+message OpsRequest {
+  repeated Op ops = 1;
+}
+
+message Applied {
+  uint64 rev = 1;
+  uint64 seq = 2;
+  bool noop = 3;             // состояние уже совпадало, seq не сдвинут
+}
+
+message Conflict {
+  Entry server = 1;          // текущее состояние на сервере
+  bool at_destination = 2;   // Rename: занято место назначения (server — запись назначения)
+}
+
+message MissingBlob {}
+
+message Rejected {
+  string code = 1;           // invalid_path, too_large, plaintext_in_encrypted_vault, ...
+  string message = 2;
+}
+
+message OpResult {
+  oneof result {
+    Applied applied = 1;
+    Conflict conflict = 2;
+    MissingBlob missing_blob = 3;
+    Rejected rejected = 4;
+  }
+}
+
+message OpsResponse {
+  repeated OpResult results = 1;  // в порядке операций запроса
+  VaultState vault = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Блобы и загрузки
+// ---------------------------------------------------------------------------
+
+message HashList {
+  repeated bytes hashes = 1;
+}
+
+message UploadStart {
+  bytes hash = 1;
+  uint64 size = 2;
+}
+
+message UploadState {
+  string upload_id = 1;      // пусто, если блоб уже есть
+  uint64 offset = 2;         // сколько байт уже принято
+  uint64 size = 3;
+  bool complete = 4;         // блоб уже в хранилище, загружать нечего
+}
+
+// ---------------------------------------------------------------------------
+// История, корзина, настройки
+// ---------------------------------------------------------------------------
+
+message Revision {
+  uint64 rev = 1;
+  bytes hash = 2;
+  uint64 size = 3;
+  int64 mtime = 4;
+  uint64 seq = 5;
+  uint32 updated_by = 6;
+  bool deleted = 7;
+  bool folder = 8;
+  Path renamed_from = 9;
+}
+
+message HistoryResponse {
+  Path path = 1;
+  repeated Revision revisions = 2;  // от новых к старым
+}
+
+message DeletedItem {
+  Entry entry = 1;           // tombstone
+  Revision last_live = 2;    // последняя живая ревизия — её хэш восстанавливают Put'ом
+  int64 expires_at = 3;      // мс, когда sweeper сотрёт запись
+}
+
+message DeletedResponse {
+  repeated DeletedItem items = 1;
+}
+
+message PathList {
+  repeated Path paths = 1;
+}
+
+message PurgeResult {
+  uint64 purged = 1;
+}
+
+message Retention {
+  uint32 days = 1;
+}
+
+message Stats {
+  uint64 seq = 1;
+  uint64 files = 2;
+  uint64 folders = 3;
+  uint64 deleted = 4;
+  uint64 live_bytes = 5;     // сумма размеров текущих версий
+  uint64 stored_bytes = 6;   // размер каталога блобов
+  uint64 blobs = 7;
+  uint32 devices = 8;
+  uint64 revisions = 9;
+}
+
+// ---------------------------------------------------------------------------
+// Ключ шифрования (сервер хранит запись непрозрачно)
+// ---------------------------------------------------------------------------
+
+message VaultKeyPut {
+  bytes record = 1;          // закодированный VaultKeyRecord
+}
+
+message VaultKeyResponse {
+  bytes record = 1;          // пусто, если записи нет
+  uint64 version = 2;        // 0, если записи нет; то же значение в ETag
+  MigrationMarker migration = 3;
+}
+
+message MigrationMarker {
+  uint32 device = 1;         // заполняет сервер
+  int64 started_at = 2;      // заполняет сервер
+  uint64 key_version = 3;
+}
+
+message MigrationPurge {
+  uint64 max_seq = 1;        // открытые записи с seq > max_seq — отказ purge (их надо доперезалить)
+}
+
+// ---------------------------------------------------------------------------
+// Устройства и подключение
+// ---------------------------------------------------------------------------
+
+message Device {
+  uint32 id = 1;
+  string name = 2;
+  int64 created_at = 3;
+  int64 last_seen = 4;
+  bool revoked = 5;
+}
+
+message DevicesResponse {
+  repeated Device devices = 1;
+  uint32 self_id = 2;
+  string vault = 3;
+}
+
+message JoinCreate {
+  string name = 1;           // имя будущего устройства (можно изменить при подключении)
+}
+
+message JoinCode {
+  string code = 1;
+  string url = 2;            // https://<server>/join/<code>
+  int64 expires_at = 3;
+}
+
+message JoinRedeem {
+  string code = 1;
+  string name = 2;
+}
+
+message JoinToken {
+  string token = 1;          // показывается один раз
+  string vault = 2;
+  uint32 device_id = 3;
+  string device_name = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Клиентские структуры (сервер их не разбирает)
+// ---------------------------------------------------------------------------
+
+// Запись ключа vault'а: мастер-ключ, обёрнутый ключом из пароля.
+message VaultKeyRecord {
+  uint32 format = 1;         // 1
+  uint32 kdf = 2;            // 1 = Argon2id v0x13
+  uint32 m_cost_kib = 3;
+  uint32 t_cost = 4;
+  uint32 p_cost = 5;
+  bytes salt = 6;            // 16 байт
+  bytes nonce = 7;           // 12 байт
+  bytes wrapped_key = 8;     // AES-256-GCM-SIV(KEK, master_key) с тегом
+  int64 created_at = 9;
+  bytes key_check = 10;      // 16 байт HMAC от производного ключа: проверка запомненного ключа без пароля
+}
