@@ -104,16 +104,33 @@ pub struct HttpRequest {
 
 /// Действие, которое должен выполнить исполнитель.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Action {
     /// HTTP-запрос → `IoResult::Http` или `IoResult::Failed`.
-    Http { id: u64, req: HttpRequest },
+    Http {
+        id: u64,
+        req: HttpRequest,
+    },
     /// Список всех файлов и папок vault'а → `IoResult::Listing`.
-    List { id: u64 },
+    List {
+        id: u64,
+    },
     /// Метаданные пути → `IoResult::Stat`.
-    Stat { id: u64, path: String },
+    Stat {
+        id: u64,
+        path: String,
+    },
     /// Прочитать файл (целиком, если `len` = None) → `IoResult::Data` / `NotFound`.
-    Read { id: u64, path: String, offset: u64, len: Option<u64> },
+    Read {
+        id: u64,
+        path: String,
+        offset: u64,
+        len: Option<u64>,
+    },
     /// Атомарно записать файл целиком (временный файл + rename) → `IoResult::Stat`
     /// нового файла или `Precondition`.
     Write {
@@ -132,21 +149,48 @@ pub enum Action {
         data: Vec<u8>,
     },
     /// Прочитать временный файл → `Data`.
-    ReadTemp { id: u64, temp: String, offset: u64, len: u64 },
+    ReadTemp {
+        id: u64,
+        temp: String,
+        offset: u64,
+        len: u64,
+    },
     /// Атомарно перенести временный файл на место → `Stat` или `Precondition`.
-    CommitTemp { id: u64, temp: String, path: String, expect: Expect },
+    CommitTemp {
+        id: u64,
+        temp: String,
+        path: String,
+        expect: Expect,
+    },
     /// Удалить временный файл → `Done`.
-    DeleteTemp { id: u64, temp: String },
+    DeleteTemp {
+        id: u64,
+        temp: String,
+    },
     /// Убрать файл в корзину Obsidian (не стирать) → `Done` / `Precondition` / `NotFound`.
     /// Файла нет — `NotFound` при любом `expect` (удалять нечего); `Precondition` —
     /// только если файл есть, но изменился.
-    Trash { id: u64, path: String, expect: Expect },
+    Trash {
+        id: u64,
+        path: String,
+        expect: Expect,
+    },
     /// Переименовать → `Stat` / `Precondition` (назначение занято) / `NotFound`.
-    Rename { id: u64, from: String, to: String },
+    Rename {
+        id: u64,
+        from: String,
+        to: String,
+    },
     /// Создать папку (с родителями) → `Done`.
-    Mkdir { id: u64, path: String },
+    Mkdir {
+        id: u64,
+        path: String,
+    },
     /// Удалить пустую папку → `Done` / `Precondition` (не пуста) / `NotFound`.
-    Rmdir { id: u64, path: String },
+    Rmdir {
+        id: u64,
+        path: String,
+    },
     /// Сохранить снимок индекса (атомарно) → `Done`.
     SaveIndex {
         id: u64,
@@ -154,22 +198,37 @@ pub enum Action {
         data: Vec<u8>,
     },
     /// Кэш базовых версий (каталог плагина).
-    CacheRead { id: u64, key: String },
+    CacheRead {
+        id: u64,
+        key: String,
+    },
     CacheWrite {
         id: u64,
         key: String,
         #[serde(with = "serde_bytes")]
         data: Vec<u8>,
     },
-    CacheDelete { id: u64, key: String },
+    CacheDelete {
+        id: u64,
+        key: String,
+    },
     /// Вызвать `Tick` не позже этого момента (мс). Ответа не требует.
-    Wake { at: i64 },
+    Wake {
+        at: i64,
+    },
     /// Новый статус для статус-бара. Ответа не требует.
-    Status { status: SyncStatus },
+    Status {
+        status: SyncStatus,
+    },
     /// Уведомление пользователю. Ответа не требует.
-    Notify { notice: Notice },
+    Notify {
+        notice: Notice,
+    },
     /// Строка в лог плагина. Ответа не требует.
-    Log { level: LogLevel, message: String },
+    Log {
+        level: LogLevel,
+        message: String,
+    },
     /// Запомнить (или забыть) мастер-ключ на устройстве по выбору пользователя.
     RememberKey {
         #[serde(with = "serde_bytes")]
@@ -177,7 +236,10 @@ pub enum Action {
     },
     ForgetKey,
     /// Результат команды интерфейса.
-    UiResult { req: u64, result: UiResult },
+    UiResult {
+        req: u64,
+        result: UiResult,
+    },
 }
 
 impl Action {
@@ -208,7 +270,11 @@ impl Action {
 
 /// Результат действия.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum IoResult {
     Http {
         status: u16,
@@ -216,8 +282,12 @@ pub enum IoResult {
         #[serde(with = "serde_bytes")]
         body: Vec<u8>,
     },
-    Listing { files: Vec<FileMeta> },
-    Stat { meta: Option<FileMeta> },
+    Listing {
+        files: Vec<FileMeta>,
+    },
+    Stat {
+        meta: Option<FileMeta>,
+    },
     Data {
         #[serde(with = "serde_bytes")]
         data: Vec<u8>,
@@ -227,12 +297,18 @@ pub enum IoResult {
     /// Условие записи не выполнено (файл изменился / назначение занято / папка не пуста).
     Precondition,
     /// Сбой (сеть, ФС). Для HTTP — запрос мог как дойти, так и не дойти до сервера.
-    Failed { message: String },
+    Failed {
+        message: String,
+    },
 }
 
 /// Входное событие.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Event {
     /// Запуск. `key` — запомненный на устройстве мастер-ключ (если пользователь разрешил).
     Start {
@@ -244,28 +320,55 @@ pub enum Event {
     /// Синк сейчас (клик по статус-бару, команда).
     SyncNow,
     /// Файл создан или изменён.
-    Changed { path: String },
+    Changed {
+        path: String,
+    },
     /// Файл или папка удалены.
-    Deleted { path: String },
+    Deleted {
+        path: String,
+    },
     /// Переименование.
-    Renamed { from: String, to: String },
+    Renamed {
+        from: String,
+        to: String,
+    },
     /// Приложение на переднем плане / ушло в фон.
     Visible,
     Hidden,
     /// Ответ на действие.
-    Done { id: u64, result: IoResult },
+    Done {
+        id: u64,
+        result: IoResult,
+    },
     /// Пароль шифрования.
-    Password { password: String, remember: bool },
+    Password {
+        password: String,
+        remember: bool,
+    },
     /// Включить шифрование существующего vault'а.
-    EnableEncryption { password: String, remember: bool },
+    EnableEncryption {
+        password: String,
+        remember: bool,
+    },
     /// Сменить пароль (мастер-ключ прежний).
-    ChangePassword { old: String, new: String },
+    ChangePassword {
+        old: String,
+        new: String,
+    },
     /// Решение по конфликту.
-    Resolve { id: u64, choice: ConflictChoice },
+    Resolve {
+        id: u64,
+        choice: ConflictChoice,
+    },
     /// Команда интерфейса (ответ — `Action::UiResult` с тем же `req`).
-    Command { req: u64, command: UiCommand },
+    Command {
+        req: u64,
+        command: UiCommand,
+    },
     /// Новые настройки.
-    Configure { config: EngineConfig },
+    Configure {
+        config: EngineConfig,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -319,24 +422,51 @@ pub enum LogLevel {
 
 /// Уведомления: структурированные, текст формирует UI (ru/en).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Notice {
     /// Пересекающиеся правки: обе версии сохранены, нужен выбор.
-    Conflict { id: u64, path: String, copy: String },
+    Conflict {
+        id: u64,
+        path: String,
+        copy: String,
+    },
     /// Локальный файл при первичной загрузке отличался — сохранён копией.
-    LocalCopySaved { path: String, copy: String },
+    LocalCopySaved {
+        path: String,
+        copy: String,
+    },
     /// Файл, удалённый на другом устройстве, возвращён: здесь его правили.
-    RestoredEdited { path: String },
+    RestoredEdited {
+        path: String,
+    },
     /// Локальное удаление отменено: файл правили на другом устройстве.
-    RestoredRemote { path: String },
+    RestoredRemote {
+        path: String,
+    },
     /// Файл переименован на другом устройстве, локальные правки перенесены.
-    FollowedRename { from: String, to: String },
+    FollowedRename {
+        from: String,
+        to: String,
+    },
     /// Сервер отказался принять файл.
-    Rejected { path: String, code: String },
+    Rejected {
+        path: String,
+        code: String,
+    },
     /// Имя отличается только регистром от существующего — пропущено.
-    CaseCollision { path: String, existing: String },
+    CaseCollision {
+        path: String,
+        existing: String,
+    },
     /// Файл больше лимита.
-    TooLarge { path: String, size: u64 },
+    TooLarge {
+        path: String,
+        size: u64,
+    },
     /// Неверный пароль: синк остановлен.
     WrongPassword,
     /// Нужен пароль (vault зашифрован).
@@ -344,13 +474,18 @@ pub enum Notice {
     /// На другом устройстве включают шифрование.
     EncryptionStarted,
     /// Миграция на шифрование: прогресс и завершение.
-    MigrationProgress { done: u32, total: u32 },
+    MigrationProgress {
+        done: u32,
+        total: u32,
+    },
     EncryptionEnabled,
     PasswordChanged,
     /// Токен не принят: устройство отозвано.
     Unauthorized,
     /// Версия протокола сервера не поддерживается.
-    ProtocolUnsupported { supported: u32 },
+    ProtocolUnsupported {
+        supported: u32,
+    },
     /// Сервер стал «моложе» клиента (восстановлен из бэкапа) — полная сверка.
     ServerRewound,
     /// Индекс повреждён — начата безопасная первичная сверка.
@@ -358,29 +493,56 @@ pub enum Notice {
     /// Сервер не зашифрован, а локально vault зашифрован: синк остановлен.
     EncryptionMismatch,
     /// Прочая ошибка.
-    Error { code: String, message: String },
+    Error {
+        code: String,
+        message: String,
+    },
 }
 
 /// Команды интерфейса.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum UiCommand {
     ListDeleted,
-    RestoreDeleted { paths: Vec<String> },
-    PurgeDeleted { paths: Vec<String> },
-    History { path: String },
-    RestoreRevision { path: String, rev: u64 },
+    RestoreDeleted {
+        paths: Vec<String>,
+    },
+    PurgeDeleted {
+        paths: Vec<String>,
+    },
+    History {
+        path: String,
+    },
+    RestoreRevision {
+        path: String,
+        rev: u64,
+    },
     Devices,
-    RevokeDevice { id: u32 },
-    CreateJoin { name: String },
-    Redeem { code: String, name: String },
+    RevokeDevice {
+        id: u32,
+    },
+    CreateJoin {
+        name: String,
+    },
+    Redeem {
+        code: String,
+        name: String,
+    },
     GetRetention,
-    SetRetention { days: u32 },
+    SetRetention {
+        days: u32,
+    },
     Stats,
     /// Список нерешённых конфликтов.
     Conflicts,
     /// Оценка пароля (биты) — совет, а не запрет.
-    PasswordStrength { password: String },
+    PasswordStrength {
+        password: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -417,18 +579,57 @@ pub struct DeviceView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum UiResult {
     Ok,
-    Error { code: String, message: String },
-    Deleted { items: Vec<DeletedView> },
-    History { revisions: Vec<RevisionView> },
-    Devices { vault: String, devices: Vec<DeviceView> },
-    Join { code: String, url: String, expires_at: i64 },
-    Token { token: String, vault: String, device_id: u32, device_name: String },
-    Retention { days: u32 },
-    Stats { seq: u64, files: u64, folders: u64, deleted: u64, live_bytes: u64, stored_bytes: u64, devices: u32 },
-    Conflicts { items: Vec<crate::index::ConflictRecord> },
-    Strength { bits: u32 },
-    Restored { count: u32 },
+    Error {
+        code: String,
+        message: String,
+    },
+    Deleted {
+        items: Vec<DeletedView>,
+    },
+    History {
+        revisions: Vec<RevisionView>,
+    },
+    Devices {
+        vault: String,
+        devices: Vec<DeviceView>,
+    },
+    Join {
+        code: String,
+        url: String,
+        expires_at: i64,
+    },
+    Token {
+        token: String,
+        vault: String,
+        device_id: u32,
+        device_name: String,
+    },
+    Retention {
+        days: u32,
+    },
+    Stats {
+        seq: u64,
+        files: u64,
+        folders: u64,
+        deleted: u64,
+        live_bytes: u64,
+        stored_bytes: u64,
+        devices: u32,
+    },
+    Conflicts {
+        items: Vec<crate::index::ConflictRecord>,
+    },
+    Strength {
+        bits: u32,
+    },
+    Restored {
+        count: u32,
+    },
 }

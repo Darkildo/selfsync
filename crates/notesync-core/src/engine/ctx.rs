@@ -24,7 +24,11 @@ pub enum SyncError {
     #[error("ошибка сервера {status}: {code}")]
     Server { status: u16, code: String },
     #[error("HTTP {status}: {code} {message}")]
-    Http { status: u16, code: String, message: String },
+    Http {
+        status: u16,
+        code: String,
+        message: String,
+    },
     #[error("токен не принят")]
     Unauthorized,
     #[error("протокол не поддерживается сервером")]
@@ -173,7 +177,6 @@ impl State {
             VaultPath::from_segments(&p.segments).ok()
         }
     }
-
 }
 
 pub(crate) fn build_excludes(cfg: &EngineConfig) -> Excludes {
@@ -228,11 +231,20 @@ impl Ctx {
         self.hub.emit(Action::Notify { notice });
     }
 
-    pub async fn http(&self, req: HttpRequest) -> SyncResult<(u16, Vec<(String, String)>, Vec<u8>)> {
+    pub async fn http(
+        &self,
+        req: HttpRequest,
+    ) -> SyncResult<(u16, Vec<(String, String)>, Vec<u8>)> {
         match self.hub.submit(|id| Action::Http { id, req }).await {
-            IoResult::Http { status, headers, body } => Ok((status, headers, body)),
+            IoResult::Http {
+                status,
+                headers,
+                body,
+            } => Ok((status, headers, body)),
             IoResult::Failed { message } => Err(SyncError::Network(message)),
-            other => Err(SyncError::Io(format!("неожиданный ответ на HTTP: {other:?}"))),
+            other => Err(SyncError::Io(format!(
+                "неожиданный ответ на HTTP: {other:?}"
+            ))),
         }
     }
 
@@ -253,9 +265,23 @@ impl Ctx {
     }
 
     /// Читает файл; `None` — файла нет.
-    pub async fn read(&self, path: &str, offset: u64, len: Option<u64>) -> SyncResult<Option<Vec<u8>>> {
+    pub async fn read(
+        &self,
+        path: &str,
+        offset: u64,
+        len: Option<u64>,
+    ) -> SyncResult<Option<Vec<u8>>> {
         let path = path.to_owned();
-        match self.hub.submit(|id| Action::Read { id, path, offset, len }).await {
+        match self
+            .hub
+            .submit(|id| Action::Read {
+                id,
+                path,
+                offset,
+                len,
+            })
+            .await
+        {
             IoResult::Data { data } => Ok(Some(data)),
             IoResult::NotFound => Ok(None),
             other => Err(io_err("read", other)),
@@ -263,11 +289,37 @@ impl Ctx {
     }
 
     /// Атомарная запись. `Ok(None)` — условие не выполнено (файл изменился).
-    pub async fn write(&self, path: &str, data: Vec<u8>, expect: Expect) -> SyncResult<Option<FileMeta>> {
+    pub async fn write(
+        &self,
+        path: &str,
+        data: Vec<u8>,
+        expect: Expect,
+    ) -> SyncResult<Option<FileMeta>> {
         let p = path.to_owned();
-        match self.hub.submit(|id| Action::Write { id, path: p, data, expect }).await {
-            IoResult::Stat { meta } => Ok(meta.or_else(|| Some(FileMeta { path: path.to_owned(), size: 0, mtime: 0, dir: false }))),
-            IoResult::Done => Ok(Some(FileMeta { path: path.to_owned(), size: 0, mtime: 0, dir: false })),
+        match self
+            .hub
+            .submit(|id| Action::Write {
+                id,
+                path: p,
+                data,
+                expect,
+            })
+            .await
+        {
+            IoResult::Stat { meta } => Ok(meta.or_else(|| {
+                Some(FileMeta {
+                    path: path.to_owned(),
+                    size: 0,
+                    mtime: 0,
+                    dir: false,
+                })
+            })),
+            IoResult::Done => Ok(Some(FileMeta {
+                path: path.to_owned(),
+                size: 0,
+                mtime: 0,
+                dir: false,
+            })),
             IoResult::Precondition => Ok(None),
             other => Err(io_err("write", other)),
         }
@@ -275,26 +327,75 @@ impl Ctx {
 
     pub async fn write_temp(&self, temp: &str, offset: u64, data: Vec<u8>) -> SyncResult<()> {
         let temp = temp.to_owned();
-        match self.hub.submit(|id| Action::WriteTemp { id, temp, offset, data }).await {
+        match self
+            .hub
+            .submit(|id| Action::WriteTemp {
+                id,
+                temp,
+                offset,
+                data,
+            })
+            .await
+        {
             IoResult::Done => Ok(()),
             other => Err(io_err("write_temp", other)),
         }
     }
 
-    pub async fn read_temp(&self, temp: &str, offset: u64, len: u64) -> SyncResult<Option<Vec<u8>>> {
+    pub async fn read_temp(
+        &self,
+        temp: &str,
+        offset: u64,
+        len: u64,
+    ) -> SyncResult<Option<Vec<u8>>> {
         let temp = temp.to_owned();
-        match self.hub.submit(|id| Action::ReadTemp { id, temp, offset, len }).await {
+        match self
+            .hub
+            .submit(|id| Action::ReadTemp {
+                id,
+                temp,
+                offset,
+                len,
+            })
+            .await
+        {
             IoResult::Data { data } => Ok(Some(data)),
             IoResult::NotFound => Ok(None),
             other => Err(io_err("read_temp", other)),
         }
     }
 
-    pub async fn commit_temp(&self, temp: &str, path: &str, expect: Expect) -> SyncResult<Option<FileMeta>> {
+    pub async fn commit_temp(
+        &self,
+        temp: &str,
+        path: &str,
+        expect: Expect,
+    ) -> SyncResult<Option<FileMeta>> {
         let (t, p) = (temp.to_owned(), path.to_owned());
-        match self.hub.submit(|id| Action::CommitTemp { id, temp: t, path: p, expect }).await {
-            IoResult::Stat { meta } => Ok(meta.or_else(|| Some(FileMeta { path: path.to_owned(), size: 0, mtime: 0, dir: false }))),
-            IoResult::Done => Ok(Some(FileMeta { path: path.to_owned(), size: 0, mtime: 0, dir: false })),
+        match self
+            .hub
+            .submit(|id| Action::CommitTemp {
+                id,
+                temp: t,
+                path: p,
+                expect,
+            })
+            .await
+        {
+            IoResult::Stat { meta } => Ok(meta.or_else(|| {
+                Some(FileMeta {
+                    path: path.to_owned(),
+                    size: 0,
+                    mtime: 0,
+                    dir: false,
+                })
+            })),
+            IoResult::Done => Ok(Some(FileMeta {
+                path: path.to_owned(),
+                size: 0,
+                mtime: 0,
+                dir: false,
+            })),
             IoResult::Precondition => Ok(None),
             other => Err(io_err("commit_temp", other)),
         }
@@ -311,7 +412,11 @@ impl Ctx {
     /// В корзину. `Ok(false)` — файл изменился (условие не выполнено).
     pub async fn trash(&self, path: &str, expect: Expect) -> SyncResult<bool> {
         let path = path.to_owned();
-        match self.hub.submit(|id| Action::Trash { id, path, expect }).await {
+        match self
+            .hub
+            .submit(|id| Action::Trash { id, path, expect })
+            .await
+        {
             IoResult::Done | IoResult::NotFound => Ok(true),
             IoResult::Precondition => Ok(false),
             other => Err(io_err("trash", other)),
@@ -321,9 +426,25 @@ impl Ctx {
     /// Переименование. `Ok(None)` — назначение занято или источника нет.
     pub async fn rename(&self, from: &str, to: &str) -> SyncResult<Option<FileMeta>> {
         let (f, t) = (from.to_owned(), to.to_owned());
-        match self.hub.submit(|id| Action::Rename { id, from: f, to: t }).await {
-            IoResult::Stat { meta } => Ok(meta.or_else(|| Some(FileMeta { path: to.to_owned(), size: 0, mtime: 0, dir: false }))),
-            IoResult::Done => Ok(Some(FileMeta { path: to.to_owned(), size: 0, mtime: 0, dir: false })),
+        match self
+            .hub
+            .submit(|id| Action::Rename { id, from: f, to: t })
+            .await
+        {
+            IoResult::Stat { meta } => Ok(meta.or_else(|| {
+                Some(FileMeta {
+                    path: to.to_owned(),
+                    size: 0,
+                    mtime: 0,
+                    dir: false,
+                })
+            })),
+            IoResult::Done => Ok(Some(FileMeta {
+                path: to.to_owned(),
+                size: 0,
+                mtime: 0,
+                dir: false,
+            })),
             IoResult::Precondition | IoResult::NotFound => Ok(None),
             other => Err(io_err("rename", other)),
         }
@@ -386,7 +507,10 @@ impl Ctx {
         });
         if !exists {
             let key = h.to_hex();
-            let _ = self.hub.submit(|id| Action::CacheWrite { id, key, data }).await;
+            let _ = self
+                .hub
+                .submit(|id| Action::CacheWrite { id, key, data })
+                .await;
         }
         for e in evict {
             let key = e.to_hex();

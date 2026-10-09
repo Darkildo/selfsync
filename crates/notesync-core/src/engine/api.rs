@@ -69,17 +69,35 @@ async fn call_empty(cx: &Ctx, r: HttpRequest) -> SyncResult<u16> {
 }
 
 pub async fn changes(cx: &Ctx, since: u64, limit: u32) -> SyncResult<pb::ChangesResponse> {
-    call(cx, req("GET", format!("/v1/changes?since={since}&limit={limit}"), vec![], None)).await
+    call(
+        cx,
+        req(
+            "GET",
+            format!("/v1/changes?since={since}&limit={limit}"),
+            vec![],
+            None,
+        ),
+    )
+    .await
 }
 
 pub async fn wait(cx: &Ctx, since: u64, timeout_s: u32) -> SyncResult<pb::VaultState> {
-    let mut r = req("GET", format!("/v1/wait?since={since}&timeout={timeout_s}"), vec![], None);
+    let mut r = req(
+        "GET",
+        format!("/v1/wait?since={since}&timeout={timeout_s}"),
+        vec![],
+        None,
+    );
     r.timeout_ms = u64::from(timeout_s) * 1000 + 15_000;
     call(cx, r).await
 }
 
 pub async fn ops(cx: &Ctx, ops: Vec<pb::Op>) -> SyncResult<pb::OpsResponse> {
-    call(cx, proto_req("POST", "/v1/ops".into(), &pb::OpsRequest { ops })).await
+    call(
+        cx,
+        proto_req("POST", "/v1/ops".into(), &pb::OpsRequest { ops }),
+    )
+    .await
 }
 
 pub async fn blobs_missing(cx: &Ctx, hashes: &[Hash]) -> SyncResult<Vec<Hash>> {
@@ -102,7 +120,12 @@ pub async fn blobs_missing(cx: &Ctx, hashes: &[Hash]) -> SyncResult<Vec<Hash>> {
 }
 
 pub async fn put_blob(cx: &Ctx, h: &Hash, data: Vec<u8>) -> SyncResult<()> {
-    let mut r = req("PUT", format!("/v1/blobs/{}", h.to_hex()), data, Some(CONTENT_TYPE_OCTETS));
+    let mut r = req(
+        "PUT",
+        format!("/v1/blobs/{}", h.to_hex()),
+        data,
+        Some(CONTENT_TYPE_OCTETS),
+    );
     r.timeout_ms = TRANSFER_TIMEOUT_MS;
     call_empty(cx, r).await.map(|_| ())
 }
@@ -112,7 +135,8 @@ pub async fn get_blob(cx: &Ctx, h: &Hash, range: Option<(u64, u64)>) -> SyncResu
     let mut r = req("GET", format!("/v1/blobs/{}", h.to_hex()), vec![], None);
     r.timeout_ms = TRANSFER_TIMEOUT_MS;
     if let Some((a, b)) = range {
-        r.headers.push(("range".to_owned(), format!("bytes={a}-{b}")));
+        r.headers
+            .push(("range".to_owned(), format!("bytes={a}-{b}")));
     }
     let (status, _, body) = cx.http(r).await?;
     match status {
@@ -142,10 +166,24 @@ pub async fn upload_state(cx: &Ctx, id: &str) -> SyncResult<pb::UploadState> {
 }
 
 /// Часть загрузки. `Ok(None)` — сервер ждёт другое смещение.
-pub async fn upload_part(cx: &Ctx, id: &str, offset: u64, total: u64, data: Vec<u8>) -> SyncResult<Option<pb::UploadState>> {
+pub async fn upload_part(
+    cx: &Ctx,
+    id: &str,
+    offset: u64,
+    total: u64,
+    data: Vec<u8>,
+) -> SyncResult<Option<pb::UploadState>> {
     let end = offset + data.len() as u64 - 1;
-    let mut r = req("PUT", format!("/v1/uploads/{id}"), data, Some(CONTENT_TYPE_OCTETS));
-    r.headers.push(("content-range".to_owned(), format!("bytes {offset}-{end}/{total}")));
+    let mut r = req(
+        "PUT",
+        format!("/v1/uploads/{id}"),
+        data,
+        Some(CONTENT_TYPE_OCTETS),
+    );
+    r.headers.push((
+        "content-range".to_owned(),
+        format!("bytes {offset}-{end}/{total}"),
+    ));
     r.timeout_ms = TRANSFER_TIMEOUT_MS;
     let (status, _, body) = cx.http(r).await?;
     match status {
@@ -168,10 +206,15 @@ pub async fn get_vault_key(cx: &Ctx) -> SyncResult<pb::VaultKeyResponse> {
 }
 
 /// Запись ключа с проверкой версии. `Ok(None)` — версия изменилась (412).
-pub async fn put_vault_key(cx: &Ctx, record: Vec<u8>, expected: u64) -> SyncResult<Option<pb::VaultKeyResponse>> {
+pub async fn put_vault_key(
+    cx: &Ctx,
+    record: Vec<u8>,
+    expected: u64,
+) -> SyncResult<Option<pb::VaultKeyResponse>> {
     let mut r = proto_req("PUT", "/v1/vaultkey".into(), &pb::VaultKeyPut { record });
     if expected > 0 {
-        r.headers.push(("if-match".to_owned(), format!("\"{expected}\"")));
+        r.headers
+            .push(("if-match".to_owned(), format!("\"{expected}\"")));
     }
     let (status, _, body) = cx.http(r).await?;
     match status {
@@ -200,15 +243,22 @@ pub async fn put_migration(cx: &Ctx, key_version: u64) -> SyncResult<()> {
 }
 
 pub async fn delete_migration(cx: &Ctx) -> SyncResult<()> {
-    call_empty(cx, req("DELETE", "/v1/vaultkey/migration".into(), vec![], None))
-        .await
-        .map(|_| ())
+    call_empty(
+        cx,
+        req("DELETE", "/v1/vaultkey/migration".into(), vec![], None),
+    )
+    .await
+    .map(|_| ())
 }
 
 /// Purge открытых записей (сервер заодно снимает маркер миграции). `Ok(false)` —
 /// открытые файлы изменились после снимка.
 pub async fn purge_plaintext(cx: &Ctx, max_seq: u64) -> SyncResult<bool> {
-    let r = proto_req("POST", "/v1/vaultkey/migration/purge".into(), &pb::MigrationPurge { max_seq });
+    let r = proto_req(
+        "POST",
+        "/v1/vaultkey/migration/purge".into(),
+        &pb::MigrationPurge { max_seq },
+    );
     let (status, _, body) = cx.http(r).await?;
     match status {
         200 => Ok(true),
@@ -227,7 +277,11 @@ pub async fn purge_plaintext(cx: &Ctx, max_seq: u64) -> SyncResult<bool> {
 
 pub async fn history(cx: &Ctx, path: &pb::Path) -> SyncResult<pb::HistoryResponse> {
     let q = base64url(&path.encode_to_vec());
-    call(cx, req("GET", format!("/v1/history?path={q}"), vec![], None)).await
+    call(
+        cx,
+        req("GET", format!("/v1/history?path={q}"), vec![], None),
+    )
+    .await
 }
 
 pub async fn deleted(cx: &Ctx) -> SyncResult<pb::DeletedResponse> {
@@ -235,7 +289,11 @@ pub async fn deleted(cx: &Ctx) -> SyncResult<pb::DeletedResponse> {
 }
 
 pub async fn purge_deleted(cx: &Ctx, paths: Vec<pb::Path>) -> SyncResult<pb::PurgeResult> {
-    call(cx, proto_req("DELETE", "/v1/deleted".into(), &pb::PathList { paths })).await
+    call(
+        cx,
+        proto_req("DELETE", "/v1/deleted".into(), &pb::PathList { paths }),
+    )
+    .await
 }
 
 pub async fn devices(cx: &Ctx) -> SyncResult<pb::DevicesResponse> {
@@ -249,11 +307,19 @@ pub async fn revoke_device(cx: &Ctx, id: u32) -> SyncResult<()> {
 }
 
 pub async fn join_create(cx: &Ctx, name: String) -> SyncResult<pb::JoinCode> {
-    call(cx, proto_req("POST", "/v1/join".into(), &pb::JoinCreate { name })).await
+    call(
+        cx,
+        proto_req("POST", "/v1/join".into(), &pb::JoinCreate { name }),
+    )
+    .await
 }
 
 pub async fn join_redeem(cx: &Ctx, code: String, name: String) -> SyncResult<pb::JoinToken> {
-    let mut r = proto_req("POST", "/v1/join/redeem".into(), &pb::JoinRedeem { code, name });
+    let mut r = proto_req(
+        "POST",
+        "/v1/join/redeem".into(),
+        &pb::JoinRedeem { code, name },
+    );
     r.auth = false;
     call(cx, r).await
 }
@@ -264,7 +330,11 @@ pub async fn get_retention(cx: &Ctx) -> SyncResult<u32> {
 }
 
 pub async fn set_retention(cx: &Ctx, days: u32) -> SyncResult<u32> {
-    let r: pb::Retention = call(cx, proto_req("PUT", "/v1/retention".into(), &pb::Retention { days })).await?;
+    let r: pb::Retention = call(
+        cx,
+        proto_req("PUT", "/v1/retention".into(), &pb::Retention { days }),
+    )
+    .await?;
     Ok(r.days)
 }
 
@@ -277,7 +347,11 @@ pub fn base64url(data: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
         let chars = chunk.len() + 1;
         for i in 0..chars {

@@ -79,7 +79,11 @@ pub(crate) fn stamp(now_ms: i64, tz_offset_min: i32) -> (String, String) {
 pub(crate) async fn unique_copy(cx: &Ctx, key: &str, label: &str) -> SyncResult<String> {
     let vp = VaultPath::parse(key).map_err(|e| SyncError::Io(e.to_string()))?;
     for n in 1..100 {
-        let l = if n == 1 { label.to_owned() } else { format!("{label} {n}") };
+        let l = if n == 1 {
+            label.to_owned()
+        } else {
+            format!("{label} {n}")
+        };
         let cand = vp.with_suffix(&l).as_str().to_owned();
         let taken = cx.with(|s| s.index.files.contains_key(&cand) || s.is_excluded(&cand));
         if !taken && cx.stat(&cand).await?.is_none() {
@@ -170,21 +174,24 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
     let Some(meta) = cx.stat(key).await? else {
         // Локальный файл так и не попал на сервер и уже удалён: серверная версия —
         // чужой файл, который здесь ещё не видели, а не повод для удаления.
-        if !f.maybe_on_server() && !r.deleted && !r.folder
+        if !f.maybe_on_server()
+            && !r.deleted
+            && !r.folder
             && let Some(h) = r.hash
-                && let Some((obs, cache)) = download_to(cx, key, &h, r.size, Expect::Absent).await? {
-                    cx.with_mut(|s| {
-                        if let Some(f) = s.index.files.get_mut(key) {
-                            f.folder = false;
-                            f.local = Some(obs);
-                        }
-                    });
-                    adopt(cx, key, &r, obs.plain);
-                    if let Some(c) = cache {
-                        cx.cache_put(obs.plain, c).await;
-                    }
-                    return Ok(());
+            && let Some((obs, cache)) = download_to(cx, key, &h, r.size, Expect::Absent).await?
+        {
+            cx.with_mut(|s| {
+                if let Some(f) = s.index.files.get_mut(key) {
+                    f.folder = false;
+                    f.local = Some(obs);
                 }
+            });
+            adopt(cx, key, &r, obs.plain);
+            if let Some(c) = cache {
+                cx.cache_put(obs.plain, c).await;
+            }
+            return Ok(());
+        }
         cx.with_mut(|s| {
             if let Some(f) = s.index.files.get_mut(key) {
                 f.local = None;
@@ -201,7 +208,9 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
         // Переименован на другом устройстве: правка следует за файлом.
         if let Some(to) = &r.renamed_to {
             let to = to.as_str().to_owned();
-            let free = to != key && cx.with(|s| !s.index.files.contains_key(&to)) && cx.stat(&to).await?.is_none();
+            let free = to != key
+                && cx.with(|s| !s.index.files.contains_key(&to))
+                && cx.stat(&to).await?.is_none();
             if free && rename_local(cx, key, &to).await? {
                 cx.with_mut(|s| {
                     if let Some(mut f) = s.index.files.remove(key) {
@@ -211,7 +220,10 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
                         s.index.files.insert(to.clone(), f);
                     }
                 });
-                cx.log(LogLevel::Info, format!("{key} переименован на другом устройстве в {to}; правки перенесены"));
+                cx.log(
+                    LogLevel::Info,
+                    format!("{key} переименован на другом устройстве в {to}; правки перенесены"),
+                );
                 cx.notify(Notice::FollowedRename {
                     from: key.to_owned(),
                     to,
@@ -227,8 +239,13 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
                 f.server_path = None;
             }
         });
-        cx.log(LogLevel::Info, format!("{key} удалён на другом устройстве, но изменён здесь — возвращается"));
-        cx.notify(Notice::RestoredEdited { path: key.to_owned() });
+        cx.log(
+            LogLevel::Info,
+            format!("{key} удалён на другом устройстве, но изменён здесь — возвращается"),
+        );
+        cx.notify(Notice::RestoredEdited {
+            path: key.to_owned(),
+        });
         return Ok(());
     }
 
@@ -254,7 +271,11 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
     };
     let small_local = meta.size <= SMALL_BLOB;
     let small_remote = r.size <= SMALL_BLOB;
-    let local_bytes = if small_local { cx.read(key, 0, None).await? } else { None };
+    let local_bytes = if small_local {
+        cx.read(key, 0, None).await?
+    } else {
+        None
+    };
     let local_obs = match &local_bytes {
         Some(b) => LocalObs {
             size: b.len() as u64,
@@ -302,30 +323,52 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
             return write_remote(cx, key, &r, sb.clone(), local_obs).await;
         }
         if let (Some(lb), true) = (&local_bytes, f.base_plain.is_some())
-            && mergeable(lb) && mergeable(sb)
-                && let Some(base) = base_content(cx, &f).await {
-                    match merge_bytes(&base, lb, sb) {
-                        Some(Merge::Clean(m)) => {
-                            let m = m.into_bytes();
-                            if Hash::of(&m) == sp {
-                                return write_remote(cx, key, &r, sb.clone(), local_obs).await;
-                            }
-                            return write_merged(cx, key, &r, sb.clone(), m, local_obs).await;
-                        }
-                        Some(Merge::Conflict) | None => {}
+            && mergeable(lb)
+            && mergeable(sb)
+            && let Some(base) = base_content(cx, &f).await
+        {
+            match merge_bytes(&base, lb, sb) {
+                Some(Merge::Clean(m)) => {
+                    let m = m.into_bytes();
+                    if Hash::of(&m) == sp {
+                        return write_remote(cx, key, &r, sb.clone(), local_obs).await;
                     }
+                    return write_merged(cx, key, &r, sb.clone(), m, local_obs).await;
                 }
+                Some(Merge::Conflict) | None => {}
+            }
+        }
     }
     // Обе версии целиком.
     let initial = f.base_rev == 0 && f.base_plain.is_none();
-    keep_both(cx, key, &r, remote_hash, local_bytes, local_obs, remote_bytes, initial).await
+    keep_both(
+        cx,
+        key,
+        &r,
+        remote_hash,
+        local_bytes,
+        local_obs,
+        remote_bytes,
+        initial,
+    )
+    .await
 }
 
 /// Записать серверную версию поверх неизменённой локальной.
-async fn write_remote(cx: &Ctx, key: &str, r: &Remote, sb: Vec<u8>, local: LocalObs) -> SyncResult<()> {
+async fn write_remote(
+    cx: &Ctx,
+    key: &str,
+    r: &Remote,
+    sb: Vec<u8>,
+    local: LocalObs,
+) -> SyncResult<()> {
     let sp = Hash::of(&sb);
     let size = sb.len() as u64;
-    let cache = if mergeable(&sb) { Some(sb.clone()) } else { None };
+    let cache = if mergeable(&sb) {
+        Some(sb.clone())
+    } else {
+        None
+    };
     let Some(meta) = cx.write(key, sb, expect_of(&Some(local))).await? else {
         cx.with_mut(|s| {
             s.dirty.insert(key.to_owned());
@@ -349,7 +392,14 @@ async fn write_remote(cx: &Ctx, key: &str, r: &Remote, sb: Vec<u8>, local: Local
 }
 
 /// Записать результат чистого слияния; следующий push отправит его.
-async fn write_merged(cx: &Ctx, key: &str, r: &Remote, sb: Vec<u8>, merged: Vec<u8>, local: LocalObs) -> SyncResult<()> {
+async fn write_merged(
+    cx: &Ctx,
+    key: &str,
+    r: &Remote,
+    sb: Vec<u8>,
+    merged: Vec<u8>,
+    local: LocalObs,
+) -> SyncResult<()> {
     let sp = Hash::of(&sb);
     let mp = Hash::of(&merged);
     let size = merged.len() as u64;
@@ -421,7 +471,11 @@ async fn keep_both(
                     let size = sb.len() as u64;
                     cx.write(key, sb, expect_of(&Some(local)))
                         .await?
-                        .map(|m| LocalObs { size, mtime: m.mtime, plain: sp })
+                        .map(|m| LocalObs {
+                            size,
+                            mtime: m.mtime,
+                            plain: sp,
+                        })
                 }
                 None => download_to(cx, key, &remote_hash, r.size, expect_of(&Some(local)))
                     .await?
@@ -474,7 +528,9 @@ async fn keep_both(
                 }
             });
             cx.save().await?;
-            if let Some((obs, _)) = download_to(cx, key, &remote_hash, r.size, Expect::Absent).await? {
+            if let Some((obs, _)) =
+                download_to(cx, key, &remote_hash, r.size, Expect::Absent).await?
+            {
                 cx.with_mut(|s| {
                     if let Some(f) = s.index.files.get_mut(key) {
                         f.local = Some(obs);
@@ -515,7 +571,12 @@ pub(crate) async fn resolve_delete(cx: &Ctx, key: &str, r: Remote) -> SyncResult
     };
     // На сервере та же версия, что мы удалили (сменилась только ревизия, например
     // после сброса баз): повторить удаление с актуальной ревизией.
-    let base = cx.with(|s| s.index.files.get(key).map(|f| (f.base_blob, f.base_plain.or(f.pending_put))));
+    let base = cx.with(|s| {
+        s.index
+            .files
+            .get(key)
+            .map(|f| (f.base_blob, f.base_plain.or(f.pending_put)))
+    });
     if let Some((base_blob, base_plain)) = base {
         let same = if base_blob == Some(h) {
             true
@@ -545,14 +606,21 @@ pub(crate) async fn resolve_delete(cx: &Ctx, key: &str, r: Remote) -> SyncResult
             if let Some(c) = cache {
                 cx.cache_put(obs.plain, c).await;
             }
-            cx.log(LogLevel::Info, format!("{key}: удаление отменено — файл изменён на другом устройстве"));
-            cx.notify(Notice::RestoredRemote { path: key.to_owned() });
+            cx.log(
+                LogLevel::Info,
+                format!("{key}: удаление отменено — файл изменён на другом устройстве"),
+            );
+            cx.notify(Notice::RestoredRemote {
+                path: key.to_owned(),
+            });
         }
         None => {
             // Место занято файлом с другим регистром имени: вернуть серверную версию
             // сюда нельзя, она переименовывается на сервере.
             if let Some(existing) = case_twin(cx, key).await? {
-                let server = cx.with(|s| s.encode_path(&VaultPath::parse(key).map_err(|e| SyncError::Io(e.to_string()))?))?;
+                let server = cx.with(|s| {
+                    s.encode_path(&VaultPath::parse(key).map_err(|e| SyncError::Io(e.to_string()))?)
+                })?;
                 if split_case(cx, key, server, r.rev, &existing).await? {
                     cx.with_mut(|s| {
                         if s.index.files.get(key).is_some_and(|f| f.local.is_none()) {
@@ -571,7 +639,12 @@ pub(crate) async fn resolve_delete(cx: &Ctx, key: &str, r: Remote) -> SyncResult
 }
 
 /// Наше переименование отклонено.
-pub(crate) async fn resolve_rename(cx: &Ctx, key: &str, r: Remote, at_destination: bool) -> SyncResult<()> {
+pub(crate) async fn resolve_rename(
+    cx: &Ctx,
+    key: &str,
+    r: Remote,
+    at_destination: bool,
+) -> SyncResult<()> {
     if at_destination {
         // На месте назначения другой файл: наш уходит в копию (на сервере его
         // переименование пойдёт уже в копию), серверный скачивается сразу — pull мог
@@ -586,7 +659,8 @@ pub(crate) async fn resolve_rename(cx: &Ctx, key: &str, r: Remote, at_destinatio
             add_conflict(cx, key, &copy, false);
             cx.save().await?;
             if let (false, false, Some(h)) = (r.deleted, r.folder, r.hash) {
-                if let Some((obs, cache)) = download_to(cx, key, &h, r.size, Expect::Absent).await? {
+                if let Some((obs, cache)) = download_to(cx, key, &h, r.size, Expect::Absent).await?
+                {
                     cx.with_mut(|s| {
                         s.index.files.insert(
                             key.to_owned(),
@@ -612,7 +686,9 @@ pub(crate) async fn resolve_rename(cx: &Ctx, key: &str, r: Remote, at_destinatio
         return Ok(());
     }
     cx.with_mut(|s| {
-        let Some(f) = s.index.files.get_mut(key) else { return };
+        let Some(f) = s.index.files.get_mut(key) else {
+            return;
+        };
         if r.deleted {
             // Источника на сервере больше нет: наш файл — новый файл по новому пути.
             f.server_path = None;
@@ -636,19 +712,31 @@ pub(crate) async fn case_twin(cx: &Ctx, key: &str) -> SyncResult<Option<String>>
     if !cx.with(|s| s.cfg.case_insensitive) {
         return Ok(None);
     }
-    Ok(cx.stat(key).await?.filter(|m| !m.path.is_empty() && m.path != key).map(|m| m.path))
+    Ok(cx
+        .stat(key)
+        .await?
+        .filter(|m| !m.path.is_empty() && m.path != key)
+        .map(|m| m.path))
 }
 
 /// Два файла, различающиеся только регистром, здесь не уместить: серверный
 /// переименовывается в свободное имя — сохраняются оба. Возвращает, применено ли
 /// переименование.
-pub(crate) async fn split_case(cx: &Ctx, key: &str, server: pb::Path, rev: u64, existing: &str) -> SyncResult<bool> {
+pub(crate) async fn split_case(
+    cx: &Ctx,
+    key: &str,
+    server: pb::Path,
+    rev: u64,
+    existing: &str,
+) -> SyncResult<bool> {
     let label = {
         let (date, _) = stamp(cx.now(), cx.with(|s| s.cfg.tz_offset_min));
         format!("case {} {date}", cx.with(|s| s.cfg.device_name.clone()))
     };
     let copy = unique_copy(cx, key, &label).await?;
-    let to = cx.with(|s| s.encode_path(&VaultPath::parse(&copy).map_err(|e| SyncError::Io(e.to_string()))?))?;
+    let to = cx.with(|s| {
+        s.encode_path(&VaultPath::parse(&copy).map_err(|e| SyncError::Io(e.to_string()))?)
+    })?;
     let resp = super::api::ops(
         cx,
         vec![pb::Op {
@@ -660,9 +748,15 @@ pub(crate) async fn split_case(cx: &Ctx, key: &str, server: pb::Path, rev: u64, 
         }],
     )
     .await?;
-    let applied = matches!(resp.results.first().and_then(|r| r.result.as_ref()), Some(pb::op_result::Result::Applied(_)));
+    let applied = matches!(
+        resp.results.first().and_then(|r| r.result.as_ref()),
+        Some(pb::op_result::Result::Applied(_))
+    );
     if applied {
-        cx.log(LogLevel::Warn, format!("{key} совпадает с {existing} без учёта регистра: переименован в {copy}"));
+        cx.log(
+            LogLevel::Warn,
+            format!("{key} совпадает с {existing} без учёта регистра: переименован в {copy}"),
+        );
         cx.with_mut(|s| s.sync_due = Some(s.now));
     }
     if cx.with_mut(|s| s.notified.insert(format!("case:{key}"))) {

@@ -45,7 +45,14 @@ fn plan(files: &std::collections::BTreeMap<String, FileState>, rebaselined: bool
         }
         if let Some(from) = &f.server_path {
             if f.local.is_some() {
-                renames.push((f.folder, depth(k), Item::Rename { key: k.clone(), from: from.clone() }));
+                renames.push((
+                    f.folder,
+                    depth(k),
+                    Item::Rename {
+                        key: k.clone(),
+                        from: from.clone(),
+                    },
+                ));
             } else {
                 // Переименовали и удалили до отправки: удаляем по старому пути.
                 del_files.push(Item::Delete { key: k.clone() });
@@ -61,7 +68,10 @@ fn plan(files: &std::collections::BTreeMap<String, FileState>, rebaselined: bool
             continue;
         }
         if f.content_dirty() {
-            let (note, size) = (VaultPath::parse(k).is_ok_and(|p| p.is_note()), f.local.map_or(0, |l| l.size));
+            let (note, size) = (
+                VaultPath::parse(k).is_ok_and(|p| p.is_note()),
+                f.local.map_or(0, |l| l.size),
+            );
             puts.push((!note, size, Item::Put { key: k.clone() }));
         } else if f.delete_pending() {
             del_files.push(Item::Delete { key: k.clone() });
@@ -116,7 +126,13 @@ pub(crate) async fn push(cx: &Ctx) -> SyncResult<bool> {
             while idx < items.len() && batch.len() < OPS_BATCH {
                 let it = items[idx].clone();
                 if let Item::Put { key } = &it {
-                    let size = cx.with(|s| s.index.files.get(key).and_then(|f| f.local).map_or(0, |l| l.size));
+                    let size = cx.with(|s| {
+                        s.index
+                            .files
+                            .get(key)
+                            .and_then(|f| f.local)
+                            .map_or(0, |l| l.size)
+                    });
                     if size <= SMALL_BLOB {
                         if bytes + size > BATCH_BYTES && !batch.is_empty() {
                             break;
@@ -134,7 +150,11 @@ pub(crate) async fn push(cx: &Ctx) -> SyncResult<bool> {
     Ok(did)
 }
 
-async fn prepare_put(cx: &Ctx, key: &str, keys: Option<&crate::crypto::VaultKeys>) -> SyncResult<Option<(PreparedBlob, LocalObs, Option<Vec<u8>>, i64)>> {
+async fn prepare_put(
+    cx: &Ctx,
+    key: &str,
+    keys: Option<&crate::crypto::VaultKeys>,
+) -> SyncResult<Option<(PreparedBlob, LocalObs, Option<Vec<u8>>, i64)>> {
     let Some(meta) = cx.stat(key).await? else {
         cx.with_mut(|s| {
             s.dirty.insert(key.to_owned());
@@ -189,9 +209,16 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
     let mut blobs: Vec<(String, PreparedBlob, LocalObs)> = Vec::new();
     for item in batch {
         let (base_rev, folder) = match &item {
-            Item::Mkdir { key } | Item::Rename { key, .. } | Item::Put { key } | Item::Delete { key } => {
-                cx.with(|s| s.index.files.get(key).map(|f| (f.base_rev, f.folder)).unwrap_or((0, false)))
-            }
+            Item::Mkdir { key }
+            | Item::Rename { key, .. }
+            | Item::Put { key }
+            | Item::Delete { key } => cx.with(|s| {
+                s.index
+                    .files
+                    .get(key)
+                    .map(|f| (f.base_rev, f.folder))
+                    .unwrap_or((0, false))
+            }),
         };
         let _ = folder;
         let op = match &item {
@@ -200,7 +227,9 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
                 pb::op::Kind::Mkdir(pb::Mkdir { path: Some(path) })
             }
             Item::Rename { key, from } => {
-                let (to_p, from_p) = cx.with(|s| Ok::<_, SyncError>((s.encode_path(&vp(key)?)?, s.encode_path(&vp(from)?)?)))?;
+                let (to_p, from_p) = cx.with(|s| {
+                    Ok::<_, SyncError>((s.encode_path(&vp(key)?)?, s.encode_path(&vp(from)?)?))
+                })?;
                 pb::op::Kind::Rename(pb::Rename {
                     from: Some(from_p),
                     to: Some(to_p),
@@ -208,12 +237,18 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
                 })
             }
             Item::Delete { key } => {
-                let target = cx.with(|s| s.index.files.get(key).and_then(|f| f.server_path.clone())).unwrap_or_else(|| key.clone());
+                let target = cx
+                    .with(|s| s.index.files.get(key).and_then(|f| f.server_path.clone()))
+                    .unwrap_or_else(|| key.clone());
                 let path = cx.with(|s| s.encode_path(&vp(&target)?))?;
-                pb::op::Kind::Delete(pb::Delete { path: Some(path), base_rev })
+                pb::op::Kind::Delete(pb::Delete {
+                    path: Some(path),
+                    base_rev,
+                })
             }
             Item::Put { key } => {
-                let Some((b, obs, cache, mtime)) = prepare_put(cx, key, keys.as_ref()).await? else {
+                let Some((b, obs, cache, mtime)) = prepare_put(cx, key, keys.as_ref()).await?
+                else {
                     continue;
                 };
                 let path = cx.with(|s| s.encode_path(&vp(key)?))?;
@@ -281,9 +316,10 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
             match &p.item {
                 Item::Put { key } => {
                     if let (Some(f), Some((obs, _))) = (s.index.files.get_mut(key), &p.sent)
-                        && f.base_rev == 0 {
-                            f.pending_put = Some(obs.plain);
-                        }
+                        && f.base_rev == 0
+                    {
+                        f.pending_put = Some(obs.plain);
+                    }
                 }
                 Item::Mkdir { key } => {
                     if let Some(f) = s.index.files.get_mut(key) {
@@ -301,7 +337,9 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
         cx.with_mut(|s| s.server_state = Some(*vs));
     }
     if resp.results.len() != prepared.len() {
-        return Err(SyncError::Protocol("число результатов не совпадает с числом операций".into()));
+        return Err(SyncError::Protocol(
+            "число результатов не совпадает с числом операций".into(),
+        ));
     }
     for (p, r) in prepared.into_iter().zip(resp.results) {
         handle_result(cx, p, r).await?;
@@ -327,7 +365,12 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
             }),
             match &r {
                 R::Applied(a) => format!("applied rev {} noop {}", a.rev, a.noop),
-                R::Conflict(c) => format!("conflict rev {:?} deleted {:?} dest {}", c.server.as_ref().map(|e| e.rev), c.server.as_ref().map(|e| e.deleted), c.at_destination),
+                R::Conflict(c) => format!(
+                    "conflict rev {:?} deleted {:?} dest {}",
+                    c.server.as_ref().map(|e| e.rev),
+                    c.server.as_ref().map(|e| e.deleted),
+                    c.at_destination
+                ),
                 R::MissingBlob(_) => "missing blob".into(),
                 R::Rejected(x) => format!("rejected {}", x.code),
             }
@@ -347,12 +390,18 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
                 if let Some(f) = s.index.files.get_mut(&key) {
                     f.server_path = None;
                     // Содержимое источника неизвестно (его меняли): сверить через Put.
-                    f.base_rev = if !f.folder && f.base_blob.is_none() { 0 } else { a.rev };
+                    f.base_rev = if !f.folder && f.base_blob.is_none() {
+                        0
+                    } else {
+                        a.rev
+                    };
                 }
             });
         }
         (Item::Put { key }, R::Applied(a)) => {
-            let Some((obs, h)) = p.sent else { return Ok(()) };
+            let Some((obs, h)) = p.sent else {
+                return Ok(());
+            };
             cx.with_mut(|s| {
                 if let Some(f) = s.index.files.get_mut(&key) {
                     f.base_rev = a.rev;
@@ -376,14 +425,20 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
         }
         (item, R::MissingBlob(_)) => {
             // Блоб пропал между загрузкой и операцией (gc): повторим в следующем раунде.
-            cx.log(LogLevel::Warn, format!("блоб пропал на сервере, повтор: {item:?}"));
+            cx.log(
+                LogLevel::Warn,
+                format!("блоб пропал на сервере, повтор: {item:?}"),
+            );
         }
         (item, R::Rejected(rj)) => {
             if rj.code == "plaintext_in_encrypted_vault" {
                 return Err(SyncError::Restart);
             }
             let key = match &item {
-                Item::Mkdir { key } | Item::Rename { key, .. } | Item::Put { key } | Item::Delete { key } => key.clone(),
+                Item::Mkdir { key }
+                | Item::Rename { key, .. }
+                | Item::Put { key }
+                | Item::Delete { key } => key.clone(),
             };
             let plain = p.sent.map(|s| s.0.plain).unwrap_or_default();
             cx.with_mut(|s| {
@@ -398,8 +453,14 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
                     }
                 }
             });
-            cx.log(LogLevel::Warn, format!("сервер отклонил {key}: {} {}", rj.code, rj.message));
-            cx.notify(Notice::Rejected { path: key, code: rj.code });
+            cx.log(
+                LogLevel::Warn,
+                format!("сервер отклонил {key}: {} {}", rj.code, rj.message),
+            );
+            cx.notify(Notice::Rejected {
+                path: key,
+                code: rj.code,
+            });
         }
         (item, R::Conflict(c)) => {
             let Some(e) = c.server else {
@@ -435,9 +496,14 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
                         resolve_delete(cx, &target, remote).await?
                     }
                 }
-                Item::Rename { key, .. } => resolve_rename(cx, &key, remote, c.at_destination).await?,
+                Item::Rename { key, .. } => {
+                    resolve_rename(cx, &key, remote, c.at_destination).await?
+                }
                 Item::Mkdir { key } => {
-                    cx.log(LogLevel::Warn, format!("на месте папки {key} на сервере файл"));
+                    cx.log(
+                        LogLevel::Warn,
+                        format!("на месте папки {key} на сервере файл"),
+                    );
                     cx.with_mut(|s| {
                         if let Some(f) = s.index.files.get_mut(&key) {
                             f.rejected = Some(("folder_conflict".into(), Hash::default()));

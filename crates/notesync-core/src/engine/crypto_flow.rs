@@ -55,17 +55,17 @@ fn pause(cx: &Ctx, reason: &str, notice: Option<Notice>) -> SyncError {
         s.paused = Some(reason.to_owned());
         first
     });
-    if first
-        && let Some(n) = notice {
-            cx.notify(n);
-        }
+    if first && let Some(n) = notice {
+        cx.notify(n);
+    }
     SyncError::Paused(reason.to_owned())
 }
 
 /// Сверяет режим vault'а на сервере с локальным.
 pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()> {
     cx.with_mut(|s| s.server_state = Some(*vs));
-    let (mode, has_keys, migrating_here) = cx.with(|s| (s.index.mode, s.keys.is_some(), s.index.migration.is_some()));
+    let (mode, has_keys, migrating_here) =
+        cx.with(|s| (s.index.mode, s.keys.is_some(), s.index.migration.is_some()));
     match mode {
         VaultMode::Plain => {
             if vs.key_version == 0 || migrating_here {
@@ -73,7 +73,11 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
             }
             if vs.migration {
                 // Шифрование включают на другом устройстве: запись приостановлена.
-                return Err(pause(cx, "encryption_started", Some(Notice::EncryptionStarted)));
+                return Err(pause(
+                    cx,
+                    "encryption_started",
+                    Some(Notice::EncryptionStarted),
+                ));
             }
             if !has_keys {
                 return Err(pause(cx, "need_password", Some(Notice::NeedPassword)));
@@ -82,7 +86,10 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
             if plaintext_left(cx).await? {
                 // Ключ записан, а миграцию никто не ведёт (включавшее устройство не
                 // получило ответ или было убито до чекпоинта): доводим её сами.
-                cx.log(LogLevel::Warn, "шифрование включено не до конца: доводим перезаливку");
+                cx.log(
+                    LogLevel::Warn,
+                    "шифрование включено не до конца: доводим перезаливку",
+                );
                 cx.with_mut(|s| {
                     s.index.migration = Some(MigrationState {
                         key_version: vs.key_version,
@@ -93,7 +100,10 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
                 cx.save().await?;
                 return Err(SyncError::Restart);
             }
-            cx.log(LogLevel::Info, "vault зашифрован: переход в зашифрованный режим");
+            cx.log(
+                LogLevel::Info,
+                "vault зашифрован: переход в зашифрованный режим",
+            );
             switch_to_encrypted(cx, vs.key_version);
             cx.save().await?;
             Err(SyncError::Restart)
@@ -110,7 +120,11 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
                 // Пароль сменили на другом устройстве: мастер-ключ тот же — проверить.
                 cx.with_mut(|s| s.keys_verified = false);
                 verify_keys(cx).await?;
-                cx.with_mut(|s| s.index.mode = VaultMode::Encrypted { key_version: vs.key_version });
+                cx.with_mut(|s| {
+                    s.index.mode = VaultMode::Encrypted {
+                        key_version: vs.key_version,
+                    }
+                });
             }
             Ok(())
         }
@@ -126,7 +140,11 @@ pub(crate) async fn verify_keys(cx: &Ctx) -> SyncResult<()> {
     if vk.record.is_empty() {
         return Ok(());
     }
-    let ok = cx.with(|s| s.master.as_ref().map(|m| crypto::verify_master(&vk.record, m)));
+    let ok = cx.with(|s| {
+        s.master
+            .as_ref()
+            .map(|m| crypto::verify_master(&vk.record, m))
+    });
     match ok {
         Some(Ok(true)) => {
             cx.with_mut(|s| s.keys_verified = true);
@@ -235,7 +253,9 @@ pub(crate) async fn change_password(cx: &Ctx, old: String, new: String) -> SyncR
         if let Some(resp) = api::put_vault_key(cx, record, vk.version).await? {
             cx.with_mut(|s| {
                 if let VaultMode::Encrypted { .. } = s.index.mode {
-                    s.index.mode = VaultMode::Encrypted { key_version: resp.version };
+                    s.index.mode = VaultMode::Encrypted {
+                        key_version: resp.version,
+                    };
                 }
             });
             cx.save().await?;
@@ -243,7 +263,9 @@ pub(crate) async fn change_password(cx: &Ctx, old: String, new: String) -> SyncR
             return Ok(());
         }
     }
-    Err(SyncError::Protocol("запись ключа постоянно меняется".into()))
+    Err(SyncError::Protocol(
+        "запись ключа постоянно меняется".into(),
+    ))
 }
 
 /// Включение шифрования (вызывается из цикла после полной синхронизации).
@@ -258,7 +280,8 @@ pub(crate) async fn enable(cx: &Ctx, password: String, remember: bool) -> SyncRe
     }
     let master = MasterKey::generate().map_err(|e| SyncError::Io(e.to_string()))?;
     let kdf = cx.with(|s| s.cfg.kdf);
-    let record = crypto::seal_master_key(&master, &password, kdf, cx.now()).map_err(|e| SyncError::Io(e.to_string()))?;
+    let record = crypto::seal_master_key(&master, &password, kdf, cx.now())
+        .map_err(|e| SyncError::Io(e.to_string()))?;
     let Some(resp) = api::put_vault_key(cx, record, 0).await? else {
         return unlock(cx, password, remember).await;
     };
@@ -297,7 +320,9 @@ pub(crate) async fn migrate(cx: &Ctx) -> SyncResult<()> {
             if !complete {
                 // Без полной перезаливки purge стёр бы неперезалитое: повтор в
                 // следующем цикле.
-                return Err(SyncError::Io("миграция: перезалито не всё, повтор позже".into()));
+                return Err(SyncError::Io(
+                    "миграция: перезалито не всё, повтор позже".into(),
+                ));
             }
         }
         let max_seq = cx.with(|s| s.index.migration.as_ref().map_or(0, |m| m.max_seq));
@@ -325,7 +350,11 @@ async fn plaintext_left(cx: &Ctx) -> SyncResult<bool> {
     let mut cursor = 0;
     loop {
         let resp = api::changes(cx, cursor, 1000).await?;
-        if resp.entries.iter().any(|e| !e.deleted && e.path.as_ref().is_some_and(|p| !p.encrypted)) {
+        if resp
+            .entries
+            .iter()
+            .any(|e| !e.deleted && e.path.as_ref().is_some_and(|p| !p.encrypted))
+        {
             return Ok(true);
         }
         cursor = resp.next_seq.max(cursor);
@@ -338,7 +367,9 @@ async fn plaintext_left(cx: &Ctx) -> SyncResult<bool> {
 /// Один проход перезаливки. Возвращает `true`, если перезалито всё: только тогда
 /// можно стирать открытые записи (purge снимает всё, что не новее `max_seq`).
 async fn upload_all(cx: &Ctx) -> SyncResult<bool> {
-    let keys = cx.with(|s| s.keys.clone()).ok_or_else(|| SyncError::Paused("need_password".into()))?;
+    let keys = cx
+        .with(|s| s.keys.clone())
+        .ok_or_else(|| SyncError::Paused("need_password".into()))?;
     // Все открытые живые записи сервера (не только локальные файлы: у других устройств
     // могут быть свои исключения) и последние зашифрованные записи тех же путей.
     let mut cursor = 0;
@@ -354,7 +385,9 @@ async fn upload_all(cx: &Ctx) -> SyncResult<bool> {
                 }
                 continue;
             }
-            let Ok(vp) = VaultPath::from_segments(&p.segments) else { continue };
+            let Ok(vp) = VaultPath::from_segments(&p.segments) else {
+                continue;
+            };
             if e.deleted {
                 plain.remove(vp.as_str());
             } else {
@@ -368,10 +401,22 @@ async fn upload_all(cx: &Ctx) -> SyncResult<bool> {
     }
     // Занятые имена (для копий) и блобы живых зашифрованных файлов.
     let mut taken: BTreeSet<String> = plain.keys().chain(encrypted.keys()).cloned().collect();
-    let enc_blobs: BTreeSet<Vec<u8>> = encrypted.values().filter(|x| !x.deleted && !x.folder).map(|x| x.hash.clone()).collect();
+    let enc_blobs: BTreeSet<Vec<u8>> = encrypted
+        .values()
+        .filter(|x| !x.deleted && !x.folder)
+        .map(|x| x.hash.clone())
+        .collect();
     let (todo, takeover): (Vec<(String, pb::Entry)>, bool) = cx.with(|s| {
-        let Some(m) = s.index.migration.as_ref() else { return (Vec::new(), false) };
-        (plain.into_iter().filter(|(k, e)| m.done.get(k) != Some(&e.seq)).collect(), m.takeover)
+        let Some(m) = s.index.migration.as_ref() else {
+            return (Vec::new(), false);
+        };
+        (
+            plain
+                .into_iter()
+                .filter(|(k, e)| m.done.get(k) != Some(&e.seq))
+                .collect(),
+            m.takeover,
+        )
     });
     let total = u32::try_from(todo.len()).unwrap_or(u32::MAX);
     let mut complete = true;
@@ -389,17 +434,24 @@ async fn upload_all(cx: &Ctx) -> SyncResult<bool> {
                     continue;
                 }
                 ops.push(pb::Op {
-                    kind: Some(pb::op::Kind::Mkdir(pb::Mkdir { path: Some(enc_path) })),
+                    kind: Some(pb::op::Kind::Mkdir(pb::Mkdir {
+                        path: Some(enc_path),
+                    })),
                 });
                 meta.push((k.clone(), e.seq));
                 continue;
             }
-            let Some(h) = Hash::from_slice(&e.hash) else { continue };
+            let Some(h) = Hash::from_slice(&e.hash) else {
+                continue;
+            };
             let b = if e.size > SMALL_BLOB {
                 match reencrypt_big(cx, k, &h, e.size, &keys).await? {
                     Some(b) => b,
                     None => {
-                        cx.log(LogLevel::Error, format!("миграция: не удалось перезалить {k}"));
+                        cx.log(
+                            LogLevel::Error,
+                            format!("миграция: не удалось перезалить {k}"),
+                        );
                         complete = false;
                         continue;
                     }
@@ -407,7 +459,10 @@ async fn upload_all(cx: &Ctx) -> SyncResult<bool> {
             } else {
                 let Some(plain) = plaintext_of(cx, k, &h).await? else {
                     // Блоба нет на сервере: спасать нечего, purge не блокируем.
-                    cx.log(LogLevel::Error, format!("миграция: блоб {k} пропал на сервере"));
+                    cx.log(
+                        LogLevel::Error,
+                        format!("миграция: блоб {k} пропал на сервере"),
+                    );
                     mark_done(cx, k, e.seq);
                     continue;
                 };
@@ -427,7 +482,11 @@ async fn upload_all(cx: &Ctx) -> SyncResult<bool> {
                 if takeover && x.seq > e.seq {
                     // Открытая версия уже бывала зашифрованной (в истории пути или в
                     // другом файле) — её содержимое сохранено, purge ничего не теряет.
-                    let in_history = api::history(cx, &enc_path).await?.revisions.iter().any(|r| r.hash == b.hash.to_vec());
+                    let in_history = api::history(cx, &enc_path)
+                        .await?
+                        .revisions
+                        .iter()
+                        .any(|r| r.hash == b.hash.to_vec());
                     if in_history || enc_blobs.contains(&b.hash.to_vec()) {
                         mark_done(cx, k, e.seq);
                         continue;
@@ -438,13 +497,25 @@ async fn upload_all(cx: &Ctx) -> SyncResult<bool> {
                 Some(x) if takeover && x.seq > e.seq => {
                     // Обе версии могут нести правки, которых нет в другой: открытая
                     // сохраняется зашифрованной копией рядом.
-                    let (date, _) = super::resolve::stamp(cx.now(), cx.with(|s| s.cfg.tz_offset_min));
+                    let (date, _) =
+                        super::resolve::stamp(cx.now(), cx.with(|s| s.cfg.tz_offset_min));
                     let copy = (1..100)
-                        .map(|n| if n == 1 { format!("plaintext {date}") } else { format!("plaintext {date} {n}") })
+                        .map(|n| {
+                            if n == 1 {
+                                format!("plaintext {date}")
+                            } else {
+                                format!("plaintext {date} {n}")
+                            }
+                        })
                         .map(|l| vp.with_suffix(&l).as_str().to_owned())
                         .find(|c| !taken.contains(c))
-                        .ok_or_else(|| SyncError::Io(format!("миграция: нет свободного имени для копии {k}")))?;
-                    cx.log(LogLevel::Warn, format!("миграция: открытая версия {k} сохранена копией {copy}"));
+                        .ok_or_else(|| {
+                            SyncError::Io(format!("миграция: нет свободного имени для копии {k}"))
+                        })?;
+                    cx.log(
+                        LogLevel::Warn,
+                        format!("миграция: открытая версия {k} сохранена копией {copy}"),
+                    );
                     taken.insert(copy.clone());
                     let cp = VaultPath::parse(&copy).map_err(|er| SyncError::Io(er.to_string()))?;
                     (keys.encrypt_path(&cp), 0)
@@ -506,8 +577,20 @@ fn mark_done(cx: &Ctx, key: &str, seq: u64) {
 
 /// Большой файл: перешифровать потоком — из локальной копии, если она совпадает с
 /// сервером, иначе через временный файл.
-async fn reencrypt_big(cx: &Ctx, key: &str, h: &Hash, size: u64, keys: &crate::crypto::VaultKeys) -> SyncResult<Option<super::transfer::PreparedBlob>> {
-    let local = cx.with(|s| s.index.files.get(key).filter(|f| f.clean() && f.base_blob == Some(*h)).and_then(|f| f.local));
+async fn reencrypt_big(
+    cx: &Ctx,
+    key: &str,
+    h: &Hash,
+    size: u64,
+    keys: &crate::crypto::VaultKeys,
+) -> SyncResult<Option<super::transfer::PreparedBlob>> {
+    let local = cx.with(|s| {
+        s.index
+            .files
+            .get(key)
+            .filter(|f| f.clean() && f.base_blob == Some(*h))
+            .and_then(|f| f.local)
+    });
     let (temp, obs) = match local {
         Some(obs) => (None, obs),
         None => {
@@ -522,7 +605,9 @@ async fn reencrypt_big(cx: &Ctx, key: &str, h: &Hash, size: u64, keys: &crate::c
     let Some(b) = prepare_big(cx, src, &obs, Some(keys)).await? else {
         return Ok(None);
     };
-    if !api::blobs_missing(cx, &[b.hash]).await?.is_empty() && !upload_big(cx, key, src, &obs, &b, Some(keys)).await? {
+    if !api::blobs_missing(cx, &[b.hash]).await?.is_empty()
+        && !upload_big(cx, key, src, &obs, &b, Some(keys)).await?
+    {
         return Ok(None);
     }
     if let Some(t) = temp {
@@ -533,12 +618,19 @@ async fn reencrypt_big(cx: &Ctx, key: &str, h: &Hash, size: u64, keys: &crate::c
 
 /// Открытый текст записи: из локального файла, если он совпадает, иначе с сервера.
 async fn plaintext_of(cx: &Ctx, key: &str, h: &Hash) -> SyncResult<Option<Vec<u8>>> {
-    let local = cx.with(|s| s.index.files.get(key).filter(|f| f.clean() && f.base_blob == Some(*h)).and_then(|f| f.base_plain));
+    let local = cx.with(|s| {
+        s.index
+            .files
+            .get(key)
+            .filter(|f| f.clean() && f.base_blob == Some(*h))
+            .and_then(|f| f.base_plain)
+    });
     if let Some(plain_hash) = local
         && let Some(d) = cx.read(key, 0, None).await?
-            && Hash::of(&d) == plain_hash {
-                return Ok(Some(d));
-            }
+        && Hash::of(&d) == plain_hash
+    {
+        return Ok(Some(d));
+    }
     match fetch_small(cx, h).await {
         Ok(d) => Ok(Some(d)),
         Err(SyncError::BlobGone) => Ok(None),

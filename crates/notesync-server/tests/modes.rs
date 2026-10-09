@@ -44,7 +44,10 @@ impl CgiResp {
 }
 
 fn parse_cgi(out: &[u8]) -> CgiResp {
-    let sep = out.windows(4).position(|w| w == b"\r\n\r\n").expect("нет конца заголовков");
+    let sep = out
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .expect("нет конца заголовков");
     let head = std::str::from_utf8(&out[..sep]).unwrap();
     let mut status = 0;
     let mut headers = Vec::new();
@@ -63,7 +66,15 @@ fn parse_cgi(out: &[u8]) -> CgiResp {
     }
 }
 
-fn cgi(data: &std::path::Path, method: &str, path: &str, query: &str, token: Option<&str>, body: &[u8], extra: &[(&str, &str)]) -> CgiResp {
+fn cgi(
+    data: &std::path::Path,
+    method: &str,
+    path: &str,
+    query: &str,
+    token: Option<&str>,
+    body: &[u8],
+    extra: &[(&str, &str)],
+) -> CgiResp {
     let mut cmd = Command::new(BIN);
     cmd.env_clear()
         .env("GATEWAY_INTERFACE", "CGI/1.1")
@@ -86,7 +97,11 @@ fn cgi(data: &std::path::Path, method: &str, path: &str, query: &str, token: Opt
     let mut child = cmd.spawn().unwrap();
     child.stdin.take().unwrap().write_all(body).unwrap();
     let out = child.wait_with_output().unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     parse_cgi(&out.stdout)
 }
 
@@ -113,7 +128,11 @@ fn cgi_health_cold_start() {
         let r = cgi(data.path(), "GET", "/v1/health", "", None, b"", &[]);
         best = best.min(t.elapsed());
         assert_eq!(r.status, 200);
-        assert!(r.header("content-type").unwrap().starts_with("application/json"));
+        assert!(
+            r.header("content-type")
+                .unwrap()
+                .starts_with("application/json")
+        );
         let v: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
         assert_eq!(v["status"], "ok");
     }
@@ -130,32 +149,99 @@ fn cgi_full_request_cycle_with_range() {
     let token = add_token(data.path(), "notes");
     let content = blob::encode(b"hello from cgi", None);
     let h = Hash::of(&content);
-    let r = cgi(data.path(), "PUT", &format!("/v1/blobs/{}", h.to_hex()), "", Some(&token), &content, &[]);
+    let r = cgi(
+        data.path(),
+        "PUT",
+        &format!("/v1/blobs/{}", h.to_hex()),
+        "",
+        Some(&token),
+        &content,
+        &[],
+    );
     assert_eq!(r.status, 201);
-    let ops = pb::OpsRequest { ops: vec![put_op("cgi.md", h, content.len() as u64)] };
-    let r = cgi(data.path(), "POST", "/v1/ops", "", Some(&token), &ops.encode_to_vec(), &[("CONTENT_TYPE", "application/x-protobuf")]);
+    let ops = pb::OpsRequest {
+        ops: vec![put_op("cgi.md", h, content.len() as u64)],
+    };
+    let r = cgi(
+        data.path(),
+        "POST",
+        "/v1/ops",
+        "",
+        Some(&token),
+        &ops.encode_to_vec(),
+        &[("CONTENT_TYPE", "application/x-protobuf")],
+    );
     assert_eq!(r.status, 200);
     let resp = pb::OpsResponse::decode(&r.body[..]).unwrap();
-    assert!(matches!(resp.results[0].result, Some(pb::op_result::Result::Applied(_))));
-    let r = cgi(data.path(), "GET", "/v1/changes", "since=0", Some(&token), b"", &[]);
+    assert!(matches!(
+        resp.results[0].result,
+        Some(pb::op_result::Result::Applied(_))
+    ));
+    let r = cgi(
+        data.path(),
+        "GET",
+        "/v1/changes",
+        "since=0",
+        Some(&token),
+        b"",
+        &[],
+    );
     let ch = pb::ChangesResponse::decode(&r.body[..]).unwrap();
     assert_eq!(ch.entries.len(), 1);
     // Range
-    let r = cgi(data.path(), "GET", &format!("/v1/blobs/{}", h.to_hex()), "", Some(&token), b"", &[("HTTP_RANGE", "bytes=17-21")]);
+    let r = cgi(
+        data.path(),
+        "GET",
+        &format!("/v1/blobs/{}", h.to_hex()),
+        "",
+        Some(&token),
+        b"",
+        &[("HTTP_RANGE", "bytes=17-21")],
+    );
     assert_eq!(r.status, 206);
     assert_eq!(r.body, b"hello");
-    assert_eq!(r.header("content-range"), Some(format!("bytes 17-21/{}", content.len()).as_str()));
+    assert_eq!(
+        r.header("content-range"),
+        Some(format!("bytes 17-21/{}", content.len()).as_str())
+    );
     // без токена
     let r = cgi(data.path(), "GET", "/v1/changes", "", None, b"", &[]);
     assert_eq!(r.status, 401);
     // путь через SCRIPT_NAME (caddy-cgi) и REQUEST_URI (fcgiwrap)
-    let r = cgi(data.path(), "GET", "/changes", "since=0", Some(&token), b"", &[("SCRIPT_NAME", "/v1")]);
+    let r = cgi(
+        data.path(),
+        "GET",
+        "/changes",
+        "since=0",
+        Some(&token),
+        b"",
+        &[("SCRIPT_NAME", "/v1")],
+    );
     assert_eq!(r.status, 200);
-    let r = cgi(data.path(), "GET", "", "", Some(&token), b"", &[("SCRIPT_NAME", "/usr/local/bin/notesync"), ("REQUEST_URI", "/v1/stats")]);
+    let r = cgi(
+        data.path(),
+        "GET",
+        "",
+        "",
+        Some(&token),
+        b"",
+        &[
+            ("SCRIPT_NAME", "/usr/local/bin/notesync"),
+            ("REQUEST_URI", "/v1/stats"),
+        ],
+    );
     assert_eq!(r.status, 200);
     // wait в CGI отвечает сразу
     let t = Instant::now();
-    let r = cgi(data.path(), "GET", "/v1/wait", "since=1&timeout=25", Some(&token), b"", &[]);
+    let r = cgi(
+        data.path(),
+        "GET",
+        "/v1/wait",
+        "since=1&timeout=25",
+        Some(&token),
+        b"",
+        &[],
+    );
     assert_eq!(r.status, 200);
     assert!(t.elapsed() < Duration::from_secs(3));
 }
@@ -166,7 +252,15 @@ fn cgi_concurrent_writers_keep_seq_monotonic() {
     let token = add_token(data.path(), "notes");
     let content = blob::encode(b"same content", None);
     let h = Hash::of(&content);
-    cgi(data.path(), "PUT", &format!("/v1/blobs/{}", h.to_hex()), "", Some(&token), &content, &[]);
+    cgi(
+        data.path(),
+        "PUT",
+        &format!("/v1/blobs/{}", h.to_hex()),
+        "",
+        Some(&token),
+        &content,
+        &[],
+    );
     const PROCS: usize = 16;
     const PER: usize = 5;
     let handles: Vec<_> = (0..PROCS)
@@ -176,11 +270,24 @@ fn cgi_concurrent_writers_keep_seq_monotonic() {
             let content_len = content.len() as u64;
             std::thread::spawn(move || {
                 for i in 0..PER {
-                    let ops = pb::OpsRequest { ops: vec![put_op(&format!("p{p}/f{i}.md"), h, content_len)] };
-                    let r = cgi(&data, "POST", "/v1/ops", "", Some(&token), &ops.encode_to_vec(), &[]);
+                    let ops = pb::OpsRequest {
+                        ops: vec![put_op(&format!("p{p}/f{i}.md"), h, content_len)],
+                    };
+                    let r = cgi(
+                        &data,
+                        "POST",
+                        "/v1/ops",
+                        "",
+                        Some(&token),
+                        &ops.encode_to_vec(),
+                        &[],
+                    );
                     assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
                     let resp = pb::OpsResponse::decode(&r.body[..]).unwrap();
-                    assert!(matches!(resp.results[0].result, Some(pb::op_result::Result::Applied(_))));
+                    assert!(matches!(
+                        resp.results[0].result,
+                        Some(pb::op_result::Result::Applied(_))
+                    ));
                 }
             })
         })
@@ -188,11 +295,22 @@ fn cgi_concurrent_writers_keep_seq_monotonic() {
     for hnd in handles {
         hnd.join().unwrap();
     }
-    let r = cgi(data.path(), "GET", "/v1/changes", "since=0&limit=5000", Some(&token), b"", &[]);
+    let r = cgi(
+        data.path(),
+        "GET",
+        "/v1/changes",
+        "since=0&limit=5000",
+        Some(&token),
+        b"",
+        &[],
+    );
     let ch = pb::ChangesResponse::decode(&r.body[..]).unwrap();
     let seqs: Vec<u64> = ch.entries.iter().map(|e| e.seq).collect();
     let expected: Vec<u64> = (1..=(PROCS * PER) as u64).collect();
-    assert_eq!(seqs, expected, "seq строго монотонный, без пропусков и дублей");
+    assert_eq!(
+        seqs, expected,
+        "seq строго монотонный, без пропусков и дублей"
+    );
 }
 
 /// Запускает `notesync socket`, передавая слушающий сокет как fd 3 (как systemd).
@@ -228,8 +346,14 @@ fn spawn_socket(listener: &TcpListener, data: &std::path::Path, idle: &str) -> C
 fn http_get(addr: std::net::SocketAddr, path: &str, token: Option<&str>) -> (u16, Vec<u8>) {
     let mut s = TcpStream::connect(addr).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
-    let auth = token.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
-    write!(s, "GET {path} HTTP/1.1\r\nHost: x\r\nX-Notesync-Proto: 1\r\n{auth}Connection: close\r\n\r\n").unwrap();
+    let auth = token
+        .map(|t| format!("Authorization: Bearer {t}\r\n"))
+        .unwrap_or_default();
+    write!(
+        s,
+        "GET {path} HTTP/1.1\r\nHost: x\r\nX-Notesync-Proto: 1\r\n{auth}Connection: close\r\n\r\n"
+    )
+    .unwrap();
     let mut buf = Vec::new();
     s.read_to_end(&mut buf).unwrap();
     let text = String::from_utf8_lossy(&buf);
@@ -259,7 +383,8 @@ fn socket_activation_idle_exit_and_reactivation() {
     assert_eq!(st, 200);
     assert!(String::from_utf8_lossy(&body).contains("\"ok\""));
     // простой → выход с кодом 0
-    let status = wait_exit(&mut child, Duration::from_secs(10)).expect("процесс не вышел по простою");
+    let status =
+        wait_exit(&mut child, Duration::from_secs(10)).expect("процесс не вышел по простою");
     assert!(status.success());
     // процесса нет, а сокет слушает (его держит «systemd» — тест): запрос ждёт в очереди
     let pending = std::thread::spawn(move || http_get(addr, "/v1/health", None));
@@ -267,7 +392,11 @@ fn socket_activation_idle_exit_and_reactivation() {
     let mut child2 = spawn_socket(&listener, data.path(), "1s");
     let (st, _) = pending.join().unwrap();
     assert_eq!(st, 200, "следующий запрос обслужен новым процессом");
-    assert!(wait_exit(&mut child2, Duration::from_secs(10)).unwrap().success());
+    assert!(
+        wait_exit(&mut child2, Duration::from_secs(10))
+            .unwrap()
+            .success()
+    );
 }
 
 #[test]
@@ -304,7 +433,11 @@ fn socket_long_request_not_cut_and_wait_does_not_hold() {
     let (st, body) = http_get(addr, "/v1/wait?since=999&timeout=25", Some(&token));
     assert_eq!(st, 200);
     assert!(pb::VaultState::decode(&body[..]).is_ok());
-    assert!(t.elapsed() < Duration::from_secs(10), "wait продержал процесс {:?}", t.elapsed());
+    assert!(
+        t.elapsed() < Duration::from_secs(10),
+        "wait продержал процесс {:?}",
+        t.elapsed()
+    );
     let status = wait_exit(&mut child, Duration::from_secs(10)).expect("процесс не вышел");
     assert!(status.success());
 }
@@ -331,9 +464,21 @@ fn systemd_socket_activate_tool() {
         return;
     }
     let data = tempfile::tempdir().unwrap();
-    let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     let mut child = Command::new(tool)
-        .args(["-l", &format!("127.0.0.1:{port}"), BIN, "socket", "--idle-timeout", "1s", "--data"])
+        .args([
+            "-l",
+            &format!("127.0.0.1:{port}"),
+            BIN,
+            "socket",
+            "--idle-timeout",
+            "1s",
+            "--data",
+        ])
         .arg(data.path())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

@@ -66,15 +66,23 @@ impl TestServer {
     pub fn token(&self, vault: &str, name: &str) -> String {
         let pool = self.state.server_pool().unwrap();
         let c = pool.get().unwrap();
-        notesync_server::db::server::add_device(&c, vault, name).unwrap().1
+        notesync_server::db::server::add_device(&c, vault, name)
+            .unwrap()
+            .1
     }
 
     pub async fn send(&self, req: Request<Body>) -> Resp {
         let resp = self.app.clone().oneshot(req).await.unwrap();
         let status = resp.status();
         let headers = resp.headers().clone();
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-        Resp { status, headers, body }
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        Resp {
+            status,
+            headers,
+            body,
+        }
     }
 
     pub async fn call(
@@ -103,31 +111,50 @@ impl TestServer {
     }
 
     pub async fn post<M: Message>(&self, uri: &str, token: &str, m: &M) -> Resp {
-        self.call(Method::POST, uri, Some(token), m.encode_to_vec(), &[]).await
+        self.call(Method::POST, uri, Some(token), m.encode_to_vec(), &[])
+            .await
     }
 
     pub async fn put_blob(&self, token: &str, data: &[u8]) -> (Hash, Resp) {
         let h = Hash::of(data);
         let r = self
-            .call(Method::PUT, &format!("/v1/blobs/{}", h.to_hex()), Some(token), data.to_vec(), &[])
+            .call(
+                Method::PUT,
+                &format!("/v1/blobs/{}", h.to_hex()),
+                Some(token),
+                data.to_vec(),
+                &[],
+            )
             .await;
         (h, r)
     }
 
     pub async fn ops(&self, token: &str, ops: Vec<pb::Op>) -> pb::OpsResponse {
-        self.post("/v1/ops", token, &pb::OpsRequest { ops }).await.proto()
+        self.post("/v1/ops", token, &pb::OpsRequest { ops })
+            .await
+            .proto()
     }
 
     pub async fn changes(&self, token: &str, since: u64) -> pb::ChangesResponse {
-        self.get(&format!("/v1/changes?since={since}"), token).await.proto()
+        self.get(&format!("/v1/changes?since={since}"), token)
+            .await
+            .proto()
     }
 
     /// Загружает содержимое как открытый блоб и кладёт его по пути.
-    pub async fn write_file(&self, token: &str, path: &str, base_rev: u64, content: &[u8]) -> pb::OpResult {
+    pub async fn write_file(
+        &self,
+        token: &str,
+        path: &str,
+        base_rev: u64,
+        content: &[u8],
+    ) -> pb::OpResult {
         let b = blob::encode(content, None);
         let (h, r) = self.put_blob(token, &b).await;
         assert!(r.status.is_success(), "{}", r.status);
-        let mut resp = self.ops(token, vec![put_op(path, base_rev, h, b.len() as u64)]).await;
+        let mut resp = self
+            .ops(token, vec![put_op(path, base_rev, h, b.len() as u64)])
+            .await;
         resp.results.remove(0)
     }
 }

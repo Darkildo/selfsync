@@ -89,9 +89,10 @@ impl FileState {
         match (&self.local, self.folder) {
             (Some(l), false) => {
                 if let Some((_, h)) = &self.rejected
-                    && *h == l.plain {
-                        return false;
-                    }
+                    && *h == l.plain
+                {
+                    return false;
+                }
                 match (self.base_rev, self.base_plain) {
                     // Новый файл.
                     (0, None) => true,
@@ -107,7 +108,10 @@ impl FileState {
     /// Файл удалён локально, а на сервере ещё жив (или, после сброса баз, может
     /// быть жив — тогда ревизию уточнит конфликт).
     pub fn delete_pending(&self) -> bool {
-        self.local.is_none() && (self.base_rev > 0 || self.pending_put.is_some() || (!self.folder && self.base_plain.is_some()))
+        self.local.is_none()
+            && (self.base_rev > 0
+                || self.pending_put.is_some()
+                || (!self.folder && self.base_plain.is_some()))
     }
 
     /// Локальная версия совпадает с базой (можно молча перезаписать серверной или
@@ -200,7 +204,8 @@ impl Index {
         let format = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
         match format {
             INDEX_FORMAT => {
-                let mut idx: Index = postcard::from_bytes(&bytes[8..]).map_err(|_| IndexError::Corrupt)?;
+                let mut idx: Index =
+                    postcard::from_bytes(&bytes[8..]).map_err(|_| IndexError::Corrupt)?;
                 idx.format = INDEX_FORMAT;
                 Ok(idx)
             }
@@ -213,7 +218,12 @@ impl Index {
     pub fn pending_count(&self) -> usize {
         self.files
             .values()
-            .filter(|f| f.content_dirty() || f.delete_pending() || f.server_path.is_some() || (f.folder && f.base_rev == 0 && f.local.is_some()))
+            .filter(|f| {
+                f.content_dirty()
+                    || f.delete_pending()
+                    || f.server_path.is_some()
+                    || (f.folder && f.base_rev == 0 && f.local.is_some())
+            })
             .count()
     }
 }

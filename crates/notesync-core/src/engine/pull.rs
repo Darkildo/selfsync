@@ -13,7 +13,9 @@ use notesync_proto::v1 as pb;
 use super::api;
 use super::crypto_flow::{check_state, rebaseline};
 use super::ctx::{Ctx, SyncError, SyncResult};
-use super::resolve::{Remote, case_twin, rename_local, resolve_content, resolve_delete, split_case};
+use super::resolve::{
+    Remote, case_twin, rename_local, resolve_content, resolve_delete, split_case,
+};
 use super::transfer::{download_to, read_local};
 use super::types::{Expect, LogLevel, Notice};
 use crate::hash::Hash;
@@ -46,7 +48,10 @@ pub(crate) async fn pull(cx: &Ctx) -> SyncResult<bool> {
                 check_state(cx, &vs).await?;
                 if vs.seq < since {
                     // Сервер «моложе» клиента (восстановлен из бэкапа): полная сверка.
-                    cx.log(LogLevel::Warn, format!("сервер вернулся с seq {since} на {}: полная сверка", vs.seq));
+                    cx.log(
+                        LogLevel::Warn,
+                        format!("сервер вернулся с seq {since} на {}: полная сверка", vs.seq),
+                    );
                     cx.notify(Notice::ServerRewound);
                     rebaseline(cx, true);
                     cx.save().await?;
@@ -137,7 +142,10 @@ fn decode(cx: &Ctx, entries: Vec<pb::Entry>) -> Vec<Item> {
         let Some(p) = e.path.as_ref() else { continue };
         let Some(vp) = cx.with(|s| s.decode_path(p)) else {
             if p.encrypted == cx.with(|s| s.encrypted()) {
-                cx.log(LogLevel::Warn, format!("запись seq {} не расшифровывается — пропущена", e.seq));
+                cx.log(
+                    LogLevel::Warn,
+                    format!("запись seq {} не расшифровывается — пропущена", e.seq),
+                );
             }
             continue;
         };
@@ -177,9 +185,15 @@ async fn apply_batch(cx: &Ctx, entries: Vec<pb::Entry>, full_listing: bool) -> S
     }
     dirs.sort_by_key(|i| i.key.matches('/').count());
     tombs.sort_by_key(|i| (i.e.folder, std::cmp::Reverse(i.key.matches('/').count())));
-    files.sort_by_key(|i| (!VaultPath::parse(&i.key).is_ok_and(|p| p.is_note()), i.e.size));
+    files.sort_by_key(|i| {
+        (
+            !VaultPath::parse(&i.key).is_ok_and(|p| p.is_note()),
+            i.e.size,
+        )
+    });
 
-    let total = u32::try_from(dirs.len() + renames.len() + tombs.len() + files.len()).unwrap_or(u32::MAX);
+    let total =
+        u32::try_from(dirs.len() + renames.len() + tombs.len() + files.len()).unwrap_or(u32::MAX);
     let mut done = 0u32;
     cx.set_status(|st| {
         st.total = total;
@@ -244,7 +258,10 @@ async fn apply_folder(cx: &Ctx, it: &Item) -> SyncResult<bool> {
             Ok(false)
         }
         Some(false) => {
-            cx.log(LogLevel::Warn, format!("на сервере папка {} на месте локального файла", it.key));
+            cx.log(
+                LogLevel::Warn,
+                format!("на сервере папка {} на месте локального файла", it.key),
+            );
             Ok(false)
         }
         None => {
@@ -283,52 +300,71 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
             "pull file {key} rev {} seq {} from {:?}; index {:?}",
             r.rev,
             it.e.seq,
-            it.e.renamed_from.as_ref().and_then(|p| cx.with(|s| s.decode_path(p))),
-            f.as_ref().map(|f| (f.base_rev, f.local.is_some(), f.clean(), f.server_path.clone()))
+            it.e.renamed_from
+                .as_ref()
+                .and_then(|p| cx.with(|s| s.decode_path(p))),
+            f.as_ref().map(|f| (
+                f.base_rev,
+                f.local.is_some(),
+                f.clean(),
+                f.server_path.clone()
+            ))
         ),
     );
     // Своё эхо или уже применено.
     if let Some(f) = &f
-        && r.hash.is_some() && f.base_rev == r.rev && f.base_blob == r.hash {
-            return Ok(false);
-        }
+        && r.hash.is_some()
+        && f.base_rev == r.rev
+        && f.base_blob == r.hash
+    {
+        return Ok(false);
+    }
     // Переименование файла, который у нас есть: локальный rename без скачивания.
-    if let Some(from) = it.e.renamed_from.as_ref().and_then(|p| cx.with(|s| s.decode_path(p))) {
+    if let Some(from) =
+        it.e.renamed_from
+            .as_ref()
+            .and_then(|p| cx.with(|s| s.decode_path(p)))
+    {
         let from = from.as_str().to_owned();
         let src = cx.with(|s| s.index.files.get(&from).cloned());
         if let Some(src) = src
-            && from != *key && f.is_none() && src.local.is_some() && src.server_path.is_none() && r.hash.is_some() {
-                // На регистронезависимой ФС stat нового имени при смене только регистра
-                // находит сам источник — это не занятое место.
-                let free = match cx.stat(key).await? {
-                    None => true,
-                    Some(m) => m.path == from,
-                };
-                if free && rename_local(cx, &from, key).await? {
-                    let unchanged = src.base_blob == r.hash;
-                    cx.with_mut(|s| {
-                        if let Some(mut moved) = s.index.files.remove(&from) {
-                            if unchanged {
-                                moved.base_rev = r.rev;
-                                moved.base_blob = r.hash;
-                            } else {
-                                // Содержимое на сервере сменилось вместе с именем: базу
-                                // сверит resolve_content (base_plain остаётся предком).
-                                moved.base_rev = 0;
-                                moved.base_blob = None;
-                            }
-                            s.index.files.insert(key.clone(), moved);
+            && from != *key
+            && f.is_none()
+            && src.local.is_some()
+            && src.server_path.is_none()
+            && r.hash.is_some()
+        {
+            // На регистронезависимой ФС stat нового имени при смене только регистра
+            // находит сам источник — это не занятое место.
+            let free = match cx.stat(key).await? {
+                None => true,
+                Some(m) => m.path == from,
+            };
+            if free && rename_local(cx, &from, key).await? {
+                let unchanged = src.base_blob == r.hash;
+                cx.with_mut(|s| {
+                    if let Some(mut moved) = s.index.files.remove(&from) {
+                        if unchanged {
+                            moved.base_rev = r.rev;
+                            moved.base_blob = r.hash;
+                        } else {
+                            // Содержимое на сервере сменилось вместе с именем: базу
+                            // сверит resolve_content (base_plain остаётся предком).
+                            moved.base_rev = 0;
+                            moved.base_blob = None;
                         }
-                        s.dirty.insert(key.clone());
-                    });
-                    if !unchanged {
-                        cx.save().await?;
-                        resolve_content(cx, key, r.clone()).await?;
-                        hold_unsettled(cx, key, it);
+                        s.index.files.insert(key.clone(), moved);
                     }
-                    return Ok(true);
+                    s.dirty.insert(key.clone());
+                });
+                if !unchanged {
+                    cx.save().await?;
+                    resolve_content(cx, key, r.clone()).await?;
+                    hold_unsettled(cx, key, it);
                 }
+                return Ok(true);
             }
+        }
     }
     // Регистронезависимая ФС: другой файл с тем же именем без учёта регистра.
     if cx.with(|s| s.cfg.case_insensitive) && f.is_none() {
@@ -361,7 +397,18 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
             hold_unsettled(cx, key, it);
             Ok(true)
         }
-        Some(f) if f.clean() => match download_to(cx, key, &hash, r.size, Expect::Stat { size: f.local.map_or(0, |l| l.size), mtime: f.local.map_or(0, |l| l.mtime) }).await? {
+        Some(f) if f.clean() => match download_to(
+            cx,
+            key,
+            &hash,
+            r.size,
+            Expect::Stat {
+                size: f.local.map_or(0, |l| l.size),
+                mtime: f.local.map_or(0, |l| l.mtime),
+            },
+        )
+        .await?
+        {
             Some((obs, cache)) => {
                 set_synced(cx, key, r, obs);
                 if let Some(c) = cache {
@@ -446,7 +493,12 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
 /// Запись, ушедшая с этого пути (переименование вслед за сервером, копия), считается
 /// разобранной.
 fn hold_unsettled(cx: &Ctx, key: &str, it: &Item) {
-    if cx.with(|s| s.index.files.get(key).is_some_and(|f| f.base_rev != it.r.rev)) {
+    if cx.with(|s| {
+        s.index
+            .files
+            .get(key)
+            .is_some_and(|f| f.base_rev != it.r.rev)
+    }) {
         hold(cx, it.e.seq);
     }
 }
@@ -474,13 +526,24 @@ fn set_synced(cx: &Ctx, key: &str, r: &Remote, obs: LocalObs) {
 async fn apply_tombstone(cx: &Ctx, it: &Item) -> SyncResult<bool> {
     let key = &it.key;
     let r = &it.r;
-    let (initial_done, rewound, f) = cx.with(|s| (s.index.initial_done, s.index.rewound, s.index.files.get(key).cloned()));
+    let (initial_done, rewound, f) = cx.with(|s| {
+        (
+            s.index.initial_done,
+            s.index.rewound,
+            s.index.files.get(key).cloned(),
+        )
+    });
     cx.log(
         LogLevel::Debug,
         format!(
             "pull tomb {key} rev {} initial_done {initial_done}; index {:?}",
             r.rev,
-            f.as_ref().map(|f| (f.base_rev, f.local.is_some(), f.clean(), f.server_path.clone()))
+            f.as_ref().map(|f| (
+                f.base_rev,
+                f.local.is_some(),
+                f.clean(),
+                f.server_path.clone()
+            ))
         ),
     );
     let Some(f) = f else { return Ok(false) };
@@ -524,7 +587,16 @@ async fn apply_tombstone(cx: &Ctx, it: &Item) -> SyncResult<bool> {
     }
     if f.clean() {
         let l = f.local.unwrap_or(dir_obs());
-        if cx.trash(key, Expect::Stat { size: l.size, mtime: l.mtime }).await? {
+        if cx
+            .trash(
+                key,
+                Expect::Stat {
+                    size: l.size,
+                    mtime: l.mtime,
+                },
+            )
+            .await?
+        {
             cx.with_mut(|s| {
                 s.index.files.remove(key);
             });
@@ -545,7 +617,10 @@ async fn apply_tombstone(cx: &Ctx, it: &Item) -> SyncResult<bool> {
             f.base_blob = None;
         }
     });
-    cx.log(LogLevel::Info, format!("{key} удалён на другом устройстве, но изменён здесь — возвращается"));
+    cx.log(
+        LogLevel::Info,
+        format!("{key} удалён на другом устройстве, но изменён здесь — возвращается"),
+    );
     cx.notify(Notice::RestoredEdited { path: key.clone() });
     Ok(false)
 }
@@ -568,7 +643,16 @@ async fn drop_missing(cx: &Ctx, listed: &BTreeSet<String>) -> SyncResult<bool> {
             });
         } else if f.clean() && !f.folder {
             let l = f.local.unwrap_or(dir_obs());
-            if cx.trash(&k, Expect::Stat { size: l.size, mtime: l.mtime }).await? {
+            if cx
+                .trash(
+                    &k,
+                    Expect::Stat {
+                        size: l.size,
+                        mtime: l.mtime,
+                    },
+                )
+                .await?
+            {
                 cx.with_mut(|s| {
                     s.index.files.remove(&k);
                 });

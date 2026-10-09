@@ -70,7 +70,6 @@ impl Hub {
     pub fn take_outbox(&self) -> Vec<Action> {
         std::mem::take(&mut *self.outbox.borrow_mut())
     }
-
 }
 
 pub(crate) struct IoFuture {
@@ -111,4 +110,3 @@ pub(crate) fn poll_task(t: &mut Task) -> bool {
     let mut cx = Context::from_waker(Waker::noop());
     t.as_mut().poll(&mut cx).is_ready()
 }
-

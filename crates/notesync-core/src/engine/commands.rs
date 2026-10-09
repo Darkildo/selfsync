@@ -49,7 +49,9 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             let mut items = Vec::new();
             for it in d.items {
                 let Some(e) = it.entry else { continue };
-                let Some(path) = e.path.as_ref().and_then(|p| cx.with(|s| s.decode_path(p))) else { continue };
+                let Some(path) = e.path.as_ref().and_then(|p| cx.with(|s| s.decode_path(p))) else {
+                    continue;
+                };
                 items.push(DeletedView {
                     path: path.as_str().to_owned(),
                     deleted_at: e.deleted_at,
@@ -64,8 +66,12 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             let d = api::deleted(cx).await?;
             let mut ops = Vec::new();
             for it in d.items {
-                let (Some(e), Some(last)) = (it.entry, it.last_live) else { continue };
-                let Some(path) = e.path.as_ref().and_then(|p| cx.with(|s| s.decode_path(p))) else { continue };
+                let (Some(e), Some(last)) = (it.entry, it.last_live) else {
+                    continue;
+                };
+                let Some(path) = e.path.as_ref().and_then(|p| cx.with(|s| s.decode_path(p))) else {
+                    continue;
+                };
                 if !paths.iter().any(|p| p == path.as_str()) {
                     continue;
                 }
@@ -211,7 +217,8 @@ async fn restore_revision(cx: &Ctx, path: &str, rev: u64) -> SyncResult<UiResult
             message: format!("ревизии {rev} нет"),
         });
     };
-    let hash = Hash::from_slice(&r.hash).ok_or_else(|| SyncError::Protocol("ревизия без хэша".into()))?;
+    let hash =
+        Hash::from_slice(&r.hash).ok_or_else(|| SyncError::Protocol("ревизия без хэша".into()))?;
     let f = cx.with(|s| s.index.files.get(&key).cloned());
     let target = match &f {
         Some(f) if f.clean() || f.local.is_none() => key.clone(),
@@ -229,7 +236,9 @@ async fn restore_revision(cx: &Ctx, path: &str, rev: u64) -> SyncResult<UiResult
         let plain = fetch_small(cx, &hash).await?;
         cx.write(&target, plain, expect).await?.is_some()
     } else {
-        download_to(cx, &target, &hash, r.size, expect).await?.is_some()
+        download_to(cx, &target, &hash, r.size, expect)
+            .await?
+            .is_some()
     };
     if !written {
         return Err(SyncError::Http {
@@ -271,7 +280,11 @@ pub(crate) async fn resolve_choice(cx: &Ctx, id: u64, choice: ConflictChoice) ->
                     cx.rename(&rec.copy, &rec.path).await?;
                     cx.with_mut(|s| {
                         if let Some(f) = s.index.files.remove(&rec.copy) {
-                            let e = s.index.files.entry(rec.path.clone()).or_insert_with(FileState::default);
+                            let e = s
+                                .index
+                                .files
+                                .entry(rec.path.clone())
+                                .or_insert_with(FileState::default);
                             e.local = f.local;
                         }
                     });

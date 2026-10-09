@@ -47,11 +47,17 @@ fn server_text(w: &World, path: &str) -> String {
 }
 
 fn server_tokens(w: &World) -> Vec<String> {
-    w.server_files().values().flat_map(|d| tokens_in(d)).collect()
+    w.server_files()
+        .values()
+        .flat_map(|d| tokens_in(d))
+        .collect()
 }
 
 fn conflict_copies(w: &World) -> Vec<String> {
-    w.server_files().into_keys().filter(|p| p.contains(" (")).collect()
+    w.server_files()
+        .into_keys()
+        .filter(|p| p.contains(" ("))
+        .collect()
 }
 
 /// Сколько живых открытых записей осталось на сервере.
@@ -71,7 +77,10 @@ fn shared_note(w: &mut World, path: &str) -> String {
     let t = base_note(w, 0, path);
     w.sync(0);
     w.sync(1);
-    assert!(w.clients[1].fs.read_file(path).is_some(), "c1 должен получить {path}");
+    assert!(
+        w.clients[1].fs.read_file(path).is_some(),
+        "c1 должен получить {path}"
+    );
     t
 }
 
@@ -87,8 +96,15 @@ fn s01_concurrent_edits_merge_cleanly() {
     w.sync(1);
     finish(&mut w);
     let text = server_text(&w, "a.md");
-    assert!(text.contains(&ta) && text.contains(&tb), "обе правки слиты: {text}");
-    assert!(conflict_copies(&w).is_empty(), "без конфликтной копии: {:?}", conflict_copies(&w));
+    assert!(
+        text.contains(&ta) && text.contains(&tb),
+        "обе правки слиты: {text}"
+    );
+    assert!(
+        conflict_copies(&w).is_empty(),
+        "без конфликтной копии: {:?}",
+        conflict_copies(&w)
+    );
 }
 
 #[test]
@@ -100,11 +116,17 @@ fn s01_overlapping_edits_keep_both() {
     w.sync(0);
     w.sync(1);
     finish(&mut w);
-    assert!(server_text(&w, "a.md").contains(&ta), "серверная версия на месте");
+    assert!(
+        server_text(&w, "a.md").contains(&ta),
+        "серверная версия на месте"
+    );
     let copies = conflict_copies(&w);
     assert_eq!(copies.len(), 1, "{copies:?}");
     assert!(copies[0].contains("conflict"), "{copies:?}");
-    assert!(server_text(&w, &copies[0]).contains(&tb), "локальная версия в копии");
+    assert!(
+        server_text(&w, &copies[0]).contains(&tb),
+        "локальная версия в копии"
+    );
 }
 
 // 2. Удаление на A против правки на B.
@@ -120,7 +142,10 @@ fn s02_delete_vs_edit_edit_wins() {
     w.sync(1);
     finish(&mut w);
     assert!(server_text(&w, "a.md").contains(&tb));
-    assert!(w.clients[0].fs.read_file("a.md").is_some(), "файл вернулся на A");
+    assert!(
+        w.clients[0].fs.read_file("a.md").is_some(),
+        "файл вернулся на A"
+    );
 
     // Правка ушла первой, удаление — потом.
     let mut w = World::new(quiet(2));
@@ -154,8 +179,15 @@ fn s03_rename_vs_edit_edit_follows() {
         }
         finish(&mut w);
         let files = w.server_files();
-        assert!(!files.contains_key("a.md"), "rename_first={rename_first}: {:?}", files.keys());
-        assert!(server_text(&w, "b.md").contains(&tb), "rename_first={rename_first}: правка у нового имени");
+        assert!(
+            !files.contains_key("a.md"),
+            "rename_first={rename_first}: {:?}",
+            files.keys()
+        );
+        assert!(
+            server_text(&w, "b.md").contains(&tb),
+            "rename_first={rename_first}: правка у нового имени"
+        );
     }
 }
 
@@ -199,7 +231,10 @@ fn s05_killed_between_write_and_index_checkpoint() {
     assert!(wrote, "c1 дошёл до записи файла");
     w.kill(1);
     finish(&mut w);
-    assert!(conflict_copies(&w).is_empty(), "уже записанный файл распознан как свой");
+    assert!(
+        conflict_copies(&w).is_empty(),
+        "уже записанный файл распознан как свой"
+    );
 
     // Запись результата слияния.
     let mut w = World::new(quiet(2));
@@ -232,14 +267,20 @@ fn s06_case_only_rename() {
     w.sync(0);
     w.sync(1);
     finish(&mut w);
-    assert_eq!(w.server_files().into_keys().collect::<Vec<_>>(), vec!["Note.md".to_owned()]);
+    assert_eq!(
+        w.server_files().into_keys().collect::<Vec<_>>(),
+        vec!["Note.md".to_owned()]
+    );
     assert_eq!(w.clients[1].fs.display_name("note.md"), Some("Note.md"));
     // И обратно — с регистронезависимой.
     assert!(w.user_rename(1, "Note.md", "NOTE.md"));
     w.sync(1);
     w.sync(0);
     finish(&mut w);
-    assert_eq!(w.server_files().into_keys().collect::<Vec<_>>(), vec!["NOTE.md".to_owned()]);
+    assert_eq!(
+        w.server_files().into_keys().collect::<Vec<_>>(),
+        vec!["NOTE.md".to_owned()]
+    );
     assert!(w.clients[0].fs.read_file("NOTE.md").is_some());
 }
 
@@ -259,11 +300,28 @@ fn s07_nfc_vs_nfd() {
     finish(&mut w);
     let files = w.server_files();
     for p in files.keys() {
-        assert_eq!(notesync_core::path::VaultPath::normalize(p).unwrap().as_str(), p, "на сервере только NFC");
+        assert_eq!(
+            notesync_core::path::VaultPath::normalize(p)
+                .unwrap()
+                .as_str(),
+            p,
+            "на сервере только NFC"
+        );
     }
     let toks = server_tokens(&w);
-    assert!(toks.contains(&t0) && toks.contains(&t1), "обе версии сохранены: {:?}", files.keys());
-    assert!(w.clients[0].fs.snapshot().keys().all(|p| !p.contains('\u{301}')), "на диске имя приведено к NFC");
+    assert!(
+        toks.contains(&t0) && toks.contains(&t1),
+        "обе версии сохранены: {:?}",
+        files.keys()
+    );
+    assert!(
+        w.clients[0]
+            .fs
+            .snapshot()
+            .keys()
+            .all(|p| !p.contains('\u{301}')),
+        "на диске имя приведено к NFC"
+    );
 }
 
 // 8. Файл 100 МБ, докачка с середины.
@@ -273,7 +331,9 @@ fn s08_large_file_resumes_mid_transfer() {
     const SIZE: usize = 100 * 1024 * 1024;
     let mut w = World::new(quiet(2));
     let tok = w.ledger.fresh(0);
-    let mut data: Vec<u8> = (0..SIZE).map(|i| ((i as u64).wrapping_mul(2_654_435_761) >> 13) as u8).collect();
+    let mut data: Vec<u8> = (0..SIZE)
+        .map(|i| ((i as u64).wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect();
     data[0] = 0; // бинарный
     data.push(0); // граница слова перед токеном
     data.extend_from_slice(tok.as_bytes());
@@ -294,7 +354,10 @@ fn s08_large_file_resumes_mid_transfer() {
     w.kill(0);
     w.sync(0);
     let sent = w.clients[0].sent_bytes;
-    assert!(sent < SIZE as u64 * 13 / 10, "загрузка продолжена, а не начата заново: отправлено {sent}");
+    assert!(
+        sent < SIZE as u64 * 13 / 10,
+        "загрузка продолжена, а не начата заново: отправлено {sent}"
+    );
 
     // Скачивание: то же на другом устройстве.
     w.deliver(1, Event::SyncNow);
@@ -311,7 +374,10 @@ fn s08_large_file_resumes_mid_transfer() {
     w.kill(1);
     finish(&mut w);
     let recv = w.clients[1].recv_bytes;
-    assert!(recv < SIZE as u64 * 13 / 10, "скачивание продолжено: получено {recv}");
+    assert!(
+        recv < SIZE as u64 * 13 / 10,
+        "скачивание продолжено: получено {recv}"
+    );
     assert_eq!(w.clients[1].fs.read_file("big.bin"), Some(&data));
 }
 
@@ -335,7 +401,10 @@ fn s09_clock_one_day_ahead() {
     assert!(server_tokens(&w).contains(&tn));
     let copies = conflict_copies(&w);
     assert_eq!(copies.len(), 1, "{copies:?}");
-    assert!(copies[0].contains("2026-10-10") && copies[0].contains("dev0"), "{copies:?}");
+    assert!(
+        copies[0].contains("2026-10-10") && copies[0].contains("dev0"),
+        "{copies:?}"
+    );
 }
 
 // 10. Два клиента создают один и тот же путь с нуля.
@@ -378,7 +447,13 @@ fn encryption_enabled_during_active_sync() {
     w.sync(0);
     w.sync(1);
     w.encrypted_password = Some(PASSWORD.to_owned());
-    w.deliver(0, Event::EnableEncryption { password: PASSWORD.into(), remember: true });
+    w.deliver(
+        0,
+        Event::EnableEncryption {
+            password: PASSWORD.into(),
+            remember: true,
+        },
+    );
     // Пока c0 перезаливает vault, c1 продолжает править и синхронизироваться.
     let mut tokens = Vec::new();
     for i in 0..40 {
@@ -396,7 +471,10 @@ fn encryption_enabled_during_active_sync() {
     assert!(w.vault_keys().is_some());
     let on_server = server_tokens(&w);
     for t in tokens.iter().filter(|t| !w.ledger.removed.contains(*t)) {
-        assert!(on_server.contains(t), "правка {t} на сервере в зашифрованном виде");
+        assert!(
+            on_server.contains(t),
+            "правка {t} на сервере в зашифрованном виде"
+        );
     }
 }
 
@@ -407,13 +485,23 @@ fn migration_interrupted_halfway() {
     let mut w = World::new(quiet(2));
     for i in 0..120 {
         let t = w.ledger.fresh(0);
-        w.user_write(0, &format!("n/{i}.md"), format!("note {i} {t}\n").into_bytes());
+        w.user_write(
+            0,
+            &format!("n/{i}.md"),
+            format!("note {i} {t}\n").into_bytes(),
+        );
     }
     w.sync(0);
     w.sync(1);
     w.encrypted_password = Some(PASSWORD.to_owned());
     // Ключ не запоминается: после перезапуска понадобится пароль.
-    w.deliver(0, Event::EnableEncryption { password: PASSWORD.into(), remember: false });
+    w.deliver(
+        0,
+        Event::EnableEncryption {
+            password: PASSWORD.into(),
+            remember: false,
+        },
+    );
     w.deliver(0, Event::SyncNow);
     let mut marker = false;
     let mut batches = 0;

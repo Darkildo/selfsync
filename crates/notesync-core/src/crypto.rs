@@ -360,7 +360,10 @@ pub fn verify_master(record: &[u8], master: &MasterKey) -> Result<bool, CryptoEr
     if r.key_check.len() != 16 {
         return Err(CryptoError::BadRecord);
     }
-    Ok(bool::from(subtle::ConstantTimeEq::ct_eq(&r.key_check[..], &master.check_value()[..])))
+    Ok(bool::from(subtle::ConstantTimeEq::ct_eq(
+        &r.key_check[..],
+        &master.check_value()[..],
+    )))
 }
 
 /// Смена пароля: тот же мастер-ключ, новая запись. Данные не перешифровываются.

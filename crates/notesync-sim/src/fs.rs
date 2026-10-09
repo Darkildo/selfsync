@@ -83,7 +83,11 @@ impl FakeFs {
         self.ensure_parents(p);
         let mtime = self.tick(now);
         let k = self.key(p);
-        let name = self.nodes.get(&k).map(|(n, _)| n.clone()).unwrap_or_else(|| p.to_owned());
+        let name = self
+            .nodes
+            .get(&k)
+            .map(|(n, _)| n.clone())
+            .unwrap_or_else(|| p.to_owned());
         self.nodes.insert(k, (name, Node::File { data, mtime }));
     }
 
@@ -194,14 +198,20 @@ impl FakeFs {
             (Expect::Any, _) => true,
             (Expect::Absent, None) => true,
             (Expect::Absent, Some(_)) => false,
-            (Expect::Stat { size, mtime }, Some(Node::File { data, mtime: m })) => data.len() as u64 == *size && m == mtime,
+            (Expect::Stat { size, mtime }, Some(Node::File { data, mtime: m })) => {
+                data.len() as u64 == *size && m == mtime
+            }
             (Expect::Stat { .. }, _) => false,
         }
     }
 
     pub fn list(&self) -> IoResult {
         IoResult::Listing {
-            files: self.nodes.values().map(|(n, node)| Self::meta(n, node)).collect(),
+            files: self
+                .nodes
+                .values()
+                .map(|(n, node)| Self::meta(n, node))
+                .collect(),
         }
     }
 
@@ -217,9 +227,13 @@ impl FakeFs {
     pub fn read(&self, p: &str, offset: u64, len: Option<u64>) -> IoResult {
         match self.get(p) {
             Some(Node::File { data, .. }) => {
-                let start = usize::try_from(offset).unwrap_or(usize::MAX).min(data.len());
+                let start = usize::try_from(offset)
+                    .unwrap_or(usize::MAX)
+                    .min(data.len());
                 let end = match len {
-                    Some(l) => start.saturating_add(usize::try_from(l).unwrap_or(usize::MAX)).min(data.len()),
+                    Some(l) => start
+                        .saturating_add(usize::try_from(l).unwrap_or(usize::MAX))
+                        .min(data.len()),
                     None => data.len(),
                 };
                 IoResult::Data {
@@ -261,8 +275,12 @@ impl FakeFs {
         match self.temps.get(t) {
             Some(d) => {
                 let s = usize::try_from(offset).unwrap_or(usize::MAX).min(d.len());
-                let e = s.saturating_add(usize::try_from(len).unwrap_or(usize::MAX)).min(d.len());
-                IoResult::Data { data: d[s..e].to_vec() }
+                let e = s
+                    .saturating_add(usize::try_from(len).unwrap_or(usize::MAX))
+                    .min(d.len());
+                IoResult::Data {
+                    data: d[s..e].to_vec(),
+                }
             }
             None => IoResult::NotFound,
         }

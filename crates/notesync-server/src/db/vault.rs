@@ -1281,13 +1281,19 @@ mod tests {
         run(&mut c, vec![put("a.md", 0, 1)]);
         assert_eq!(put_vault_key(&mut c, b"rec", 0).unwrap(), Some(1));
         set_migration(&c, &pb::MigrationMarker::default()).unwrap();
-        assert!(matches!(purge_plaintext(&mut c, 1).unwrap(), PurgeOutcome::Done { .. }));
+        assert!(matches!(
+            purge_plaintext(&mut c, 1).unwrap(),
+            PurgeOutcome::Done { .. }
+        ));
         assert!(meta_blob(&c, "migration").unwrap().is_none());
         match &run(&mut c, vec![put("b.md", 0, 2)])[0] {
             R::Rejected(r) => assert_eq!(r.code, "plaintext_in_encrypted_vault"),
             o => panic!("{o:?}"),
         }
-        assert_eq!(purge_plaintext(&mut c, 1).unwrap(), PurgeOutcome::NoMigration);
+        assert_eq!(
+            purge_plaintext(&mut c, 1).unwrap(),
+            PurgeOutcome::NoMigration
+        );
     }
 
     #[test]

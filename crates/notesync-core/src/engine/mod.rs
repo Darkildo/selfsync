@@ -21,8 +21,8 @@ pub mod types;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub use ctx::{SyncError, TEMP_SUFFIX};
 use ctx::{Ctx, State, build_excludes};
+pub use ctx::{SyncError, TEMP_SUFFIX};
 use runtime::{Hub, Task, poll_task};
 pub use types::*;
 
@@ -125,7 +125,10 @@ impl Engine {
                 s.sync_due = Some(now);
                 s.backoff_ms = 0;
                 s.wait_disabled = false;
-                if s.blocked.as_deref().is_some_and(|b| b != "wrong_password" && b != "encryption_mismatch") {
+                if s.blocked
+                    .as_deref()
+                    .is_some_and(|b| b != "wrong_password" && b != "encryption_mismatch")
+                {
                     s.blocked = None;
                 }
                 if s.paused.as_deref() == Some("encryption_started") {
@@ -196,7 +199,9 @@ impl Engine {
             }
             Event::Command { req, command } => {
                 let c = cx.clone();
-                self.spawn(Kind::Command, async move { commands::run(&c, req, command).await });
+                self.spawn(Kind::Command, async move {
+                    commands::run(&c, req, command).await
+                });
             }
             Event::Configure { config } => cx.with_mut(|s| {
                 s.excludes = build_excludes(&config);
@@ -260,7 +265,12 @@ impl Engine {
             spawned = true;
         }
         let want_wait = cx.with(|s| {
-            s.cfg.use_wait && !s.wait_disabled && s.visible && s.index.initial_done && s.paused.is_none() && !s.sync_running
+            s.cfg.use_wait
+                && !s.wait_disabled
+                && s.visible
+                && s.index.initial_done
+                && s.paused.is_none()
+                && !s.sync_running
         });
         if want_wait && !self.running(Kind::Wait) && !self.running(Kind::Sync) {
             let c = cx.clone();
@@ -271,7 +281,13 @@ impl Engine {
     }
 
     fn emit_wake(&mut self) {
-        let wake = self.st.borrow().sync_due.into_iter().chain(self.st.borrow().next_poll).min();
+        let wake = self
+            .st
+            .borrow()
+            .sync_due
+            .into_iter()
+            .chain(self.st.borrow().next_poll)
+            .min();
         let changed = {
             let mut s = self.st.borrow_mut();
             if s.wake_at != wake {
@@ -281,10 +297,9 @@ impl Engine {
                 false
             }
         };
-        if changed
-            && let Some(at) = wake {
-                self.hub.emit(Action::Wake { at });
-            }
+        if changed && let Some(at) = wake {
+            self.hub.emit(Action::Wake { at });
+        }
     }
 
     /// Текущий статус.
@@ -332,7 +347,9 @@ async fn sync_task(cx: Ctx) {
                 if *changed || recent {
                     s.poll_interval = s.cfg.poll_active_ms;
                 } else {
-                    s.poll_interval = (s.poll_interval.saturating_mul(2)).min(s.cfg.poll_idle_max_ms).max(s.cfg.poll_active_ms);
+                    s.poll_interval = (s.poll_interval.saturating_mul(2))
+                        .min(s.cfg.poll_idle_max_ms)
+                        .max(s.cfg.poll_active_ms);
                 }
             }
             Err(e) => {
@@ -388,9 +405,10 @@ async fn sync_task(cx: Ctx) {
         }
     });
     if let Err(e) = &res
-        && !matches!(e, SyncError::Network(_) | SyncError::Paused(_)) {
-            cx.log(LogLevel::Warn, format!("синк: {e}"));
-        }
+        && !matches!(e, SyncError::Network(_) | SyncError::Paused(_))
+    {
+        cx.log(LogLevel::Warn, format!("синк: {e}"));
+    }
     if let Some(n) = notice {
         cx.notify(n);
     }
@@ -401,7 +419,13 @@ async fn sync_task(cx: Ctx) {
 /// сервер отвечает мгновенно (CGI), переключается на обычный опрос.
 async fn wait_task(cx: Ctx) {
     loop {
-        let (go, since, t0) = cx.with(|s| (s.visible && s.cfg.use_wait && !s.wait_disabled && s.blocked.is_none(), s.index.last_seq, s.now));
+        let (go, since, t0) = cx.with(|s| {
+            (
+                s.visible && s.cfg.use_wait && !s.wait_disabled && s.blocked.is_none(),
+                s.index.last_seq,
+                s.now,
+            )
+        });
         if !go {
             return;
         }

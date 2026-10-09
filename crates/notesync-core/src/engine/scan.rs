@@ -35,7 +35,10 @@ async fn canonical(cx: &Ctx, raw: &str, is_dir: bool) -> SyncResult<Option<Strin
             cx.log(LogLevel::Warn, format!("имя не синхронизируется: {raw}"));
             cx.notify(Notice::Rejected {
                 path: raw.to_owned(),
-                code: VaultPath::normalize(raw).err().map_or("path_invalid", |e| e.code()).to_owned(),
+                code: VaultPath::normalize(raw)
+                    .err()
+                    .map_or("path_invalid", |e| e.code())
+                    .to_owned(),
             });
         }
         return Ok(None);
@@ -54,7 +57,10 @@ async fn canonical(cx: &Ctx, raw: &str, is_dir: bool) -> SyncResult<Option<Strin
             let (date, _) = super::resolve::stamp(cx.now(), cx.with(|s| s.cfg.tz_offset_min));
             let label = format!("nfd {date}");
             target = super::resolve::unique_copy(cx, &nfc, &label).await?;
-            cx.log(LogLevel::Warn, format!("есть и NFD, и NFC вариант имени: NFD-файл сохранён как {target}"));
+            cx.log(
+                LogLevel::Warn,
+                format!("есть и NFD, и NFC вариант имени: NFD-файл сохранён как {target}"),
+            );
         }
         let tmp = format!("{target}.nfc{}", super::ctx::TEMP_SUFFIX);
         if cx.rename(raw, &tmp).await?.is_none() {
@@ -74,9 +80,14 @@ async fn canonical(cx: &Ctx, raw: &str, is_dir: bool) -> SyncResult<Option<Strin
 /// переименование доводится до конца, недописанная атомарная запись уходит в корзину.
 async fn recover_temp(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
     let base = &raw[..raw.len() - super::ctx::TEMP_SUFFIX.len()];
-    let target = base.strip_suffix(".case").or_else(|| base.strip_suffix(".nfc"));
+    let target = base
+        .strip_suffix(".case")
+        .or_else(|| base.strip_suffix(".nfc"));
     let Some(target) = target else {
-        cx.log(LogLevel::Warn, format!("брошенный временный файл убран в корзину: {raw}"));
+        cx.log(
+            LogLevel::Warn,
+            format!("брошенный временный файл убран в корзину: {raw}"),
+        );
         cx.trash(raw, super::types::Expect::Any).await?;
         return Ok(None);
     };
@@ -86,7 +97,10 @@ async fn recover_temp(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
         let (date, _) = super::resolve::stamp(cx.now(), cx.with(|s| s.cfg.tz_offset_min));
         super::resolve::unique_copy(cx, target, &format!("recovered {date}")).await?
     };
-    cx.log(LogLevel::Warn, format!("доведено прерванное переименование: {raw} → {dest}"));
+    cx.log(
+        LogLevel::Warn,
+        format!("доведено прерванное переименование: {raw} → {dest}"),
+    );
     Ok(cx.rename(raw, &dest).await?.map(|_| dest))
 }
 
@@ -144,7 +158,9 @@ fn apply_rename_events(cx: &Ctx) {
                     s.dirty.insert(new_key);
                     continue;
                 }
-                let Some(mut f) = s.index.files.remove(&k) else { continue };
+                let Some(mut f) = s.index.files.remove(&k) else {
+                    continue;
+                };
                 // Файл есть на сервере, если он когда-либо синхронизировался (даже если
                 // ревизия сейчас неизвестна после сброса баз).
                 if f.server_path.is_none() && f.maybe_on_server() {
@@ -238,7 +254,9 @@ fn mark_gone(cx: &Ctx, path: &str, delta: &mut ScanDelta) {
             None => Vec::new(),
         };
         for k in std::iter::once(path.to_owned()).chain(inside) {
-            let Some(f) = s.index.files.get_mut(&k) else { continue };
+            let Some(f) = s.index.files.get_mut(&k) else {
+                continue;
+            };
             if f.local.is_none() {
                 continue;
             }
@@ -271,17 +289,22 @@ fn detect_renames(cx: &Ctx, delta: &ScanDelta) {
         let mut new_by_hash: BTreeMap<Hash, Vec<String>> = BTreeMap::new();
         for n in &delta.new {
             if let Some(f) = s.index.files.get(n)
-                && let (Some(l), false, 0) = (&f.local, f.folder, f.base_rev) {
-                    new_by_hash.entry(l.plain).or_default().push(n.clone());
-                }
+                && let (Some(l), false, 0) = (&f.local, f.folder, f.base_rev)
+            {
+                new_by_hash.entry(l.plain).or_default().push(n.clone());
+            }
         }
         for (h, gone) in gone_by_hash {
-            let Some(news) = new_by_hash.get(&h) else { continue };
+            let Some(news) = new_by_hash.get(&h) else {
+                continue;
+            };
             if gone.len() != 1 || news.len() != 1 {
                 continue; // неоднозначно — пусть будет удаление + новый файл
             }
             let (old, new) = (&gone[0], &news[0]);
-            let Some(mut f) = s.index.files.remove(old) else { continue };
+            let Some(mut f) = s.index.files.remove(old) else {
+                continue;
+            };
             let local = s.index.files.get(new).and_then(|n| n.local);
             f.server_path = f.server_path.take().or_else(|| Some(old.clone()));
             if f.server_path.as_deref() == Some(new.as_str()) {
@@ -315,7 +338,9 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
         });
         let mut present: BTreeMap<String, FileMeta> = BTreeMap::new();
         for mut m in listing {
-            if m.path.ends_with(super::ctx::TEMP_SUFFIX) && !cx.with(|s| s.excludes.is_excluded(&m.path)) {
+            if m.path.ends_with(super::ctx::TEMP_SUFFIX)
+                && !cx.with(|s| s.excludes.is_excluded(&m.path))
+            {
                 match recover_temp(cx, &m.path).await? {
                     Some(p) => m.path = p,
                     None => continue,
@@ -348,11 +373,16 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
                 Some(m) => {
                     // Регистронезависимая ФС: по этому имени нашёлся файл с другим
                     // регистром — запрошенного пути нет, наблюдаем настоящее имя.
-                    let actual = if m.path.is_empty() { raw.clone() } else { m.path.clone() };
+                    let actual = if m.path.is_empty() {
+                        raw.clone()
+                    } else {
+                        m.path.clone()
+                    };
                     if actual != raw
-                        && let Ok(vp) = VaultPath::normalize(&raw) {
-                            mark_gone(cx, vp.as_str(), &mut delta);
-                        }
+                        && let Ok(vp) = VaultPath::normalize(&raw)
+                    {
+                        mark_gone(cx, vp.as_str(), &mut delta);
+                    }
                     if let Some(p) = canonical(cx, &actual, m.dir).await? {
                         observe(cx, &p, &m, &mut delta).await?;
                     }
@@ -366,7 +396,13 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
         }
     }
     if !delta.new.is_empty() || !delta.gone.is_empty() {
-        cx.log(LogLevel::Debug, format!("scan full={full}: new {:?}, gone {:?}", delta.new, delta.gone));
+        cx.log(
+            LogLevel::Debug,
+            format!(
+                "scan full={full}: new {:?}, gone {:?}",
+                delta.new, delta.gone
+            ),
+        );
     }
     detect_renames(cx, &delta);
     cx.save().await

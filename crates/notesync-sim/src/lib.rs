@@ -19,7 +19,9 @@ use axum::Router;
 use axum::body::Body;
 use notesync_core::blob;
 use notesync_core::crypto::{self, KdfParams, VaultKeys};
-use notesync_core::engine::{Action, Engine, EngineConfig, Event, HttpRequest, IoResult, LogLevel, Notice, SyncState};
+use notesync_core::engine::{
+    Action, Engine, EngineConfig, Event, HttpRequest, IoResult, LogLevel, Notice, SyncState,
+};
 use notesync_core::path::{VaultPath, canonical_decode};
 use notesync_server::{AppState, Config, Mode, router};
 use tower::ServiceExt;
@@ -107,9 +109,15 @@ impl SimConfig {
         c.steps = 150 + r.idx(250);
         c.fault_rate = [0.0, 0.03, 0.1][r.idx(3)];
         c.kill_rate = [0.0, 0.005, 0.02][r.idx(3)];
-        c.skew_ms = (0..clients).map(|_| if r.chance(0.2) { 86_400_000 } else { 0 }).collect();
+        c.skew_ms = (0..clients)
+            .map(|_| if r.chance(0.2) { 86_400_000 } else { 0 })
+            .collect();
         c.case_insensitive = (0..clients).map(|_| r.chance(0.3)).collect();
-        c.encrypt_at = if r.chance(0.15) { Some(r.idx(c.steps)) } else { None };
+        c.encrypt_at = if r.chance(0.15) {
+            Some(r.idx(c.steps))
+        } else {
+            None
+        };
         c
     }
 }
@@ -203,8 +211,14 @@ fn data_root() -> std::path::PathBuf {
 
 impl World {
     pub fn new(cfg: SimConfig) -> World {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime");
-        let dir = tempfile::Builder::new().prefix("notesync-sim-").tempdir_in(data_root()).expect("tempdir");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let dir = tempfile::Builder::new()
+            .prefix("notesync-sim-")
+            .tempdir_in(data_root())
+            .expect("tempdir");
         let config = Config::for_tests(dir.path().to_path_buf());
         // CGI-режим: /v1/wait отвечает сразу, без реального ожидания.
         let state = AppState::new(config, Mode::Cgi);
@@ -236,7 +250,9 @@ impl World {
         let token = {
             let pool = self.state.server_pool().expect("server db");
             let c = pool.get().expect("conn");
-            notesync_server::db::server::add_device(&c, "sim", &name).expect("device").1
+            notesync_server::db::server::add_device(&c, "sim", &name)
+                .expect("device")
+                .1
         };
         let ci = self.cfg.case_insensitive.get(i).copied().unwrap_or(false);
         let mut cfg = EngineConfig {
@@ -271,7 +287,11 @@ impl World {
     }
 
     pub fn log(&mut self, s: String) {
-        let limit = if std::env::var_os("SIM_FULL_TRACE").is_some() { usize::MAX } else { 400 };
+        let limit = if std::env::var_os("SIM_FULL_TRACE").is_some() {
+            usize::MAX
+        } else {
+            400
+        };
         if self.trace.len() > limit {
             self.trace.pop_front();
         }
@@ -304,7 +324,8 @@ impl World {
                 self.clients[c].notices.push(notice);
             }
             Action::Log { level, message } => {
-                if !matches!(level, LogLevel::Debug) || std::env::var_os("SIM_FULL_TRACE").is_some() {
+                if !matches!(level, LogLevel::Debug) || std::env::var_os("SIM_FULL_TRACE").is_some()
+                {
                     self.log(format!("c{c} log {message}"));
                 }
             }
@@ -333,7 +354,9 @@ impl World {
     }
 
     fn http(&mut self, c: usize, req: HttpRequest) -> IoResult {
-        let mut b = http::Request::builder().method(req.method.as_str()).uri(&req.path);
+        let mut b = http::Request::builder()
+            .method(req.method.as_str())
+            .uri(&req.path);
         for (k, v) in &req.headers {
             b = b.header(k, v);
         }
@@ -355,11 +378,17 @@ impl World {
                 .iter()
                 .map(|(k, v)| (k.as_str().to_owned(), v.to_str().unwrap_or("").to_owned()))
                 .collect();
-            let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.expect("body");
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .expect("body");
             (status, headers, body.to_vec())
         });
         self.clients[c].recv_bytes += body.len() as u64;
-        IoResult::Http { status, headers, body }
+        IoResult::Http {
+            status,
+            headers,
+            body,
+        }
     }
 
     /// Выполнить одно действие клиента (с возможным сбоем).
@@ -369,10 +398,16 @@ impl World {
         let res = match a {
             Action::Http { req, .. } => {
                 let line = format!("{} {}", req.method, req.path);
-                let planned = self.planned_faults.iter().position(|(p, _)| line.starts_with(p.as_str()));
+                let planned = self
+                    .planned_faults
+                    .iter()
+                    .position(|(p, _)| line.starts_with(p.as_str()));
                 let fault = if let Some(i) = planned {
                     self.planned_faults.remove(i).map(|(_, after)| !after)
-                } else if self.faults_enabled && self.cfg.fault_rate > 0.0 && self.rng.chance(self.cfg.fault_rate) {
+                } else if self.faults_enabled
+                    && self.cfg.fault_rate > 0.0
+                    && self.rng.chance(self.cfg.fault_rate)
+                {
                     Some(self.rng.chance(0.5))
                 } else {
                     None
@@ -404,15 +439,25 @@ impl World {
             }
             Action::List { .. } => self.clients[c].fs.list(),
             Action::Stat { path, .. } => self.clients[c].fs.stat(&path),
-            Action::Read { path, offset, len, .. } => self.clients[c].fs.read(&path, offset, len),
-            Action::Write { path, data, expect, .. } => {
+            Action::Read {
+                path, offset, len, ..
+            } => self.clients[c].fs.read(&path, offset, len),
+            Action::Write {
+                path, data, expect, ..
+            } => {
                 let r = self.clients[c].fs.write(&path, data, &expect, now);
                 self.log(format!("c{c} write {path} -> {}", short(&r)));
                 r
             }
-            Action::WriteTemp { temp, offset, data, .. } => self.clients[c].fs.write_temp(&temp, offset, &data),
-            Action::ReadTemp { temp, offset, len, .. } => self.clients[c].fs.read_temp(&temp, offset, len),
-            Action::CommitTemp { temp, path, expect, .. } => {
+            Action::WriteTemp {
+                temp, offset, data, ..
+            } => self.clients[c].fs.write_temp(&temp, offset, &data),
+            Action::ReadTemp {
+                temp, offset, len, ..
+            } => self.clients[c].fs.read_temp(&temp, offset, len),
+            Action::CommitTemp {
+                temp, path, expect, ..
+            } => {
                 let r = self.clients[c].fs.commit_temp(&temp, &path, &expect, now);
                 self.log(format!("c{c} commit {path} -> {}", short(&r)));
                 r
@@ -464,7 +509,11 @@ impl World {
             return false;
         }
         // Чаще по порядку, иногда — вразнобой (ответы параллельных задач).
-        let i = if n > 1 && self.rng.chance(0.2) { self.rng.idx(n.min(4)) } else { 0 };
+        let i = if n > 1 && self.rng.chance(0.2) {
+            self.rng.idx(n.min(4))
+        } else {
+            0
+        };
         let Some(a) = self.clients[c].pending.remove(i) else {
             return false;
         };
@@ -486,7 +535,11 @@ impl World {
             Action::Rename { from, to, .. } => format!("Rename {from} -> {to}"),
             Action::Trash { path, .. } => format!("Trash {path}"),
             Action::SaveIndex { .. } => "SaveIndex".to_owned(),
-            other => format!("{other:?}").split([' ', '{']).next().unwrap_or("").to_owned(),
+            other => format!("{other:?}")
+                .split([' ', '{'])
+                .next()
+                .unwrap_or("")
+                .to_owned(),
         };
         if let Some((id, result)) = self.exec(c, a) {
             self.deliver(c, Event::Done { id, result });
@@ -497,10 +550,11 @@ impl World {
     /// Доставить таймеры, если подошло время.
     pub fn tick(&mut self, c: usize) {
         if let Some(at) = self.clients[c].wake
-            && at <= self.client_now(c) {
-                self.clients[c].wake = None;
-                self.deliver(c, Event::Tick);
-            }
+            && at <= self.client_now(c)
+        {
+            self.clients[c].wake = None;
+            self.deliver(c, Event::Tick);
+        }
     }
 
     /// Прогнать клиента, пока у него есть действия (без продвижения времени).
@@ -525,13 +579,18 @@ impl World {
             .status
             .as_ref()
             .is_some_and(|s| s.state == SyncState::NeedPassword);
-        if need
-            && let Some(pw) = self.encrypted_password.clone() {
-                self.deliver(c, Event::Password { password: pw, remember: true });
-                self.drain(c);
-                self.deliver(c, Event::SyncNow);
-                self.drain(c);
-            }
+        if need && let Some(pw) = self.encrypted_password.clone() {
+            self.deliver(
+                c,
+                Event::Password {
+                    password: pw,
+                    remember: true,
+                },
+            );
+            self.drain(c);
+            self.deliver(c, Event::SyncNow);
+            self.drain(c);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -556,15 +615,29 @@ impl World {
                 }
             }
         }
-        self.log(format!("c{c} USER write {path} ({} b) {:?}", data.len(), tokens_in(&data)));
+        self.log(format!(
+            "c{c} USER write {path} ({} b) {:?}",
+            data.len(),
+            tokens_in(&data)
+        ));
         self.clients[c].fs.user_write(path, data, now);
-        self.emit(c, Event::Changed { path: path.to_owned() });
+        self.emit(
+            c,
+            Event::Changed {
+                path: path.to_owned(),
+            },
+        );
     }
 
     pub fn user_delete(&mut self, c: usize, path: &str) {
         self.log(format!("c{c} USER delete {path}"));
         self.clients[c].fs.user_delete(path);
-        self.emit(c, Event::Deleted { path: path.to_owned() });
+        self.emit(
+            c,
+            Event::Deleted {
+                path: path.to_owned(),
+            },
+        );
     }
 
     pub fn user_rename(&mut self, c: usize, from: &str, to: &str) -> bool {
@@ -573,13 +646,21 @@ impl World {
             return false;
         }
         self.log(format!("c{c} USER rename {from} -> {to}"));
-        self.emit(c, Event::Renamed { from: from.to_owned(), to: to.to_owned() });
+        self.emit(
+            c,
+            Event::Renamed {
+                from: from.to_owned(),
+                to: to.to_owned(),
+            },
+        );
         true
     }
 
     /// Правка текстового файла: добавить строку, вставить, заменить или удалить.
     pub fn user_edit(&mut self, c: usize, path: &str) {
-        let Some(old) = self.clients[c].fs.read_file(path).cloned() else { return };
+        let Some(old) = self.clients[c].fs.read_file(path).cloned() else {
+            return;
+        };
         if !blob::is_text(&old) {
             let tok = self.ledger.fresh(c);
             let mut b = self.rng.bytes(64);
@@ -615,7 +696,12 @@ impl World {
         let now = self.client_now(c);
         self.log(format!("c{c} USER edit {path} +{tok}"));
         self.clients[c].fs.user_write(path, out.into_bytes(), now);
-        self.emit(c, Event::Changed { path: path.to_owned() });
+        self.emit(
+            c,
+            Event::Changed {
+                path: path.to_owned(),
+            },
+        );
     }
 
     fn files_of(&self, c: usize) -> Vec<String> {
@@ -630,7 +716,16 @@ impl World {
     /// Случайная операция пользователя на клиенте.
     pub fn random_user_op(&mut self, c: usize) {
         let files = self.files_of(c);
-        const NAMES: [&str; 8] = ["a.md", "b.md", "notes/c.md", "notes/d.md", "Cafe\u{301}.md", "img/p.png", "deep/x/y.md", "e.md"];
+        const NAMES: [&str; 8] = [
+            "a.md",
+            "b.md",
+            "notes/c.md",
+            "notes/d.md",
+            "Cafe\u{301}.md",
+            "img/p.png",
+            "deep/x/y.md",
+            "e.md",
+        ];
         let roll = self.rng.idx(100);
         if files.is_empty() || roll < 15 {
             let name = NAMES[self.rng.idx(NAMES.len())];
@@ -668,7 +763,9 @@ impl World {
                     }
                     chars.into_iter().collect()
                 } else {
-                    let base = vp.as_ref().map_or("x.md".to_owned(), |p| p.file_name().to_owned());
+                    let base = vp
+                        .as_ref()
+                        .map_or("x.md".to_owned(), |p| p.file_name().to_owned());
                     let dir = ["", "moved/", "notes/"][self.rng.idx(3)];
                     format!("{dir}r{}-{base}", self.rng.below(5))
                 };
@@ -688,12 +785,20 @@ impl World {
         self.step_no += 1;
         self.now += i64::try_from(self.rng.below(400)).unwrap_or(0);
         if let Some(at) = self.cfg.encrypt_at
-            && at == self.step_no && self.encrypted_password.is_none() {
-                self.log("ENABLE ENCRYPTION on c0".into());
-                self.encrypted_password = Some(PASSWORD.to_owned());
-                let remember = self.rng.chance(0.5);
-                self.deliver(0, Event::EnableEncryption { password: PASSWORD.into(), remember });
-            }
+            && at == self.step_no
+            && self.encrypted_password.is_none()
+        {
+            self.log("ENABLE ENCRYPTION on c0".into());
+            self.encrypted_password = Some(PASSWORD.to_owned());
+            let remember = self.rng.chance(0.5);
+            self.deliver(
+                0,
+                Event::EnableEncryption {
+                    password: PASSWORD.into(),
+                    remember,
+                },
+            );
+        }
         let c = self.rng.idx(self.clients.len());
         let roll = self.rng.next_u64() % 1000;
         if (roll as f64) < self.cfg.kill_rate * 1000.0 {
@@ -709,7 +814,11 @@ impl World {
             return;
         }
         if self.rng.chance(0.02) {
-            let ev = if self.rng.chance(0.5) { Event::Hidden } else { Event::Visible };
+            let ev = if self.rng.chance(0.5) {
+                Event::Hidden
+            } else {
+                Event::Visible
+            };
             self.deliver(c, ev);
             return;
         }
@@ -729,11 +838,16 @@ impl World {
                 .status
                 .as_ref()
                 .is_some_and(|s| s.state == SyncState::NeedPassword);
-            if need
-                && let Some(pw) = self.encrypted_password.clone() {
-                    let remember = self.rng.chance(0.5);
-                    self.deliver(c, Event::Password { password: pw, remember });
-                }
+            if need && let Some(pw) = self.encrypted_password.clone() {
+                let remember = self.rng.chance(0.5);
+                self.deliver(
+                    c,
+                    Event::Password {
+                        password: pw,
+                        remember,
+                    },
+                );
+            }
         }
     }
 
@@ -761,15 +875,27 @@ impl World {
                 self.sync(c);
             }
             let sig = self.signature();
-            let pending = self.clients.iter().any(|cl| cl.engine.as_ref().is_some_and(Engine::has_pending));
+            let pending = self
+                .clients
+                .iter()
+                .any(|cl| cl.engine.as_ref().is_some_and(Engine::has_pending));
             if sig == last && !pending && round > 0 {
                 return Ok(());
             }
             let snap = self.snapshots();
             if round >= 27 {
-                churn.push_str(&format!("\nраунд {round}: seq {}, pending {pending}", self.server_seq()));
+                churn.push_str(&format!(
+                    "\nраунд {round}: seq {}, pending {pending}",
+                    self.server_seq()
+                ));
                 for (c, (a, b)) in prev_snap.iter().zip(&snap).enumerate() {
-                    let changed: Vec<&String> = a.keys().chain(b.keys()).filter(|k| a.get(*k) != b.get(*k)).collect::<BTreeSet<_>>().into_iter().collect();
+                    let changed: Vec<&String> = a
+                        .keys()
+                        .chain(b.keys())
+                        .filter(|k| a.get(*k) != b.get(*k))
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect();
                     if !changed.is_empty() {
                         churn.push_str(&format!("\n  c{c} меняются {changed:?}"));
                     }
@@ -778,7 +904,12 @@ impl World {
                         let pend: Vec<&String> = idx
                             .files
                             .iter()
-                            .filter(|(_, f)| f.content_dirty() || f.delete_pending() || f.server_path.is_some() || (f.folder && f.base_rev == 0 && f.local.is_some()))
+                            .filter(|(_, f)| {
+                                f.content_dirty()
+                                    || f.delete_pending()
+                                    || f.server_path.is_some()
+                                    || (f.folder && f.base_rev == 0 && f.local.is_some())
+                            })
                             .map(|(k, _)| k)
                             .collect();
                         if !pend.is_empty() {
@@ -803,7 +934,10 @@ impl World {
         let mut s = String::new();
         for cl in &self.clients {
             for (p, d) in cl.fs.snapshot() {
-                s.push_str(&format!("{p}:{};", notesync_core::hash::Hash::of(&d).to_hex()));
+                s.push_str(&format!(
+                    "{p}:{};",
+                    notesync_core::hash::Hash::of(&d).to_hex()
+                ));
             }
             s.push('|');
         }
@@ -849,8 +983,12 @@ impl World {
                     Err(_) => continue,
                 }
             };
-            let Some(h) = notesync_core::hash::Hash::from_slice(&e.hash) else { continue };
-            let Ok(data) = std::fs::read(v.blobs.path_of(&h)) else { continue };
+            let Some(h) = notesync_core::hash::Hash::from_slice(&e.hash) else {
+                continue;
+            };
+            let Ok(data) = std::fs::read(v.blobs.path_of(&h)) else {
+                continue;
+            };
             if let Ok(plain) = blob::decode(&data, keys.as_ref()) {
                 out.insert(path, plain);
             }
@@ -873,8 +1011,12 @@ impl World {
             .collect();
         let mut out = Vec::new();
         for h in hashes {
-            let Some(hh) = notesync_core::hash::Hash::from_slice(&h) else { continue };
-            let Ok(data) = std::fs::read(v.blobs.path_of(&hh)) else { continue };
+            let Some(hh) = notesync_core::hash::Hash::from_slice(&h) else {
+                continue;
+            };
+            let Ok(data) = std::fs::read(v.blobs.path_of(&hh)) else {
+                continue;
+            };
             if let Ok(p) = blob::decode(&data, keys.as_ref()) {
                 out.push(p);
             } else if let Ok(p) = blob::decode(&data, None) {
@@ -916,14 +1058,22 @@ impl World {
     pub fn check_converged(&self) -> Result<(), String> {
         let server = self.server_files();
         let norm = |m: BTreeMap<String, Vec<u8>>| -> BTreeMap<String, Vec<u8>> {
-            m.into_iter().filter(|(p, _)| !p.starts_with(".trash")).collect()
+            m.into_iter()
+                .filter(|(p, _)| !p.starts_with(".trash"))
+                .collect()
         };
         for (i, cl) in self.clients.iter().enumerate() {
             let local = norm(cl.fs.snapshot());
             if local != server {
-                let only_local: Vec<_> = local.keys().filter(|k| !server.contains_key(*k)).collect();
-                let only_server: Vec<_> = server.keys().filter(|k| !local.contains_key(*k)).collect();
-                let differ: Vec<_> = local.iter().filter(|(k, v)| server.get(*k).is_some_and(|s| s != *v)).map(|x| x.0).collect();
+                let only_local: Vec<_> =
+                    local.keys().filter(|k| !server.contains_key(*k)).collect();
+                let only_server: Vec<_> =
+                    server.keys().filter(|k| !local.contains_key(*k)).collect();
+                let differ: Vec<_> = local
+                    .iter()
+                    .filter(|(k, v)| server.get(*k).is_some_and(|s| s != *v))
+                    .map(|x| x.0)
+                    .collect();
                 return Err(format!(
                     "клиент {i} не совпадает с сервером: только локально {only_local:?}, только на сервере {only_server:?}, различаются {differ:?}"
                 ));
@@ -949,6 +1099,14 @@ pub fn run_seed(cfg: SimConfig) -> Result<(), String> {
     let mut w = World::new(cfg.clone());
     w.run();
     let settled = w.settle();
-    let res = settled.and_then(|()| w.check_no_loss()).and_then(|()| w.check_converged());
-    res.map_err(|e| format!("seed {}: {e}\n--- конфигурация: {cfg:?}\n--- последние события:\n{}", cfg.seed, w.dump_trace()))
+    let res = settled
+        .and_then(|()| w.check_no_loss())
+        .and_then(|()| w.check_converged());
+    res.map_err(|e| {
+        format!(
+            "seed {}: {e}\n--- конфигурация: {cfg:?}\n--- последние события:\n{}",
+            cfg.seed,
+            w.dump_trace()
+        )
+    })
 }

@@ -16,7 +16,8 @@ use notesync_server::state::open_vault;
 
 fn age_file(path: &std::path::Path, days: u64) {
     let f = std::fs::File::options().write(true).open(path).unwrap();
-    f.set_modified(SystemTime::now() - Duration::from_secs(days * 86400)).unwrap();
+    f.set_modified(SystemTime::now() - Duration::from_secs(days * 86400))
+        .unwrap();
 }
 
 #[tokio::test]
@@ -54,8 +55,17 @@ async fn import_existing_folder() {
     assert!(names.contains(&"Café.md".to_owned()));
     assert!(names.contains(&"empty".to_owned()));
     // содержимое — открытый блоб NSB
-    let e = ch.entries.iter().find(|e| e.path == Some(p("root.md"))).unwrap();
-    let b = s.get(&format!("/v1/blobs/{}", Hash::from_slice(&e.hash).unwrap().to_hex()), &t).await;
+    let e = ch
+        .entries
+        .iter()
+        .find(|e| e.path == Some(p("root.md")))
+        .unwrap();
+    let b = s
+        .get(
+            &format!("/v1/blobs/{}", Hash::from_slice(&e.hash).unwrap().to_hex()),
+            &t,
+        )
+        .await;
     assert_eq!(blob::decode(&b.body, None).unwrap(), b"# root");
     // повторный импорт ничего не меняет
     let r2 = cmd::import(s.config(), "notes", src.path(), 1 << 30).unwrap();
@@ -72,18 +82,27 @@ async fn gc_plan_is_dry_by_default_then_executes() {
     let s = TestServer::new();
     let t = s.token("notes", "a");
     for i in 0..25u64 {
-        s.write_file(&t, "busy.md", i, format!("v{i}").as_bytes()).await;
+        s.write_file(&t, "busy.md", i, format!("v{i}").as_bytes())
+            .await;
     }
     let v = open_vault(s.config(), "notes", 1).unwrap();
     let c = v.pool.get().unwrap();
     // вся история «старая»
-    c.execute("UPDATE revisions SET created_at = 0", []).unwrap();
+    c.execute("UPDATE revisions SET created_at = 0", [])
+        .unwrap();
     for (h, _, _) in v.blobs.list().unwrap() {
         age_file(&v.blobs.path_of(&h), 2);
     }
     // брошенная загрузка
     let st: pb::UploadState = s
-        .post("/v1/uploads", &t, &pb::UploadStart { hash: vec![5; 32], size: 10 })
+        .post(
+            "/v1/uploads",
+            &t,
+            &pb::UploadStart {
+                hash: vec![5; 32],
+                size: 10,
+            },
+        )
         .await
         .proto();
     c.execute("UPDATE uploads SET updated_at = 0", []).unwrap();
@@ -106,12 +125,19 @@ async fn gc_plan_is_dry_by_default_then_executes() {
     assert!(!v.blobs.exists(&orphan));
     assert!(!v.blobs.upload_path(&st.upload_id).exists());
     let c = v.pool.get().unwrap();
-    let n: i64 = c.query_row("SELECT COUNT(*) FROM revisions", [], |r| r.get(0)).unwrap();
+    let n: i64 = c
+        .query_row("SELECT COUNT(*) FROM revisions", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(n, 20);
     // текущая версия по-прежнему читается
     let ch = s.changes(&t, 0).await;
     let cur = Hash::from_slice(&ch.entries[0].hash).unwrap();
-    assert_eq!(s.get(&format!("/v1/blobs/{}", cur.to_hex()), &t).await.status, 200);
+    assert_eq!(
+        s.get(&format!("/v1/blobs/{}", cur.to_hex()), &t)
+            .await
+            .status,
+        200
+    );
 }
 
 #[tokio::test]
@@ -122,7 +148,13 @@ async fn gc_keeps_fresh_unreferenced_blobs() {
     let (fresh, _) = s.put_blob(&t, b"just uploaded").await;
     let v = open_vault(s.config(), "notes", 1).unwrap();
     let c = v.pool.get().unwrap();
-    let plan = gc::plan(&c, &v.blobs, GcOptions::default(), notesync_server::db::now_ms()).unwrap();
+    let plan = gc::plan(
+        &c,
+        &v.blobs,
+        GcOptions::default(),
+        notesync_server::db::now_ms(),
+    )
+    .unwrap();
     assert!(plan.blobs.is_empty());
     assert!(v.blobs.exists(&fresh));
 }
@@ -133,7 +165,8 @@ async fn sweep_erases_expired_deleted_files() {
     let t = s.token("notes", "a");
     s.write_file(&t, "old.md", 0, b"old").await;
     s.write_file(&t, "recent.md", 0, b"recent").await;
-    s.ops(&t, vec![del_op("old.md", 1), del_op("recent.md", 1)]).await;
+    s.ops(&t, vec![del_op("old.md", 1), del_op("recent.md", 1)])
+        .await;
     let v = open_vault(s.config(), "notes", 1).unwrap();
     {
         let c = v.pool.get().unwrap();
@@ -146,8 +179,15 @@ async fn sweep_erases_expired_deleted_files() {
     cmd::sweep(s.config()).unwrap();
     let d: pb::DeletedResponse = s.get("/v1/deleted", &t).await.proto();
     assert_eq!(d.items.len(), 1);
-    assert_eq!(d.items[0].entry.as_ref().unwrap().path, Some(p("recent.md")));
-    assert_eq!(v.blobs.list().unwrap().len(), 1, "блоб стёртого файла удалён");
+    assert_eq!(
+        d.items[0].entry.as_ref().unwrap().path,
+        Some(p("recent.md"))
+    );
+    assert_eq!(
+        v.blobs.list().unwrap().len(),
+        1,
+        "блоб стёртого файла удалён"
+    );
 }
 
 #[tokio::test]
@@ -171,7 +211,11 @@ async fn backup_is_consistent_copy() {
     );
     // токен работает и на копии
     let pool = notesync_server::db::open(&target.join("server.db")).unwrap();
-    assert!(notesync_server::db::server::authenticate(&pool, &t).unwrap().is_some());
+    assert!(
+        notesync_server::db::server::authenticate(&pool, &t)
+            .unwrap()
+            .is_some()
+    );
     // повторно в тот же каталог — отказ
     assert!(cmd::backup(s.config(), &target).is_err());
 }
@@ -187,9 +231,16 @@ fn token_cli_roundtrip() {
         .env_remove("GATEWAY_INTERFACE")
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let text = String::from_utf8(out.stdout).unwrap();
-    let token = text.split_whitespace().find(|w| w.starts_with("ns_")).unwrap();
+    let token = text
+        .split_whitespace()
+        .find(|w| w.starts_with("ns_"))
+        .unwrap();
     assert!(token.len() > 40);
     let list = Command::new(bin)
         .args(["token", "list", "--data"])
@@ -205,12 +256,29 @@ fn token_cli_roundtrip() {
         .output()
         .unwrap();
     assert!(rv.status.success());
-    let list = Command::new(bin).args(["token", "list", "--data"]).arg(data.path()).output().unwrap();
+    let list = Command::new(bin)
+        .args(["token", "list", "--data"])
+        .arg(data.path())
+        .output()
+        .unwrap();
     assert!(String::from_utf8(list.stdout).unwrap().contains("ОТОЗВАН"));
-    let vl = Command::new(bin).args(["vault", "list", "--data"]).arg(data.path()).output().unwrap();
+    let vl = Command::new(bin)
+        .args(["vault", "list", "--data"])
+        .arg(data.path())
+        .output()
+        .unwrap();
     assert!(String::from_utf8(vl.stdout).unwrap().contains("notes"));
     let link = Command::new(bin)
-        .args(["link", "--vault", "notes", "--name", "phone", "--url", "https://n.example", "--data"])
+        .args([
+            "link",
+            "--vault",
+            "notes",
+            "--name",
+            "phone",
+            "--url",
+            "https://n.example",
+            "--data",
+        ])
         .arg(data.path())
         .output()
         .unwrap();
