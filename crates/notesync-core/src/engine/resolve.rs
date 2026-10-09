@@ -534,6 +534,19 @@ pub(crate) async fn resolve_delete(cx: &Ctx, key: &str, r: Remote) -> SyncResult
             cx.notify(Notice::RestoredRemote { path: key.to_owned() });
         }
         None => {
+            // Место занято файлом с другим регистром имени: вернуть серверную версию
+            // сюда нельзя, она переименовывается на сервере.
+            if let Some(existing) = case_twin(cx, key).await? {
+                let server = cx.with(|s| s.to_server(&VaultPath::parse(key).map_err(|e| SyncError::Io(e.to_string()))?))?;
+                if split_case(cx, key, server, r.rev, &existing).await? {
+                    cx.with_mut(|s| {
+                        if s.index.files.get(key).is_some_and(|f| f.local.is_none()) {
+                            s.index.files.remove(key);
+                        }
+                    });
+                }
+                return Ok(());
+            }
             cx.with_mut(|s| {
                 s.dirty.insert(key.to_owned());
             });
@@ -575,6 +588,49 @@ pub(crate) async fn resolve_rename(cx: &Ctx, key: &str, r: Remote, at_destinatio
         }
     });
     Ok(())
+}
+
+/// Регистронезависимая ФС: на месте `key` лежит файл с другим регистром имени.
+pub(crate) async fn case_twin(cx: &Ctx, key: &str) -> SyncResult<Option<String>> {
+    if !cx.with(|s| s.cfg.case_insensitive) {
+        return Ok(None);
+    }
+    Ok(cx.stat(key).await?.filter(|m| !m.path.is_empty() && m.path != key).map(|m| m.path))
+}
+
+/// Два файла, различающиеся только регистром, здесь не уместить: серверный
+/// переименовывается в свободное имя — сохраняются оба. Возвращает, применено ли
+/// переименование.
+pub(crate) async fn split_case(cx: &Ctx, key: &str, server: pb::Path, rev: u64, existing: &str) -> SyncResult<bool> {
+    let label = {
+        let (date, _) = stamp(cx.now(), cx.with(|s| s.cfg.tz_offset_min));
+        format!("case {} {date}", cx.with(|s| s.cfg.device_name.clone()))
+    };
+    let copy = unique_copy(cx, key, &label).await?;
+    let to = cx.with(|s| s.to_server(&VaultPath::parse(&copy).map_err(|e| SyncError::Io(e.to_string()))?))?;
+    let resp = super::api::ops(
+        cx,
+        vec![pb::Op {
+            kind: Some(pb::op::Kind::Rename(pb::Rename {
+                from: Some(server),
+                to: Some(to),
+                base_rev: rev,
+            })),
+        }],
+    )
+    .await?;
+    let applied = matches!(resp.results.first().and_then(|r| r.result.as_ref()), Some(pb::op_result::Result::Applied(_)));
+    if applied {
+        cx.log(LogLevel::Warn, format!("{key} совпадает с {existing} без учёта регистра: переименован в {copy}"));
+        cx.with_mut(|s| s.sync_due = Some(s.now));
+    }
+    if cx.with_mut(|s| s.notified.insert(format!("case:{key}"))) {
+        cx.notify(Notice::CaseCollision {
+            path: key.to_owned(),
+            existing: existing.to_owned(),
+        });
+    }
+    Ok(applied)
 }
 
 /// Локальное переименование (регистр меняется через временное имя).

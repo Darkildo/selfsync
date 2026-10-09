@@ -13,7 +13,7 @@ use notesync_proto::v1 as pb;
 use super::api;
 use super::crypto_flow::{check_state, rebaseline};
 use super::ctx::{Ctx, SyncError, SyncResult};
-use super::resolve::{Remote, rename_local, resolve_content, resolve_delete};
+use super::resolve::{Remote, case_twin, rename_local, resolve_content, resolve_delete, split_case};
 use super::transfer::{download_to, read_local};
 use super::types::{Expect, LogLevel, Notice};
 use crate::hash::Hash;
@@ -291,80 +291,63 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
             return Ok(false);
         }
     }
-    // Регистронезависимая ФС: другой файл с тем же именем без учёта регистра.
-    if cx.with(|s| s.cfg.case_insensitive) && f.is_none() {
-        let fold = key.to_lowercase();
-        let renamed_from = it.e.renamed_from.as_ref().and_then(|p| cx.with(|s| s.from_server(p))).map(|p| p.as_str().to_owned());
-        let mut other = cx.with(|s| {
-            s.index
-                .files
-                .iter()
-                .find(|(k, f)| *k != key && k.to_lowercase() == fold && f.local.is_some() && Some(k.as_str()) != renamed_from.as_deref())
-                .map(|(k, _)| k.clone())
-        });
-        if other.is_none() {
-            if let Some(m) = cx.stat(key).await? {
-                if !m.path.is_empty() && m.path != *key && Some(m.path.as_str()) != renamed_from.as_deref() {
-                    other = Some(m.path);
-                }
-            }
-        }
-        if let Some(existing) = other {
-            // Два файла, различающиеся только регистром, здесь не уместить: второй
-            // переименовывается на сервере в свободное имя — сохраняются оба.
-            hold(cx, it.e.seq);
-            if let Some(path) = &it.e.path {
-                let label = {
-                    let (date, _) = super::resolve::stamp(cx.now(), cx.with(|s| s.cfg.tz_offset_min));
-                    format!("case {} {date}", cx.with(|s| s.cfg.device_name.clone()))
-                };
-                let copy = super::resolve::unique_copy(cx, key, &label).await?;
-                let to = cx.with(|s| s.to_server(&VaultPath::parse(&copy).map_err(|e| SyncError::Io(e.to_string()))?))?;
-                let resp = api::ops(
-                    cx,
-                    vec![pb::Op {
-                        kind: Some(pb::op::Kind::Rename(pb::Rename {
-                            from: Some(path.clone()),
-                            to: Some(to),
-                            base_rev: r.rev,
-                        })),
-                    }],
-                )
-                .await?;
-                if matches!(resp.results.first().and_then(|r| r.result.as_ref()), Some(pb::op_result::Result::Applied(_))) {
-                    cx.log(LogLevel::Warn, format!("{key} совпадает с {existing} без учёта регистра: переименован в {copy}"));
-                    cx.with_mut(|s| s.sync_due = Some(s.now));
-                }
-            }
-            if cx.with_mut(|s| s.notified.insert(format!("case:{key}"))) {
-                cx.notify(Notice::CaseCollision {
-                    path: key.clone(),
-                    existing,
-                });
-            }
-            return Ok(false);
-        }
-    }
     // Переименование файла, который у нас есть: локальный rename без скачивания.
     if let Some(from) = it.e.renamed_from.as_ref().and_then(|p| cx.with(|s| s.from_server(p))) {
         let from = from.as_str().to_owned();
         let src = cx.with(|s| s.index.files.get(&from).cloned());
         if let Some(src) = src {
-            if from != *key && f.is_none() && src.local.is_some() && src.server_path.is_none() && src.base_blob == r.hash && r.hash.is_some() && cx.stat(key).await?.is_none() && rename_local(cx, &from, key).await? {
-                cx.with_mut(|s| {
-                    if let Some(mut moved) = s.index.files.remove(&from) {
-                        moved.base_rev = r.rev;
-                        moved.base_blob = r.hash;
-                        if let Some(l) = &mut moved.local {
-                            // mtime после rename обычно прежний; если нет — перехэширует скан.
-                            let _ = l;
+            if from != *key && f.is_none() && src.local.is_some() && src.server_path.is_none() && r.hash.is_some() {
+                // На регистронезависимой ФС stat нового имени при смене только регистра
+                // находит сам источник — это не занятое место.
+                let free = match cx.stat(key).await? {
+                    None => true,
+                    Some(m) => m.path == from,
+                };
+                if free && rename_local(cx, &from, key).await? {
+                    let unchanged = src.base_blob == r.hash;
+                    cx.with_mut(|s| {
+                        if let Some(mut moved) = s.index.files.remove(&from) {
+                            if unchanged {
+                                moved.base_rev = r.rev;
+                                moved.base_blob = r.hash;
+                            } else {
+                                // Содержимое на сервере сменилось вместе с именем: базу
+                                // сверит resolve_content (base_plain остаётся предком).
+                                moved.base_rev = 0;
+                                moved.base_blob = None;
+                            }
+                            s.index.files.insert(key.clone(), moved);
                         }
-                        s.index.files.insert(key.clone(), moved);
+                        s.dirty.insert(key.clone());
+                    });
+                    if !unchanged {
+                        cx.save().await?;
+                        resolve_content(cx, key, r.clone()).await?;
                     }
-                    s.dirty.insert(key.clone());
-                });
-                return Ok(true);
+                    return Ok(true);
+                }
             }
+        }
+    }
+    // Регистронезависимая ФС: другой файл с тем же именем без учёта регистра.
+    if cx.with(|s| s.cfg.case_insensitive) && f.is_none() {
+        let fold = key.to_lowercase();
+        let mut other = cx.with(|s| {
+            s.index
+                .files
+                .iter()
+                .find(|(k, f)| *k != key && k.to_lowercase() == fold && f.local.is_some())
+                .map(|(k, _)| k.clone())
+        });
+        if other.is_none() {
+            other = case_twin(cx, key).await?;
+        }
+        if let Some(existing) = other {
+            hold(cx, it.e.seq);
+            if let Some(path) = &it.e.path {
+                split_case(cx, key, path.clone(), r.rev, &existing).await?;
+            }
+            return Ok(false);
         }
     }
     let Some(hash) = r.hash else {
@@ -400,6 +383,14 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
             // Локально файла нет в индексе (или он ещё не скачан).
             if let Some(meta) = cx.stat(key).await? {
                 if meta.dir {
+                    return Ok(false);
+                }
+                if !meta.path.is_empty() && meta.path != *key {
+                    // Регистронезависимая ФС: это другой файл.
+                    hold(cx, it.e.seq);
+                    if let Some(path) = &it.e.path {
+                        split_case(cx, key, path.clone(), r.rev, &meta.path).await?;
+                    }
                     return Ok(false);
                 }
                 // Файл есть, но не в индексе (первичная загрузка): сначала сравнить.
