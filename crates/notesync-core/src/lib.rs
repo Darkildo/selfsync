@@ -7,7 +7,10 @@
 
 pub mod blob;
 pub mod crypto;
+pub mod exclude;
 pub mod hash;
+pub mod merge;
+pub mod index;
 pub mod path;
 
 pub use notesync_proto as proto;
