@@ -1,0 +1,22 @@
+{
+  "name": "notesync-obsidian",
+  "version": "0.1.0",
+  "description": "Плагин Obsidian для self-hosted синхронизации notesync",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "wasm": "../scripts/build-wasm.sh",
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.4",
+    "esbuild": "0.28.2",
+    "obsidian": "1.14.4",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  }
+}
