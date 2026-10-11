@@ -48,6 +48,7 @@ fn error_of(status: u16, headers: &[(String, String)], body: &[u8]) -> SyncError
     let e = pb::Error::decode(body).unwrap_or_default();
     match status {
         401 => SyncError::Unauthorized,
+        403 if e.code == "read_only" => SyncError::ReadOnly,
         429 => SyncError::RateLimited {
             retry_after_s: retry_after(headers),
         },
@@ -320,10 +321,14 @@ pub async fn revoke_device(cx: &Ctx, id: u32) -> SyncResult<()> {
         .map(|_| ())
 }
 
-pub async fn join_create(cx: &Ctx, name: String) -> SyncResult<pb::JoinCode> {
+pub async fn join_create(cx: &Ctx, name: String, read_only: bool) -> SyncResult<pb::JoinCode> {
     call(
         cx,
-        proto_req("POST", "/v1/join".into(), &pb::JoinCreate { name }),
+        proto_req(
+            "POST",
+            "/v1/join".into(),
+            &pb::JoinCreate { name, read_only },
+        ),
     )
     .await
 }

@@ -25,6 +25,7 @@ struct Texts {
     expires: &'static str,
     invalid_title: &'static str,
     invalid: &'static str,
+    read_only: &'static str,
     limited_title: &'static str,
     /// `{n}` — секунды до следующей попытки.
     limited: &'static str,
@@ -44,6 +45,7 @@ const RU: Texts = Texts {
     expires: "Ссылка одноразовая и действует 15 минут.",
     invalid_title: "Ссылка недействительна",
     invalid: "Код подключения истёк или уже использован. Создайте новый в настройках плагина на подключённом устройстве.",
+    read_only: "Устройство подключится только для чтения: оно будет получать изменения, но свои отправлять не сможет.",
     limited_title: "Слишком много попыток",
     limited: "С этого адреса было слишком много неверных кодов. Повторите через {n} с.",
 };
@@ -62,6 +64,7 @@ const EN: Texts = Texts {
     expires: "The link works once and expires in 15 minutes.",
     invalid_title: "Link is not valid",
     invalid: "The connection code has expired or was already used. Create a new one in the plugin settings on a connected device.",
+    read_only: "The device will connect read-only: it receives changes but cannot send its own.",
     limited_title: "Too many attempts",
     limited: "Too many wrong codes came from this address. Try again in {n} s.",
 };
@@ -160,7 +163,11 @@ pub async fn page(State(st): State<AppState>, Path(code): Path<String>, req: Req
     };
     let resp = match valid {
         None => simple_page(t, StatusCode::NOT_FOUND, t.invalid_title, t.invalid),
-        Some((vault, name)) => {
+        Some(server::JoinInfo {
+            vault,
+            name,
+            read_only,
+        }) => {
             let base = public_base(&st, headers);
             let link = format!(
                 "obsidian://selfsync-connect?server={}&code={}",
@@ -169,7 +176,7 @@ pub async fn page(State(st): State<AppState>, Path(code): Path<String>, req: Req
             );
             let html = format!(
                 "<!doctype html><html lang=\"{lang}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{title}</title><style>{STYLE}</style></head><body>\
-<h1>{title}</h1><p>{intro} <b>{vault}</b> ({name}).</p>\
+<h1>{title}</h1><p>{intro} <b>{vault}</b> ({name}).</p>{ro}\
 <ol><li>{s1}</li><li>{s2}</li><li>{s3}</li></ol>\
 <a class=\"btn\" href=\"{link}\">{button}</a>\
 <p>{manual}</p><p>{server_l}: <code>{base}</code><br>{code_l}: <code>{code}</code></p>\
@@ -179,6 +186,11 @@ pub async fn page(State(st): State<AppState>, Path(code): Path<String>, req: Req
                 intro = t.intro,
                 vault = esc(&vault),
                 name = esc(&name),
+                ro = if read_only {
+                    format!("<p class=\"muted\">{}</p>", t.read_only)
+                } else {
+                    String::new()
+                },
                 s1 = t.step1,
                 s2 = t.step2,
                 s3 = t.step3,

@@ -31,6 +31,8 @@ pub enum SyncError {
     },
     #[error("токен не принят")]
     Unauthorized,
+    #[error("устройство подключено только для чтения")]
+    ReadOnly,
     #[error("слишком много неудачных попыток, повтор через {retry_after_s} с")]
     RateLimited { retry_after_s: u64 },
     #[error("протокол не поддерживается сервером")]
@@ -87,6 +89,14 @@ pub(crate) struct State {
     /// Сервер ответил 429: до этого момента ни синка, ни long-poll (иначе клиент
     /// сам продлевает свою блокировку). «Синхронизировать сейчас» не отменяет.
     pub rate_limited_until: Option<i64>,
+    /// Устройство только для чтения: из `VaultState` или по ответу 403 `read_only`
+    /// (старый сервер поля не знает). Не сохраняется: узнаётся заново на первом
+    /// запросе сессии, до любой отправки.
+    pub read_only: bool,
+    /// Узнали по 403 — `VaultState` старого сервера этого не отменит.
+    pub read_only_forced: bool,
+    /// Уведомление `ReadOnly` уже показано в этой сессии.
+    pub read_only_notified: bool,
 
     /// Синк остановлен до вмешательства пользователя (код причины).
     pub blocked: Option<String>,
@@ -133,6 +143,9 @@ impl State {
             wake_at: None,
             wait_disabled: false,
             rate_limited_until: None,
+            read_only: false,
+            read_only_forced: false,
+            read_only_notified: false,
             blocked: None,
             paused: None,
             server_state: None,
@@ -141,6 +154,18 @@ impl State {
             notified: BTreeSet::new(),
             hold_seq: None,
         }
+    }
+
+    /// Режим «только чтение» из `VaultState` (`None` — узнали по 403).
+    pub fn set_read_only(&mut self, from_state: Option<bool>) {
+        match from_state {
+            Some(v) => self.read_only = v || self.read_only_forced,
+            None => {
+                self.read_only_forced = true;
+                self.read_only = true;
+            }
+        }
+        self.status.read_only = self.read_only;
     }
 
     /// Запомнить `Retry-After` из ответа 429.

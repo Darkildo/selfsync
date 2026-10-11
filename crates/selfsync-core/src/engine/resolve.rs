@@ -324,7 +324,11 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
             // Мы ничего не меняли: просто серверная версия.
             return write_remote(cx, key, &r, sb.clone(), local_obs).await;
         }
+        // Устройству только для чтения слияние не нужно: результат никуда не уйдёт,
+        // а при следующей серверной правке пришлось бы сливать снова. Своя версия —
+        // копией рядом, на месте — серверная.
         if let (Some(lb), true) = (&local_bytes, f.base_plain.is_some())
+            && !cx.with(|s| s.read_only)
             && mergeable(lb)
             && mergeable(sb)
             && let Some(base) = base_content(cx, &f).await

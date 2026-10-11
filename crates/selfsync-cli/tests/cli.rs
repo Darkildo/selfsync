@@ -35,14 +35,14 @@ async fn server() -> Server {
 impl Server {
     fn token(&self, vault: &str, name: &str) -> String {
         let c = self.state.server_pool().unwrap().get().unwrap();
-        selfsync_server::db::server::add_device(&c, vault, name)
+        selfsync_server::db::server::add_device(&c, vault, name, false)
             .unwrap()
             .1
     }
 
     fn join_code(&self, vault: &str, name: &str) -> String {
         let c = self.state.server_pool().unwrap().get().unwrap();
-        selfsync_server::db::server::create_join_code(&c, vault, name, None)
+        selfsync_server::db::server::create_join_code(&c, vault, name, None, false)
             .unwrap()
             .0
     }
@@ -235,4 +235,56 @@ async fn daemon_picks_up_changes() {
             assert_eq!(got.as_deref(), Some("seen\n"));
         })
         .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn read_only_folder_receives_and_keeps_local_edits() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "ro", "a");
+    let b = tempfile::tempdir().unwrap();
+    let cb = Config {
+        server: srv.url.clone(),
+        token: {
+            let c = srv.state.server_pool().unwrap().get().unwrap();
+            selfsync_server::db::server::add_device(&c, "ro", "mirror", true)
+                .unwrap()
+                .1
+        },
+        device_name: "mirror".into(),
+        ..Config::default()
+    };
+    cb.save(b.path()).unwrap();
+    std::fs::write(a.path().join("note.md"), "from a\n").unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    // свои правки зеркала не уходят, но синк считается удавшимся (код 0)
+    std::fs::write(b.path().join("local.md"), "only here\n").unwrap();
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    assert_eq!(
+        std::fs::read_to_string(b.path().join("note.md")).unwrap(),
+        "from a\n"
+    );
+    assert!(b.path().join(".selfsync/read-only").exists());
+    assert!(!a.path().join(".selfsync/read-only").exists());
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert!(!a.path().join("local.md").exists());
+    // повторный запуск — тот же исход, файл на месте
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    assert!(b.path().join("local.md").exists());
+    // создать ссылку подключения с зеркала нельзя
+    let r = runner::command(
+        b.path(),
+        &srv.url,
+        Some(cb.token.clone()),
+        "mirror",
+        UiCommand::CreateJoin {
+            name: "x".into(),
+            read_only: false,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(&r, UiResult::Error { code, .. } if code == "read_only"),
+        "{r:?}"
+    );
 }

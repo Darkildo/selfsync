@@ -234,6 +234,9 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                         }
                     );
                     println!("курсор:     {}", idx.last_seq);
+                    if dir.join(STATE_DIR).join(runner::READ_ONLY_MARKER).exists() {
+                        println!("режим:      только чтение (локальные правки не отправляются)");
+                    }
                     for c in &idx.conflicts {
                         println!("конфликт:   {} → копия {}", c.path, c.copy);
                     }

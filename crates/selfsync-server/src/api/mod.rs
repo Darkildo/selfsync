@@ -31,6 +31,8 @@ pub struct AuthCtx {
     pub device_id: u32,
     pub device_name: String,
     pub vault: Arc<Vault>,
+    /// Устройство только для чтения (сервер пропускает лишь GET и HEAD).
+    pub read_only: bool,
 }
 
 /// Id устройства в расширениях ответа — для access-лога.
@@ -147,6 +149,18 @@ async fn auth(State(st): State<AppState>, mut req: Request, next: Next) -> Respo
         Ok(None) => return ApiError::unauthorized().into_response(),
         Err(e) => return e.into_response(),
     };
+    // Правило одно и проверяемое: устройству только для чтения — только GET и HEAD.
+    // Отсюда же: ни записи, ни ключа, ни отзыва, ни новых кодов подключения.
+    if dev.read_only && !matches!(*req.method(), http::Method::GET | http::Method::HEAD) {
+        let mut resp = ApiError::new(
+            StatusCode::FORBIDDEN,
+            "read_only",
+            "устройство подключено только для чтения",
+        )
+        .into_response();
+        resp.extensions_mut().insert(DeviceTag(dev.id));
+        return resp;
+    }
     let vault = match st.vault(&dev.vault) {
         Ok(v) => v,
         Err(e) => return e.into_response(),
@@ -156,6 +170,7 @@ async fn auth(State(st): State<AppState>, mut req: Request, next: Next) -> Respo
         device_id: dev.id,
         device_name: dev.name,
         vault,
+        read_only: dev.read_only,
     });
     let mut resp = next.run(req).await;
     resp.extensions_mut().insert(DeviceTag(id));

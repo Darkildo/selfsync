@@ -145,6 +145,38 @@ describe("подключение", () => {
     }
   });
 
+  test("по ссылке только для чтения", async () => {
+    const out = server.cli("link", "--vault", "rojoin", "--name", "tablet", "--url", server.url, "--read-only");
+    assert.match(out, /только для чтения/);
+    const code = /Код для ручного ввода: (\S+)/.exec(out)?.[1];
+    assert.ok(code, out);
+    const writer = await TestClient.create(server, { name: "writer", token: server.token("rojoin", "writer") });
+    await writer.write("shared.md", "from writer\n");
+    await writer.sync();
+    const fresh = await TestClient.create(server, { name: "tablet" });
+    const r = await fresh.runner.command({ type: "redeem", code, name: "tablet" });
+    assert.ok(r.type === "token");
+    const tablet = await TestClient.create(server, { name: "tablet", token: r.token });
+    await tablet.write("mine.md", "local\n");
+    await tablet.sync();
+    assert.equal(await tablet.read("shared.md"), "from writer\n");
+    assert.equal(tablet.status?.readOnly, true);
+    assert.equal(tablet.status?.pending, 1);
+    assert.ok(tablet.notices.some((n) => n.kind === "readOnly" && n.pending === 1));
+    await writer.sync();
+    assert.ok(!(await writer.files()).has("mine.md"));
+    const j = await tablet.runner.command({ type: "createJoin", name: "x" });
+    assert.ok(j.type === "error" && j.code === "read_only", JSON.stringify(j));
+    // устройство с записью выписывает ro-ссылки и видит пометку в списке
+    const j2 = await writer.runner.command({ type: "createJoin", name: "y", readOnly: true });
+    assert.equal(j2.type, "join");
+    const d = await writer.runner.command({ type: "devices" });
+    assert.ok(d.type === "devices" && d.devices.some((x) => x.name === "tablet" && x.readOnly));
+    await fresh.stop();
+    await tablet.stop();
+    await writer.stop();
+  });
+
   test("отозванный токен останавливает синк", async () => {
     const token = server.token("revoke", "gone");
     const c = await TestClient.create(server, { name: "gone", token });

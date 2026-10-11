@@ -63,7 +63,11 @@ fn pause(cx: &Ctx, reason: &str, notice: Option<Notice>) -> SyncError {
 
 /// Сверяет режим vault'а на сервере с локальным.
 pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()> {
-    cx.with_mut(|s| s.server_state = Some(*vs));
+    cx.with_mut(|s| {
+        s.server_state = Some(*vs);
+        s.set_read_only(Some(vs.read_only));
+    });
+    let read_only = cx.with(|s| s.read_only);
     let (mode, has_keys, migrating_here) =
         cx.with(|s| (s.index.mode, s.keys.is_some(), s.index.migration.is_some()));
     match mode {
@@ -84,6 +88,14 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
             }
             verify_keys(cx).await?;
             if plaintext_left(cx).await? {
+                if read_only {
+                    // Довести чужую миграцию не можем: ждём устройство с записью.
+                    return Err(pause(
+                        cx,
+                        "encryption_started",
+                        Some(Notice::EncryptionStarted),
+                    ));
+                }
                 // Ключ записан, а миграцию никто не ведёт (включавшее устройство не
                 // получило ответ или было убито до чекпоинта): доводим её сами.
                 cx.log(

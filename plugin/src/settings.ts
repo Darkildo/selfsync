@@ -37,6 +37,11 @@ export const DEFAULT_SETTINGS: Settings = {
   pollIdleMaxMin: 5,
 };
 
+/** Текст ошибки команды: известные коды — локализованно. */
+function errorText(r: { code: string; message: string }): string {
+  return r.code === "read_only" ? t("readOnly.error") : r.message;
+}
+
 export function normalizeServer(url: string): string {
   return url.trim().replace(/\/+$/, "");
 }
@@ -62,6 +67,9 @@ interface Section {
  * они находятся поиском по настройкам.
  */
 export class SelfsyncSettingTab extends PluginSettingTab {
+  /** Следующая ссылка подключения — для устройства только для чтения. */
+  private joinReadOnly = false;
+
   constructor(
     app: App,
     private plugin: SelfsyncPlugin,
@@ -107,7 +115,11 @@ export class SelfsyncSettingTab extends PluginSettingTab {
       { heading: t("settings.connection"), rows: this.connectionRows() },
       { heading: t("settings.sync"), rows: this.syncRows() },
       { heading: t("encryption.heading"), rows: [this.encryptionRow()], needsRunner: true },
-      { heading: t("devices.heading"), rows: [this.retentionRow(), this.joinRow(), this.devicesRow()], needsRunner: true },
+      {
+        heading: t("devices.heading"),
+        rows: [this.readOnlyRow(), this.retentionRow(), this.joinRow(), this.joinReadOnlyRow(), this.devicesRow()],
+        needsRunner: true,
+      },
     ];
   }
 
@@ -227,6 +239,26 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     ];
   }
 
+  /** Устройство только для чтения: менять vault'у ничего нельзя. */
+  private readOnly(): boolean {
+    return this.plugin.runner?.status().readOnly ?? false;
+  }
+
+  /** Пояснение вместо кнопок на устройстве только для чтения. */
+  private readOnlyRow(): Row {
+    return {
+      name: t("status.readOnly"),
+      desc: t("readOnly.desc"),
+      build: (row) => {
+        if (!this.readOnly()) {
+          row.settingEl.hide();
+          return;
+        }
+        row.setName(t("status.readOnly")).setDesc(t("readOnly.desc"));
+      },
+    };
+  }
+
   private encryptionRow(): Row {
     return {
       name: t("encryption.enable"),
@@ -236,6 +268,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
         if (!runner) return;
         const encrypted = runner.status().encrypted;
         row.setName("").setDesc(encrypted ? t("encryption.on") : t("encryption.off"));
+        if (this.readOnly()) return;
         if (!encrypted) {
           row.addButton((b) =>
             b
@@ -271,18 +304,19 @@ export class SelfsyncSettingTab extends PluginSettingTab {
         const runner = this.plugin.runner;
         if (!runner) return;
         row.setName(t("retention.name")).setDesc(t("retention.desc"));
+        const readOnly = this.readOnly();
         row.addText((x) => {
           x.inputEl.type = "number";
           x.setDisabled(true);
           void runner.command({ type: "getRetention" }).then((r) => {
             if (r.type !== "retention") return;
-            x.setValue(String(r.days)).setDisabled(false);
+            x.setValue(String(r.days)).setDisabled(readOnly);
           });
           x.onChange(async (raw) => {
             const days = Math.round(Number(raw));
             if (!Number.isFinite(days) || days < 1 || days > 3650) return;
             const r = await runner.command({ type: "setRetention", days });
-            if (r.type === "error") new Notice(r.message);
+            if (r.type === "error") new Notice(errorText(r));
           });
         });
       },
@@ -296,6 +330,10 @@ export class SelfsyncSettingTab extends PluginSettingTab {
       build: (row) => {
         const runner = this.plugin.runner;
         if (!runner) return;
+        if (this.readOnly()) {
+          row.settingEl.hide();
+          return;
+        }
         let name = "";
         row
           .setName(t("join.title"))
@@ -306,11 +344,30 @@ export class SelfsyncSettingTab extends PluginSettingTab {
               .setButtonText(t("join.create"))
               .setCta()
               .onClick(async () => {
-                const r = await runner.command({ type: "createJoin", name: name || t("join.namePlaceholder") });
-                if (r.type === "join") new JoinModal(this.app, r).open();
-                else new Notice(r.type === "error" ? r.message : r.type);
+                const readOnly = this.joinReadOnly;
+                const r = await runner.command({ type: "createJoin", name: name || t("join.namePlaceholder"), readOnly });
+                if (r.type === "join") new JoinModal(this.app, { ...r, readOnly }).open();
+                else new Notice(r.type === "error" ? errorText(r) : r.type);
               }),
           );
+      },
+    };
+  }
+
+  /** «Только чтение» для следующей ссылки подключения. */
+  private joinReadOnlyRow(): Row {
+    return {
+      name: t("join.readOnly"),
+      desc: t("join.readOnlyDesc"),
+      build: (row) => {
+        if (!this.plugin.runner || this.readOnly()) {
+          row.settingEl.hide();
+          return;
+        }
+        row
+          .setName(t("join.readOnly"))
+          .setDesc(t("join.readOnlyDesc"))
+          .addToggle((x) => x.setValue(this.joinReadOnly).onChange((v) => (this.joinReadOnly = v)));
       },
     };
   }
@@ -340,9 +397,13 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     const seen = d.lastSeen > 0 ? new Date(d.lastSeen).toLocaleString() : "—";
     const row = new Setting(list)
       .setName(d.current ? `${d.name} (${t("devices.current")})` : d.name)
-      .setDesc(d.revoked ? t("devices.revoked") : t("devices.lastSeen", { when: seen }));
+      .setDesc(
+        [d.revoked ? t("devices.revoked") : t("devices.lastSeen", { when: seen }), d.readOnly ? t("devices.readOnly") : ""]
+          .filter((x) => x)
+          .join(" · "),
+      );
     if (d.revoked) row.settingEl.addClass("selfsync-device-revoked");
-    if (d.current || d.revoked) return;
+    if (d.current || d.revoked || this.readOnly()) return;
     row.addButton((b) =>
       b
         .setButtonText(t("devices.revoke"))
@@ -350,7 +411,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
         .onClick(async () => {
           if (!(await confirm(this.app, t("devices.revokeConfirm", { name: d.name }), t("devices.revoke")))) return;
           const res = await runner.command({ type: "revokeDevice", id: d.id });
-          if (res.type === "error") new Notice(res.message);
+          if (res.type === "error") new Notice(errorText(res));
           this.refresh();
         }),
     );

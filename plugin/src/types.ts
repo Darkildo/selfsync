@@ -51,6 +51,8 @@ export interface SyncStatus {
   encrypted: boolean;
   /** При `reason === "rate_limited"`: раньше этого момента (мс) запросов не будет. */
   retryAt: number;
+  /** Устройство только для чтения: `pending` правок на сервер не уйдут. */
+  readOnly: boolean;
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -64,6 +66,7 @@ export type Notice =
   | { kind: "rejected"; path: string; code: string }
   | { kind: "caseCollision"; path: string; existing: string }
   | { kind: "tooLarge"; path: string; size: number }
+  | { kind: "readOnly"; pending: number }
   | { kind: "unsupportedName"; path: string }
   | { kind: "nonPortableName"; path: string }
   | { kind: "wrongPassword" }
@@ -111,6 +114,7 @@ export interface DeviceView {
   lastSeen: number;
   revoked: boolean;
   current: boolean;
+  readOnly: boolean;
 }
 
 export type UiResult =
@@ -144,7 +148,7 @@ export type UiCommand =
   | { type: "restoreRevision"; path: string; rev: number }
   | { type: "devices" }
   | { type: "revokeDevice"; id: number }
-  | { type: "createJoin"; name: string }
+  | { type: "createJoin"; name: string; readOnly?: boolean }
   | { type: "redeem"; code: string; name: string }
   | { type: "getRetention" }
   | { type: "setRetention"; days: number }

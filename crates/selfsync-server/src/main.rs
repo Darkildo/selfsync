@@ -66,6 +66,9 @@ enum Cmd {
         url: Option<String>,
         #[arg(long)]
         name: String,
+        /// Устройство только для чтения: получает изменения, своих не отправляет.
+        #[arg(long)]
+        read_only: bool,
     },
     /// Загрузить существующую папку (открытым текстом).
     Import {
@@ -132,6 +135,9 @@ enum TokenCmd {
         vault: String,
         #[arg(long)]
         name: String,
+        /// Устройство только для чтения: получает изменения, своих не отправляет.
+        #[arg(long)]
+        read_only: bool,
     },
     /// Список устройств.
     List {
@@ -202,12 +208,21 @@ fn run() -> anyhow::Result<ExitCode> {
         }
         Cmd::Migrate { vault } => cmd::migrate(&config, vault.as_deref())?,
         Cmd::Vault(VaultCmd::List) => cmd::vault_list(&config)?,
-        Cmd::Token(TokenCmd::Add { vault, name }) => cmd::token_add(&config, &vault, &name)?,
+        Cmd::Token(TokenCmd::Add {
+            vault,
+            name,
+            read_only,
+        }) => cmd::token_add(&config, &vault, &name, read_only)?,
         Cmd::Token(TokenCmd::List { vault }) => cmd::token_list(&config, vault.as_deref())?,
         Cmd::Token(TokenCmd::Revoke { name, vault }) => {
             cmd::token_revoke(&config, vault.as_deref(), &name)?
         }
-        Cmd::Link { vault, url, name } => cmd::link(&config, &vault, url.as_deref(), &name)?,
+        Cmd::Link {
+            vault,
+            url,
+            name,
+            read_only,
+        } => cmd::link(&config, &vault, url.as_deref(), &name, read_only)?,
         Cmd::Import { vault, from } => {
             let r = cmd::import(&config, &vault, &from, config.max_blob_size)
                 .with_context(|| format!("импорт из {}", from.display()))?;

@@ -789,3 +789,73 @@ fn rate_limited_client_waits_retry_after() {
     finish(&mut w);
     assert!(server_text(&w, "a.md").contains(&tok));
 }
+
+/// Устройство только для чтения: получает чужие правки, свои не отправляет, а правка
+/// поверх пришедшей серверной версии сохраняется копией рядом.
+fn read_only_scenario(old_server: bool) {
+    let mut w = World::new(quiet(2));
+    w.hide_read_only = old_server;
+    let shared = shared_note(&mut w, "a.md");
+    w.set_read_only(1);
+    // чужая правка приходит
+    let from_c0 = edit_line(&mut w, 0, "a.md", 1);
+    w.sync(0);
+    // своя новая заметка остаётся только здесь
+    let local_new = base_note(&mut w, 1, "mine.md");
+    w.sync(1);
+    let text = String::from_utf8(w.clients[1].fs.read_file("a.md").cloned().unwrap()).unwrap();
+    assert!(text.contains(&from_c0) && text.contains(&shared), "{text}");
+    let st = w.clients[1].status.clone().unwrap();
+    assert!(st.read_only, "{st:?}");
+    assert_eq!(st.pending, 1, "{st:?}");
+    assert!(!w.server_files().contains_key("mine.md"));
+    let ro_notices = |w: &World| {
+        w.clients[1]
+            .notices
+            .iter()
+            .filter(|n| matches!(n, Notice::ReadOnly { .. }))
+            .count()
+    };
+    assert_eq!(ro_notices(&w), 1);
+    // правка поверх серверной: серверная на месте, своя — копией рядом
+    let mine = edit_line(&mut w, 1, "a.md", 3);
+    let theirs = edit_line(&mut w, 0, "a.md", 3);
+    w.sync(0);
+    for _ in 0..3 {
+        w.now += 20_000;
+        w.sync(1);
+    }
+    let local = w.clients[1].fs.snapshot();
+    let a = String::from_utf8_lossy(&local["a.md"]).into_owned();
+    assert!(a.contains(&theirs) && !a.contains(&mine), "{a}");
+    let copies: Vec<&String> = local.keys().filter(|p| p.starts_with("a (")).collect();
+    assert_eq!(copies.len(), 1, "{:?}", local.keys());
+    assert!(String::from_utf8_lossy(&local[copies[0]]).contains(&mine));
+    // на сервер ничего не ушло, уведомление — одно за сессию
+    let server = server_tokens(&w);
+    assert!(!server.contains(&mine) && !server.contains(&local_new));
+    assert_eq!(ro_notices(&w), 1);
+    // запросы на запись: ни одного, а со старым сервером — один отказ за сессию
+    assert_eq!(w.clients[1].writes, u64::from(old_server));
+    w.kill(1);
+    w.sync(1);
+    w.now += 20_000;
+    w.sync(1);
+    assert_eq!(w.clients[1].writes, 2 * u64::from(old_server));
+    assert!(w.clients[1].status.as_ref().unwrap().read_only);
+    // устройство с записью сходится с сервером, ни одна правка не потеряна
+    w.check_no_loss().unwrap();
+    let server = w.server_files();
+    let c0: std::collections::BTreeMap<_, _> = w.clients[0].fs.snapshot().into_iter().collect();
+    assert_eq!(c0, server);
+}
+
+#[test]
+fn read_only_client_receives_but_does_not_send() {
+    read_only_scenario(false);
+}
+
+#[test]
+fn read_only_client_against_old_server_learns_from_403() {
+    read_only_scenario(true);
+}

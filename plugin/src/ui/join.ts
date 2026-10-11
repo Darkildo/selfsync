@@ -37,7 +37,7 @@ export function qrSvg(doc: Document, modules: Uint8Array): SVGSVGElement {
 export class JoinModal extends Modal {
   constructor(
     app: App,
-    private join: { url: string; code: string; expiresAt: number },
+    private join: { url: string; code: string; expiresAt: number; readOnly?: boolean },
   ) {
     super(app);
   }
@@ -46,6 +46,7 @@ export class JoinModal extends Modal {
     const { contentEl } = this;
     this.setTitle(t("join.title"));
     contentEl.createEl("p", { text: t("join.desc") });
+    if (this.join.readOnly) contentEl.createEl("p", { text: `${t("join.readOnly")}: ${t("join.readOnlyDesc")}` });
     contentEl.appendChild(qrSvg(document, qrModules(this.join.url)));
     new Setting(contentEl)
       .setName(this.join.url)

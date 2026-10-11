@@ -39,6 +39,31 @@ interface LoadedPlugin {
   onunload(): void;
   runner?: { idle(): Promise<void>; send(e: unknown): void };
   statusBar: { text: string };
+  settingTab: { getSettingDefinitions(): { items: { render(s: unknown): unknown }[] }[] };
+}
+
+/** Кнопки и строки, которые рисует вкладка настроек (с ответами сервера). */
+async function renderSettings(plugin: LoadedPlugin): Promise<obsidian.Setting[]> {
+  obsidian.settings.length = 0;
+  for (const g of plugin.settingTab.getSettingDefinitions()) {
+    for (const it of g.items) it.render(new obsidian.Setting());
+  }
+  // Список устройств и окно хранения приходят ответом сервера.
+  await plugin.runner?.idle();
+  await new Promise((r) => setTimeout(r, 200));
+  return obsidian.settings.filter((s) => !s.hidden);
+}
+
+async function loadPlugin(vault: string, token: string): Promise<LoadedPlugin> {
+  const app = obsidian.stubApp(vault, { server: server.url, token, deviceName: "stub" });
+  const require = Module.createRequire(import.meta.url);
+  const Plugin = (require(join(PLUGIN, "main.js")) as { default: new (a: unknown, m: unknown) => LoadedPlugin }).default;
+  const plugin = new Plugin(app, { id: "selfsync", dir: ".obsidian/plugins/selfsync" });
+  await plugin.onload();
+  for (let i = 0; i < 100 && !plugin.runner; i++) await new Promise((r) => setTimeout(r, 10));
+  assert.ok(plugin.runner, "движок запущен");
+  await plugin.runner.idle();
+  return plugin;
 }
 
 test("main.js: синк при старте и по событиям vault'а", async () => {
@@ -79,4 +104,32 @@ test("main.js: синк при старте и по событиям vault'а", 
   plugin.onunload();
   await other.stop();
   await fsp.rm(vault, { recursive: true, force: true });
+});
+
+test("main.js: устройство только для чтения — статус и скрытые действия", async () => {
+  const roToken = server.cli("token", "add", "--vault", "ro", "--name", "mirror", "--read-only").trim().split("\n").pop() ?? "";
+  const rwVault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-rw-"));
+  const roVault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-ro-"));
+  const rw = await loadPlugin(rwVault, server.token("ro", "writer"));
+  const ro = await loadPlugin(roVault, roToken);
+  await fsp.writeFile(join(roVault, "local.md"), "only here\n");
+  ro.runner?.send({ type: "syncNow" });
+  await ro.runner?.idle();
+  assert.match(ro.statusBar.text, /Только чтение/);
+  assert.match(ro.statusBar.text, /не уйдут на сервер: 1/);
+  assert.ok(obsidian.shown.some((m) => m.includes("только для чтения")), obsidian.shown.join("\n"));
+
+  const buttons = (rows: obsidian.Setting[]): string[] => rows.flatMap((r) => r.buttons);
+  const rwRows = await renderSettings(rw);
+  for (const b of ["Включить шифрование", "Создать ссылку", "Отозвать"]) assert.ok(buttons(rwRows).includes(b), `${b}: ${buttons(rwRows)}`);
+  assert.ok(rwRows.some((r) => r.name === "Только чтение" && r.toggles === 1), "переключатель для ссылки");
+  assert.ok(rwRows.some((r) => r.desc.includes("только чтение")), "пометка в списке устройств");
+  const roRows = await renderSettings(ro);
+  for (const b of ["Включить шифрование", "Создать ссылку", "Отозвать"]) assert.ok(!buttons(roRows).includes(b), `${b}: ${buttons(roRows)}`);
+  assert.ok(roRows.some((r) => r.desc.includes("подключено только для чтения")), "пояснение");
+
+  rw.onunload();
+  ro.onunload();
+  await fsp.rm(rwVault, { recursive: true, force: true });
+  await fsp.rm(roVault, { recursive: true, force: true });
 });

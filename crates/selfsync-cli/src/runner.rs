@@ -110,6 +110,15 @@ impl Loop {
         match a {
             Action::Wake { at } => self.wake = Some(at),
             Action::Status { status } => {
+                if status.read_only != self.status.read_only {
+                    // Для `status` без сети: режим знает только сервер.
+                    let marker = self.key_path.with_file_name(READ_ONLY_MARKER);
+                    if status.read_only {
+                        let _ = std::fs::write(&marker, b"");
+                    } else {
+                        let _ = std::fs::remove_file(&marker);
+                    }
+                }
                 if status.state != self.status.state || status.retry_at != self.status.retry_at {
                     tracing::info!("состояние: {:?} ({})", status.state, reason_text(&status));
                 }
@@ -157,8 +166,14 @@ impl Loop {
     }
 }
 
+/// Файл в `.selfsync/`: последний синк прошёл в режиме «только чтение».
+pub const READ_ONLY_MARKER: &str = "read-only";
+
 fn notify_user(n: &Notice) {
     match n {
+        Notice::ReadOnly { pending } => tracing::warn!(
+            "устройство только для чтения: локальные правки ({pending}) на сервер не отправляются"
+        ),
         Notice::Conflict { path, copy, .. } => {
             tracing::warn!("конфликт: {path} — локальная версия сохранена как {copy}")
         }
@@ -281,7 +296,16 @@ pub async fn run(dir: &Path, cfg: &Config, opts: Options) -> anyhow::Result<Outc
         if opts.once && lp.settled() {
             let s = &lp.status;
             match s.state {
-                SyncState::Idle if s.last_sync > 0 => return Ok(Outcome::Synced),
+                SyncState::Idle if s.last_sync > 0 => {
+                    if s.read_only && s.pending > 0 {
+                        eprintln!(
+                            "предупреждение: устройство только для чтения — локальных правок, \
+                             которые не уйдут на сервер: {}",
+                            s.pending
+                        );
+                    }
+                    return Ok(Outcome::Synced);
+                }
                 SyncState::Offline | SyncState::Error => {
                     return Ok(Outcome::Failed(reason_text(s)));
                 }

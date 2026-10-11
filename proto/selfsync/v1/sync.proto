@@ -45,6 +45,9 @@ message VaultState {
   // Наибольший seq строки, которую сервер стёр окончательно (sweeper, gc, purge).
   // Клиент с last_seq < purged_seq мог пропустить tombstone и делает полную сверку.
   uint64 purged_seq = 5;
+  // Запрос сделан токеном устройства только для чтения: клиент не отправляет
+  // своих правок. Старый сервер поле не заполняет — клиент узнаёт по 403 read_only.
+  bool read_only = 6;
 }
 
 message Error {
@@ -245,6 +248,7 @@ message Device {
   int64 created_at = 3;
   int64 last_seen = 4;
   bool revoked = 5;
+  bool read_only = 6;        // устройство только для чтения
 }
 
 message DevicesResponse {
@@ -255,6 +259,7 @@ message DevicesResponse {
 
 message JoinCreate {
   string name = 1;           // имя будущего устройства (можно изменить при подключении)
+  bool read_only = 2;        // подключить устройство только для чтения
 }
 
 message JoinCode {

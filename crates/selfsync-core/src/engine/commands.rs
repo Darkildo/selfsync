@@ -25,6 +25,7 @@ fn error_result(e: &SyncError) -> UiResult {
         SyncError::Network(_) => "offline",
         SyncError::Unauthorized => "unauthorized",
         SyncError::RateLimited { .. } => "rate_limited",
+        SyncError::ReadOnly => "read_only",
         SyncError::Paused(r) | SyncError::Blocked(r) => r.as_str(),
         SyncError::Http { code, .. } | SyncError::Server { code, .. } => code.as_str(),
         _ => "error",
@@ -39,10 +40,33 @@ fn error_result(e: &SyncError) -> UiResult {
     }
 }
 
+/// Команда меняет что-то на сервере (устройству только для чтения нельзя).
+fn writes(cmd: &UiCommand) -> bool {
+    matches!(
+        cmd,
+        UiCommand::RestoreDeleted { .. }
+            | UiCommand::PurgeDeleted { .. }
+            | UiCommand::RestoreRevision { .. }
+            | UiCommand::RevokeDevice { .. }
+            | UiCommand::CreateJoin { .. }
+            | UiCommand::SetRetention { .. }
+    )
+}
+
 pub(crate) async fn run(cx: &Ctx, req: u64, cmd: UiCommand) {
-    let result = match exec(cx, cmd).await {
+    let res = if writes(&cmd) && cx.with(|s| s.read_only) {
+        Err(SyncError::ReadOnly)
+    } else {
+        exec(cx, cmd).await
+    };
+    let result = match res {
         Ok(r) => r,
-        Err(e) => error_result(&e),
+        Err(e) => {
+            if matches!(e, SyncError::ReadOnly) {
+                cx.with_mut(|s| s.set_read_only(None));
+            }
+            error_result(&e)
+        }
     };
     cx.hub.emit(Action::UiResult { req, result });
 }
@@ -156,6 +180,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                         created_at: x.created_at,
                         last_seen: x.last_seen,
                         revoked: x.revoked,
+                        read_only: x.read_only,
                     })
                     .collect(),
             })
@@ -164,8 +189,8 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             api::revoke_device(cx, id).await?;
             Ok(UiResult::Ok)
         }
-        UiCommand::CreateJoin { name } => {
-            let j = api::join_create(cx, name).await?;
+        UiCommand::CreateJoin { name, read_only } => {
+            let j = api::join_create(cx, name, read_only).await?;
             Ok(UiResult::Join {
                 code: j.code,
                 url: j.url,

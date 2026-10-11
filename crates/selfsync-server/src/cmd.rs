@@ -90,11 +90,22 @@ pub fn vault_list(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn token_add(config: &Config, vault_name: &str, name: &str) -> anyhow::Result<()> {
+pub fn token_add(
+    config: &Config,
+    vault_name: &str,
+    name: &str,
+    read_only: bool,
+) -> anyhow::Result<()> {
     let c = server_conn(config)?;
-    let (id, token) = server::add_device(&c, vault_name, name)?;
+    let (id, token) = server::add_device(&c, vault_name, name, read_only)?;
     open_vault(config, vault_name, 1)?;
     println!("Устройство #{id} «{name}» добавлено в vault «{vault_name}».");
+    if read_only {
+        println!(
+            "Только для чтения: нужен плагин или selfsync-cli 0.1.4+ (старые версии \
+             покажут ошибку синхронизации при первой локальной правке)."
+        );
+    }
     println!("Токен (показывается один раз):");
     println!("{token}");
     Ok(())
@@ -108,12 +119,17 @@ pub fn token_list(config: &Config, vault_name: Option<&str>) -> anyhow::Result<(
     }
     for d in rows {
         println!(
-            "#{}\t{}\t{}\tсоздано {}\tбыл {}\t{}",
+            "#{}\t{}\t{}\tсоздано {}\tбыл {}\t{}\t{}",
             d.id,
             d.vault,
             d.name,
             fmt_time(d.created_at),
             fmt_time(d.last_seen),
+            if d.read_only {
+                "чтение"
+            } else {
+                "запись"
+            },
             if d.revoked {
                 "ОТОЗВАН"
             } else {
@@ -171,6 +187,7 @@ pub fn link(
     vault_name: &str,
     url: Option<&str>,
     name: &str,
+    read_only: bool,
 ) -> anyhow::Result<()> {
     let base = url
         .map(str::to_owned)
@@ -179,10 +196,15 @@ pub fn link(
     let base = base.trim_end_matches('/');
     let c = server_conn(config)?;
     open_vault(config, vault_name, 1)?;
-    let (code, expires) = server::create_join_code(&c, vault_name, name, None)?;
+    let (code, expires) = server::create_join_code(&c, vault_name, name, None, read_only)?;
     let link = format!("{base}/join/{code}");
     println!(
-        "Ссылка подключения «{name}» к vault'у «{vault_name}» (одноразовая, до {}):",
+        "Ссылка подключения «{name}» к vault'у «{vault_name}»{} (одноразовая, до {}):",
+        if read_only {
+            " только для чтения"
+        } else {
+            ""
+        },
         fmt_time(expires)
     );
     println!("{link}\n");

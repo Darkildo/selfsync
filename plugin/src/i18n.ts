@@ -11,6 +11,8 @@ const en = {
   "status.needPassword": "Password needed",
   "status.blocked": "Sync stopped",
   "status.rateLimited": "Too many attempts, next one at {time}",
+  "status.readOnly": "Read-only",
+  "status.readOnlyPending": "{n} local changes will not be sent",
   "status.notConfigured": "Not connected",
   "status.pending": "{n} pending",
   "status.conflicts": "conflicts: {n}",
@@ -136,6 +138,7 @@ const en = {
   "devices.lastSeen": "last seen {when}",
   "devices.revoke": "Revoke",
   "devices.revokeConfirm": "Revoke access for «{name}»? It will stop syncing immediately.",
+  "devices.readOnly": "read-only",
 
   "join.title": "Connect a new device",
   "join.nameDesc": "A one-time link (valid for a short time): open it on the new device or scan the QR code",
@@ -144,6 +147,11 @@ const en = {
   "join.desc": "Scan with the new device's camera or open the link there. The link works once.",
   "join.code": "Code for manual entry: {code} · valid until {until}",
   "join.copy": "Copy link",
+  "join.readOnly": "Read-only",
+  "join.readOnlyDesc": "The new device receives changes but cannot send its own, change settings or connect other devices. Needs plugin 0.1.4 or newer on it.",
+  "readOnly.desc": "This device is connected read-only: it receives changes from other devices, but its own edits stay here. Encryption, the retention period, revoking devices and new connect links are managed from a device with write access.",
+  "readOnly.error": "This device is connected read-only",
+  "notice.readOnly": "selfsync: this device is read-only — {n} local changes will not reach the server. If the same file changes elsewhere, your version is kept as a copy next to it.",
 };
 
 type Key = keyof typeof en;
@@ -156,6 +164,8 @@ const ru: Record<Key, string> = {
   "status.needPassword": "Нужен пароль",
   "status.blocked": "Синхронизация остановлена",
   "status.rateLimited": "Слишком много попыток, следующая в {time}",
+  "status.readOnly": "Только чтение",
+  "status.readOnlyPending": "не уйдут на сервер: {n}",
   "status.notConfigured": "Не подключено",
   "status.pending": "к отправке: {n}",
   "status.conflicts": "конфликтов: {n}",
@@ -281,6 +291,7 @@ const ru: Record<Key, string> = {
   "devices.lastSeen": "был в сети {when}",
   "devices.revoke": "Отозвать",
   "devices.revokeConfirm": "Отозвать доступ у «{name}»? Устройство сразу перестанет синхронизироваться.",
+  "devices.readOnly": "только чтение",
 
   "join.title": "Подключить новое устройство",
   "join.nameDesc": "Одноразовая ссылка (действует недолго): откройте её на новом устройстве или отсканируйте QR-код",
@@ -289,6 +300,11 @@ const ru: Record<Key, string> = {
   "join.desc": "Отсканируйте камерой нового устройства или откройте ссылку на нём. Ссылка срабатывает один раз.",
   "join.code": "Код для ручного ввода: {code} · действует до {until}",
   "join.copy": "Скопировать ссылку",
+  "join.readOnly": "Только чтение",
+  "join.readOnlyDesc": "Новое устройство будет получать изменения, но не сможет отправлять свои, менять настройки vault'а и подключать другие устройства. На нём нужен плагин 0.1.4 или новее.",
+  "readOnly.desc": "Это устройство подключено только для чтения: оно получает изменения с других устройств, а его собственные правки остаются здесь. Шифрование, срок хранения удалённого, отзыв устройств и новые ссылки подключения — с устройства с правом записи.",
+  "readOnly.error": "Устройство подключено только для чтения",
+  "notice.readOnly": "selfsync: устройство только для чтения — локальных правок, которые не уйдут на сервер: {n}. Если тот же файл изменится на другом устройстве, ваша версия сохранится копией рядом.",
 };
 
 let lang: "ru" | "en" = "en";
@@ -332,6 +348,8 @@ export function noticeText(n: Notice): string | null {
       return t("notice.caseCollision", { path: n.path, existing: n.existing });
     case "tooLarge":
       return t("notice.tooLarge", { path: n.path, size: formatBytes(n.size) });
+    case "readOnly":
+      return t("notice.readOnly", { n: n.pending });
     case "unsupportedName":
       return t("notice.unsupportedName", { path: n.path });
     case "nonPortableName":
@@ -359,7 +377,7 @@ export function noticeText(n: Notice): string | null {
     case "encryptionMismatch":
       return t("notice.encryptionMismatch");
     case "error":
-      return t("notice.error", { message: n.message });
+      return t("notice.error", { message: n.code === "read_only" ? t("readOnly.error") : n.message });
   }
 }
 
@@ -368,5 +386,6 @@ export function stateText(s: SyncStatus | null): string {
   if (s.reason === "rate_limited" && s.retryAt > Date.now()) {
     return t("status.rateLimited", { time: new Date(s.retryAt).toLocaleTimeString() });
   }
+  if (s.readOnly && s.state === "idle") return t("status.readOnly");
   return t(`status.${s.state}`);
 }

@@ -46,6 +46,10 @@ CREATE TABLE throttle (
   blocked_until INTEGER
 );
 ",
+    "
+ALTER TABLE devices ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE join_codes ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0;
+",
 ];
 
 pub fn migrate_server(c: &mut Connection) -> rusqlite::Result<()> {
@@ -58,6 +62,8 @@ pub struct DeviceAuth {
     pub id: u32,
     pub vault: String,
     pub name: String,
+    /// Только GET и HEAD.
+    pub read_only: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -68,6 +74,7 @@ pub struct DeviceRow {
     pub created_at: i64,
     pub last_seen: i64,
     pub revoked: bool,
+    pub read_only: bool,
 }
 
 /// Новый токен: 32 случайных байта в base64url с префиксом `ns_`.
@@ -107,7 +114,12 @@ pub fn valid_vault_name(v: &str) -> bool {
 }
 
 /// Создаёт устройство и возвращает (id, токен).
-pub fn add_device(c: &Connection, vault: &str, name: &str) -> anyhow::Result<(u32, String)> {
+pub fn add_device(
+    c: &Connection,
+    vault: &str,
+    name: &str,
+    read_only: bool,
+) -> anyhow::Result<(u32, String)> {
     anyhow::ensure!(
         valid_vault_name(vault),
         "имя vault'а должно быть [a-z0-9-]{{1,64}}"
@@ -119,8 +131,9 @@ pub fn add_device(c: &Connection, vault: &str, name: &str) -> anyhow::Result<(u3
     );
     let token = generate_token()?;
     c.execute(
-        "INSERT INTO devices (vault, name, token_hash, created_at) VALUES (?1, ?2, ?3, ?4)",
-        params![vault, name, hash_secret(&token), now_ms()],
+        "INSERT INTO devices (vault, name, token_hash, created_at, read_only)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![vault, name, hash_secret(&token), now_ms(), read_only],
     )?;
     let id = u32::try_from(c.last_insert_rowid())?;
     Ok((id, token))
@@ -132,15 +145,25 @@ pub fn authenticate(c: &Connection, token: &str) -> rusqlite::Result<Option<Devi
         return Ok(None);
     }
     let h = hash_secret(token);
-    let row: Option<(i64, String, String, Vec<u8>, i64)> = c
+    #[allow(clippy::type_complexity)]
+    let row: Option<(i64, String, String, Vec<u8>, i64, bool)> = c
         .query_row(
-            "SELECT id, vault, name, token_hash, last_seen FROM devices
+            "SELECT id, vault, name, token_hash, last_seen, read_only FROM devices
              WHERE token_hash = ?1 AND revoked_at IS NULL",
             params![h],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
         )
         .optional()?;
-    let Some((id, vault, name, stored, last_seen)) = row else {
+    let Some((id, vault, name, stored, last_seen, read_only)) = row else {
         return Ok(None);
     };
     // Поиск по хэшу сам по себе не раскрывает токен, но сравнение — константное.
@@ -158,6 +181,7 @@ pub fn authenticate(c: &Connection, token: &str) -> rusqlite::Result<Option<Devi
         id: u32::try_from(id).unwrap_or(0),
         vault,
         name,
+        read_only,
     }))
 }
 
@@ -171,6 +195,7 @@ fn row_to_device(r: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceRow> {
         created_at: r.get(3)?,
         last_seen: r.get(4)?,
         revoked: revoked.is_some(),
+        read_only: r.get(6)?,
     })
 }
 
@@ -179,7 +204,7 @@ pub fn list_devices(c: &Connection, vault: Option<&str>) -> rusqlite::Result<Vec
     match vault {
         Some(v) => {
             let mut st = c.prepare(
-                "SELECT id, vault, name, created_at, last_seen, revoked_at FROM devices
+                "SELECT id, vault, name, created_at, last_seen, revoked_at, read_only FROM devices
                  WHERE vault = ?1 ORDER BY id",
             )?;
             for d in st.query_map(params![v], row_to_device)? {
@@ -188,7 +213,7 @@ pub fn list_devices(c: &Connection, vault: Option<&str>) -> rusqlite::Result<Vec
         }
         None => {
             let mut st = c.prepare(
-                "SELECT id, vault, name, created_at, last_seen, revoked_at FROM devices
+                "SELECT id, vault, name, created_at, last_seen, revoked_at, read_only FROM devices
                  ORDER BY vault, id",
             )?;
             for d in st.query_map([], row_to_device)? {
@@ -241,6 +266,7 @@ pub fn create_join_code(
     vault: &str,
     name: &str,
     created_by: Option<u32>,
+    read_only: bool,
 ) -> anyhow::Result<(String, i64)> {
     anyhow::ensure!(valid_vault_name(vault), "неверное имя vault'а");
     let code = generate_join_code()?;
@@ -252,26 +278,43 @@ pub fn create_join_code(
         params![now - JOIN_TTL_MS],
     )?;
     c.execute(
-        "INSERT INTO join_codes (code_hash, vault, name, created_by, created_at, expires_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO join_codes
+           (code_hash, vault, name, created_by, created_at, expires_at, read_only)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             hash_secret(&code),
             vault,
             name.trim(),
             created_by,
             now,
-            expires
+            expires,
+            read_only
         ],
     )?;
     Ok((code, expires))
 }
 
+/// Действующий код подключения: vault, имя будущего устройства, только чтение.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinInfo {
+    pub vault: String,
+    pub name: String,
+    pub read_only: bool,
+}
+
 /// Состояние кода без его использования (для HTML-страницы).
-pub fn peek_join_code(c: &Connection, code: &str) -> rusqlite::Result<Option<(String, String)>> {
+pub fn peek_join_code(c: &Connection, code: &str) -> rusqlite::Result<Option<JoinInfo>> {
     c.query_row(
-        "SELECT vault, name FROM join_codes WHERE code_hash = ?1 AND used_at IS NULL AND expires_at > ?2",
+        "SELECT vault, name, read_only FROM join_codes
+         WHERE code_hash = ?1 AND used_at IS NULL AND expires_at > ?2",
         params![hash_secret(code), now_ms()],
-        |r| Ok((r.get(0)?, r.get(1)?)),
+        |r| {
+            Ok(JoinInfo {
+                vault: r.get(0)?,
+                name: r.get(1)?,
+                read_only: r.get(2)?,
+            })
+        },
     )
     .optional()
 }
@@ -284,15 +327,15 @@ pub fn redeem_join_code(
 ) -> anyhow::Result<Option<(u32, String, String, String)>> {
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let now = now_ms();
-    let row: Option<(String, String)> = tx
+    let row: Option<(String, String, bool)> = tx
         .query_row(
-            "SELECT vault, name FROM join_codes
+            "SELECT vault, name, read_only FROM join_codes
              WHERE code_hash = ?1 AND used_at IS NULL AND expires_at > ?2",
             params![hash_secret(code), now],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?;
-    let Some((vault, default_name)) = row else {
+    let Some((vault, default_name, read_only)) = row else {
         return Ok(None);
     };
     let name = if name.trim().is_empty() {
@@ -300,7 +343,7 @@ pub fn redeem_join_code(
     } else {
         name.trim().to_owned()
     };
-    let (id, token) = add_device(&tx, &vault, &name)?;
+    let (id, token) = add_device(&tx, &vault, &name, read_only)?;
     tx.execute(
         "UPDATE join_codes SET used_at = ?1, used_by = ?2 WHERE code_hash = ?3",
         params![now, id, hash_secret(code)],
@@ -323,7 +366,7 @@ mod tests {
     #[test]
     fn tokens_lifecycle() {
         let c = db();
-        let (id, token) = add_device(&c, "notes", "laptop").unwrap();
+        let (id, token) = add_device(&c, "notes", "laptop", false).unwrap();
         assert!(token.starts_with("ns_"));
         let a = authenticate(&c, &token).unwrap().unwrap();
         assert_eq!(
@@ -351,27 +394,42 @@ mod tests {
         assert!(!valid_vault_name(""));
         assert!(!valid_vault_name(&"a".repeat(65)));
         let c = db();
-        assert!(add_device(&c, "Bad", "x").is_err());
+        assert!(add_device(&c, "Bad", "x", false).is_err());
     }
 
     #[test]
     fn join_codes_are_single_use() {
         let mut c = db();
-        let (code, exp) = create_join_code(&c, "notes", "phone", None).unwrap();
+        let (code, exp) = create_join_code(&c, "notes", "phone", None, false).unwrap();
         assert_eq!(code.len(), 16);
         assert!(exp > now_ms());
         assert!(peek_join_code(&c, &code).unwrap().is_some());
         let (id, token, vault, name) = redeem_join_code(&mut c, &code, "").unwrap().unwrap();
         assert_eq!((vault.as_str(), name.as_str()), ("notes", "phone"));
-        assert_eq!(authenticate(&c, &token).unwrap().unwrap().id, id);
+        let a = authenticate(&c, &token).unwrap().unwrap();
+        assert_eq!((a.id, a.read_only), (id, false));
         assert!(redeem_join_code(&mut c, &code, "again").unwrap().is_none());
         assert!(peek_join_code(&c, &code).unwrap().is_none());
     }
 
     #[test]
+    fn read_only_flag_travels_from_code_to_device() {
+        let mut c = db();
+        let (_, t) = add_device(&c, "notes", "nas", true).unwrap();
+        assert!(authenticate(&c, &t).unwrap().unwrap().read_only);
+        let (code, _) = create_join_code(&c, "notes", "tablet", None, true).unwrap();
+        assert!(peek_join_code(&c, &code).unwrap().unwrap().read_only);
+        let (id, token, _, _) = redeem_join_code(&mut c, &code, "").unwrap().unwrap();
+        assert!(authenticate(&c, &token).unwrap().unwrap().read_only);
+        let rows = list_devices(&c, Some("notes")).unwrap();
+        assert!(rows.iter().all(|d| d.read_only));
+        assert!(rows.iter().any(|d| d.id == id));
+    }
+
+    #[test]
     fn expired_code_rejected() {
         let mut c = db();
-        let (code, _) = create_join_code(&c, "notes", "phone", None).unwrap();
+        let (code, _) = create_join_code(&c, "notes", "phone", None, false).unwrap();
         c.execute("UPDATE join_codes SET expires_at = 1", [])
             .unwrap();
         assert!(redeem_join_code(&mut c, &code, "").unwrap().is_none());

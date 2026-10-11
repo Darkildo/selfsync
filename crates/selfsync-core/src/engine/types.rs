@@ -419,6 +419,9 @@ pub struct SyncStatus {
     /// Сервер ограничил попытки (`reason == "rate_limited"`): следующий запрос не
     /// раньше этого момента, мс. `0` — ограничения нет.
     pub retry_at: i64,
+    /// Устройство только для чтения: свои правки не отправляются (`pending` — сколько
+    /// их накопилось).
+    pub read_only: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -476,6 +479,11 @@ pub enum Notice {
     TooLarge {
         path: String,
         size: u64,
+    },
+    /// Устройство только для чтения, а локальные правки есть: на сервер они не
+    /// уйдут. Один раз за сессию.
+    ReadOnly {
+        pending: u32,
     },
     /// Имя недопустимо на этом устройстве (`?` на Android и т.п.): файл или папка
     /// с другого устройства не скачаны. `path` — до недопустимого сегмента.
@@ -547,6 +555,9 @@ pub enum UiCommand {
     },
     CreateJoin {
         name: String,
+        /// Подключить новое устройство только для чтения.
+        #[serde(default)]
+        read_only: bool,
     },
     Redeem {
         code: String,
@@ -596,6 +607,7 @@ pub struct DeviceView {
     pub last_seen: i64,
     pub revoked: bool,
     pub current: bool,
+    pub read_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

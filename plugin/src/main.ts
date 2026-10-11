@@ -172,11 +172,13 @@ export default class SelfsyncPlugin extends Plugin {
     this.runner = new Runner(this.engineConfig(), index, exec, {
       status: (s) => {
         const wasEncrypted = this.status?.encrypted;
+        const wasReadOnly = this.status?.readOnly ?? false;
         this.status = s;
         this.renderStatus();
         // Шифрование включили (здесь или на другом устройстве) — иначе в открытых
         // настройках так и висела бы кнопка «Включить».
         if (wasEncrypted !== undefined && wasEncrypted !== s.encrypted) this.settingTab?.refresh();
+        if (wasReadOnly !== s.readOnly) this.settingTab?.refresh();
       },
       notice: (n) => this.showNotice(n),
       log: (level, m) => this.addLog(level, m),
@@ -235,10 +237,14 @@ export default class SelfsyncPlugin extends Plugin {
 
   private renderStatus(): void {
     const s = this.status;
-    const icon = !s ? "○" : { idle: "✓", syncing: "↻", offline: "⚠", error: "✗", needPassword: "🔒", blocked: "⛔" }[s.state];
+    const icon = !s
+      ? "○"
+      : s.readOnly && s.state === "idle"
+        ? "👁"
+        : { idle: "✓", syncing: "↻", offline: "⚠", error: "✗", needPassword: "🔒", blocked: "⛔" }[s.state];
     const parts = [`${icon} ${stateText(s)}`];
     if (s?.state === "syncing" && s.total > 0) parts.push(`${s.done}/${s.total}`);
-    else if (s && s.pending > 0) parts.push(t("status.pending", { n: s.pending }));
+    else if (s && s.pending > 0) parts.push(t(s.readOnly ? "status.readOnlyPending" : "status.pending", { n: s.pending }));
     if (s && s.conflicts > 0) parts.push(t("status.conflicts", { n: s.conflicts }));
     this.statusEl.setText(parts.join(" · "));
     let tip = t("status.tooltip", { state: stateText(s) });

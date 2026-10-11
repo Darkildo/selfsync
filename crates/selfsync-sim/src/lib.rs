@@ -162,6 +162,8 @@ pub struct Client {
     pub recv_bytes: u64,
     /// Число HTTP-запросов (проверка, что клиент выжидает `Retry-After`).
     pub requests: u64,
+    /// Из них не GET/HEAD (устройство только для чтения не должно их слать).
+    pub writes: u64,
 }
 
 /// Учёт токенов для инварианта.
@@ -188,6 +190,26 @@ impl Ledger {
 }
 
 /// Токены в содержимом (и в тексте, и в «бинарных» файлах).
+/// Ответ старого сервера: без `read_only` в `VaultState`.
+fn hide_read_only(path: &str, body: Vec<u8>) -> Vec<u8> {
+    use prost::Message;
+    if path.starts_with("/v1/changes")
+        && let Ok(mut r) = selfsync_proto::v1::ChangesResponse::decode(&body[..])
+    {
+        if let Some(v) = r.vault.as_mut() {
+            v.read_only = false;
+        }
+        return r.encode_to_vec();
+    }
+    if path.starts_with("/v1/wait")
+        && let Ok(mut v) = selfsync_proto::v1::VaultState::decode(&body[..])
+    {
+        v.read_only = false;
+        return v.encode_to_vec();
+    }
+    body
+}
+
 pub fn tokens_in(data: &[u8]) -> Vec<String> {
     let mut out = Vec::new();
     let s = String::from_utf8_lossy(data);
@@ -216,6 +238,8 @@ pub struct World {
     /// Точечные сбои для сценариев: первый HTTP-запрос, чьё «МЕТОД путь» начинается
     /// с префикса, обрывается до (`false`) или после (`true`) применения на сервере.
     pub planned_faults: VecDeque<(String, bool)>,
+    /// Изображать старый сервер, который не сообщает `VaultState.read_only`.
+    pub hide_read_only: bool,
 }
 
 fn data_root() -> std::path::PathBuf {
@@ -257,6 +281,7 @@ impl World {
             step_no: 0,
             faults_enabled: true,
             planned_faults: VecDeque::new(),
+            hide_read_only: false,
         };
         for i in 0..cfg.clients {
             w.add_client(i);
@@ -269,7 +294,7 @@ impl World {
         let token = {
             let pool = self.state.server_pool().expect("server db");
             let c = pool.get().expect("conn");
-            selfsync_server::db::server::add_device(&c, "sim", &name)
+            selfsync_server::db::server::add_device(&c, "sim", &name, false)
                 .expect("device")
                 .1
         };
@@ -303,9 +328,21 @@ impl World {
             sent_bytes: 0,
             recv_bytes: 0,
             requests: 0,
+            writes: 0,
         };
         self.clients.push(client);
         self.start_client(self.clients.len() - 1);
+    }
+
+    /// Сделать устройство клиента устройством только для чтения (токен тот же).
+    pub fn set_read_only(&self, c: usize) {
+        let pool = self.state.server_pool().expect("server db");
+        let conn = pool.get().expect("conn");
+        conn.execute(
+            "UPDATE devices SET read_only = 1 WHERE name = ?1",
+            [&self.clients[c].name],
+        )
+        .expect("read_only");
     }
 
     pub fn log(&mut self, s: String) {
@@ -387,6 +424,9 @@ impl World {
         }
         self.clients[c].sent_bytes += req.body.len() as u64;
         self.clients[c].requests += 1;
+        if req.method != "GET" && req.method != "HEAD" {
+            self.clients[c].writes += 1;
+        }
         let Ok(request) = b.body(Body::from(req.body)) else {
             return IoResult::Failed {
                 message: "bad request".into(),
@@ -406,6 +446,11 @@ impl World {
                 .expect("body");
             (status, headers, body.to_vec())
         });
+        let body = if self.hide_read_only {
+            hide_read_only(&req.path, body)
+        } else {
+            body
+        };
         self.clients[c].recv_bytes += body.len() as u64;
         IoResult::Http {
             status,

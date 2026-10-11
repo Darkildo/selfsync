@@ -30,6 +30,7 @@ pub async fn list(
                 created_at: d.created_at,
                 last_seen: d.last_seen,
                 revoked: d.revoked,
+                read_only: d.read_only,
             })
             .collect(),
         self_id: a.device_id,
@@ -69,8 +70,17 @@ pub async fn join_create(
     };
     let vault = a.vault.name.clone();
     let by = a.device_id;
+    let read_only = req.read_only;
     let (code, expires_at) = st
-        .server_db(move |c| Ok(server::create_join_code(c, &vault, &name, Some(by))?))
+        .server_db(move |c| {
+            Ok(server::create_join_code(
+                c,
+                &vault,
+                &name,
+                Some(by),
+                read_only,
+            )?)
+        })
         .await?;
     let url = format!("{}/join/{code}", public_base(&st, &headers));
     Ok(Proto(pb::JoinCode {

@@ -62,13 +62,15 @@ pub async fn changes(
 ) -> ApiResult<Proto<pb::ChangesResponse>> {
     let since = q.since.unwrap_or(0);
     let limit = q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+    let read_only = a.read_only;
     let resp = a
         .vault
         .db(move |c, _| {
             // Дельта и состояние — из одного снимка.
             let tx = c.transaction()?;
             let (entries, has_more) = vault::changes(&tx, since, limit)?;
-            let state = vault::vault_state(&tx)?;
+            let mut state = vault::vault_state(&tx)?;
+            state.read_only = read_only;
             tx.commit()?;
             let next_seq = entries.last().map_or(since, |e| e.seq);
             Ok(pb::ChangesResponse {
@@ -100,7 +102,14 @@ pub async fn wait(
 ) -> ApiResult<Proto<pb::VaultState>> {
     let since = q.since.unwrap_or(0);
     let timeout = Duration::from_secs(q.timeout.unwrap_or(25)).min(MAX_WAIT);
-    let read = || a.vault.db(|c, _| Ok(vault::vault_state(c)?));
+    let read_only = a.read_only;
+    let read = || {
+        a.vault.db(move |c, _| {
+            let mut s = vault::vault_state(c)?;
+            s.read_only = read_only;
+            Ok(s)
+        })
+    };
     let state = read().await?;
     // В CGI держать процесс открытым бессмысленно: отвечаем сразу.
     if st.mode == Mode::Cgi || state.seq > since || timeout.is_zero() {

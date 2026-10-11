@@ -141,6 +141,7 @@ In TOML the limits go into a `[rate]` section with the same names in lower case 
 ```sh
 selfsync token add --vault notes --name laptop   # device token (the vault is created on first use)
 selfsync link --vault notes --name phone         # one-time link + QR code in the terminal
+selfsync token add --vault notes --name nas --read-only   # receives changes, cannot send any
 selfsync token list | revoke --name phone
 selfsync vault list
 selfsync import --vault notes --from ~/Notes     # upload an existing folder
@@ -164,6 +165,19 @@ sudo systemd-run --pipe -p DynamicUser=yes -p User=selfsync -p StateDirectory=se
   /usr/local/bin/selfsync verify --repair-from /backups/selfsync-2026-10-01
 docker compose run --rm selfsync verify
 ```
+
+### Read-only devices
+
+A mirror on a publishing server, a backup copy on a NAS, a reader on an old tablet: a device that should change nothing, and whose token gives no write access if it leaks.
+
+```sh
+selfsync token add --vault notes --name nas --read-only
+selfsync link --vault notes --name tablet --read-only
+```
+
+In the plugin, turn on "Read-only" under "Connect a new device" before creating the link. The rule on the server is a single one: a read-only device may only send `GET` and `HEAD`. So it cannot write files, change the retention period or the encryption key, revoke devices, or create connect links. `token list` and the device list in the plugin mark such devices.
+
+The device receives everything, and its own edits stay on it: the status bar shows "Read-only" and how many local changes will not be sent. If a file edited there also changes on another device, the server version takes its place and the local one is kept as a copy next to it, as in a conflict — nothing is lost silently. The plugin hides the buttons for encryption, retention, revoking and connect links. `selfsync-cli run --once` in such a folder exits with code 0 and prints a warning about local changes; `status` shows the mode. Plugin and CLI 0.1.3 do not know this mode: they work, but the first local edit turns into a sync error.
 
 ## Obsidian plugin
 

@@ -100,7 +100,10 @@ export class Plugin {
   addCommand(c: { id: string; callback: () => void }): void {
     this.commands.push(c);
   }
-  addSettingTab(): void {}
+  settingTab: unknown;
+  addSettingTab(tab: unknown): void {
+    this.settingTab = tab;
+  }
   registerObsidianProtocolHandler(): void {}
 }
 
@@ -120,7 +123,86 @@ export class Modal {
   setTitle(): void {}
 }
 
-export class Setting {}
+/** Все созданные строки настроек — тест проверяет, какие кнопки показаны. */
+export const settings: Setting[] = [];
+
+class Control {
+  inputEl = { type: "", rows: 0 };
+  disabled = false;
+  constructor(private row?: Setting) {}
+  setButtonText(t: string): this {
+    this.row?.buttons.push(t);
+    return this;
+  }
+  setValue(): this {
+    return this;
+  }
+  setPlaceholder(): this {
+    return this;
+  }
+  setDisabled(d: boolean): this {
+    this.disabled = d;
+    return this;
+  }
+  setCta(): this {
+    return this;
+  }
+  setWarning(): this {
+    return this;
+  }
+  onChange(): this {
+    return this;
+  }
+  onClick(): this {
+    return this;
+  }
+}
+
+export class Setting {
+  name = "";
+  desc = "";
+  buttons: string[] = [];
+  toggles = 0;
+  hidden = false;
+  settingEl = {
+    hide: (): void => {
+      this.hidden = true;
+    },
+    empty(): void {},
+    addClass(): void {},
+  };
+  constructor(_el?: unknown) {
+    settings.push(this);
+  }
+  setName(n: string): this {
+    this.name = n;
+    return this;
+  }
+  setDesc(d: string): this {
+    this.desc = d;
+    return this;
+  }
+  setHeading(): this {
+    return this;
+  }
+  addButton(cb: (b: Control) => unknown): this {
+    cb(new Control(this));
+    return this;
+  }
+  addText(cb: (b: Control) => unknown): this {
+    cb(new Control());
+    return this;
+  }
+  addTextArea(cb: (b: Control) => unknown): this {
+    cb(new Control());
+    return this;
+  }
+  addToggle(cb: (b: Control) => unknown): this {
+    this.toggles++;
+    cb(new Control());
+    return this;
+  }
+}
 
 export class TFile {}
 

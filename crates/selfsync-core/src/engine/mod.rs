@@ -178,6 +178,9 @@ impl Engine {
                 s.enable = Some((password, remember));
                 s.sync_due = Some(now);
             }),
+            Event::ChangePassword { .. } if cx.with(|s| s.read_only) => {
+                cx.notify(sync::read_only_error());
+            }
             Event::ChangePassword { old, new } => {
                 let c = cx.clone();
                 self.spawn(Kind::Password, async move {

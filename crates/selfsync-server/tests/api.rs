@@ -606,6 +606,7 @@ async fn join_code_flow() {
             Some(&t),
             pb::JoinCreate {
                 name: "phone".into(),
+                ..Default::default()
             }
             .encode_to_vec(),
             &[
@@ -679,7 +680,14 @@ async fn expired_join_code() {
     let s = TestServer::new();
     let t = s.token("notes", "laptop");
     let code: pb::JoinCode = s
-        .post("/v1/join", &t, &pb::JoinCreate { name: "x".into() })
+        .post(
+            "/v1/join",
+            &t,
+            &pb::JoinCreate {
+                name: "x".into(),
+                ..Default::default()
+            },
+        )
         .await
         .proto();
     {
@@ -947,7 +955,14 @@ async fn redeem_rate_limited() {
     let s = TestServer::new();
     let t = s.token("notes", "laptop");
     let code: pb::JoinCode = s
-        .post("/v1/join", &t, &pb::JoinCreate { name: "x".into() })
+        .post(
+            "/v1/join",
+            &t,
+            &pb::JoinCreate {
+                name: "x".into(),
+                ..Default::default()
+            },
+        )
         .await
         .proto();
     for _ in 0..10 {
@@ -1123,4 +1138,162 @@ async fn rate_limits_can_be_disabled() {
         .query_row("SELECT COUNT(*) FROM throttle", [], |r| r.get(0))
         .unwrap();
     assert_eq!(n, 0);
+}
+
+/// Маршруты роутера с методами — прямо из исходника, чтобы новый маршрут не ушёл
+/// мимо проверки режима «только чтение».
+fn router_routes() -> Vec<(String, Vec<&'static str>)> {
+    let src = include_str!("../src/api/mod.rs");
+    let mut out = Vec::new();
+    for chunk in src.split(".route(").skip(1) {
+        let body = &chunk[..chunk.find(".route(").unwrap_or(chunk.len())];
+        let path = body.split('"').nth(1).unwrap().to_owned();
+        let mut methods = Vec::new();
+        for (needle, m) in [
+            ("get(", "GET"),
+            ("post(", "POST"),
+            ("put(", "PUT"),
+            ("delete(", "DELETE"),
+        ] {
+            if body.contains(needle) {
+                methods.push(m);
+            }
+        }
+        assert!(!methods.is_empty(), "{path}");
+        out.push((path, methods));
+    }
+    out
+}
+
+#[tokio::test]
+async fn read_only_token_rejects_writes() {
+    let s = TestServer::new();
+    let rw = s.token("notes", "laptop");
+    s.write_file(&rw, "a.md", 0, b"hello").await;
+    let ro = {
+        let pool = s.state.server_pool().unwrap();
+        let c = pool.get().unwrap();
+        selfsync_server::db::server::add_device(&c, "notes", "mirror", true)
+            .unwrap()
+            .1
+    };
+    let blob = Hash::of(&selfsync_core::blob::encode(b"hello", None)).to_hex();
+    let path_q = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(selfsync_core::path::canonical_encode(&p("a.md")));
+    let routes = router_routes();
+    assert!(routes.len() >= 15, "{routes:?}");
+    let (mut writes, mut reads) = (0, 0);
+    for (path, methods) in &routes {
+        let uri = path
+            .replace("{hash}", &blob)
+            .replace("{id}", "1")
+            .replace("{code}", "aaaaaaaaaaaaaaaa");
+        if uri == "/v1/health" || uri.starts_with("/join/") || uri == "/v1/join/redeem" {
+            continue; // без авторизации
+        }
+        for m in methods {
+            let method: Method = m.parse().unwrap();
+            let uri = match (*m, uri.as_str()) {
+                ("GET", "/v1/history") => format!("/v1/history?path={path_q}"),
+                ("GET", "/v1/wait") => "/v1/wait?timeout=0".to_owned(),
+                _ => uri.clone(),
+            };
+            let r = s.call(method.clone(), &uri, Some(&ro), vec![], &[]).await;
+            if *m == "GET" {
+                reads += 1;
+                assert_ne!(r.status, StatusCode::FORBIDDEN, "{m} {uri}");
+                assert_ne!(r.status, StatusCode::UNAUTHORIZED, "{m} {uri}");
+            } else {
+                writes += 1;
+                assert_eq!(r.status, StatusCode::FORBIDDEN, "{m} {uri}");
+                assert_eq!(r.error().code, "read_only", "{m} {uri}");
+            }
+        }
+        // HEAD тоже разрешён
+        if methods.contains(&"GET") && uri.starts_with("/v1/blobs/") && uri != "/v1/blobs/missing" {
+            let r = s.call(Method::HEAD, &uri, Some(&ro), vec![], &[]).await;
+            assert_eq!(r.status, StatusCode::OK);
+        }
+    }
+    assert!(writes >= 13 && reads >= 10, "writes {writes} reads {reads}");
+    // GET даёт данные, а операция записи с телом — тот же отказ, и ничего не меняет
+    let ch = s.changes(&ro, 0).await;
+    assert_eq!(ch.entries.len(), 1);
+    assert!(ch.vault.unwrap().read_only);
+    assert!(!s.changes(&rw, 0).await.vault.unwrap().read_only);
+    let wait: pb::VaultState = s.get("/v1/wait?timeout=0", &ro).await.proto();
+    assert!(wait.read_only);
+    let r = s
+        .post(
+            "/v1/ops",
+            &ro,
+            &pb::OpsRequest {
+                ops: vec![del_op("a.md", 1)],
+            },
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+    assert_eq!(s.changes(&rw, 0).await.entries.len(), 1);
+    // список устройств помечает режим
+    let d: pb::DevicesResponse = s.get("/v1/devices", &rw).await.proto();
+    let flags: Vec<(String, bool)> = d
+        .devices
+        .into_iter()
+        .map(|d| (d.name, d.read_only))
+        .collect();
+    assert_eq!(flags, [("laptop".into(), false), ("mirror".into(), true)]);
+}
+
+#[tokio::test]
+async fn read_only_join_code_yields_read_only_device() {
+    let s = TestServer::new();
+    let t = s.token("notes", "laptop");
+    let code: pb::JoinCode = s
+        .post(
+            "/v1/join",
+            &t,
+            &pb::JoinCreate {
+                name: "tablet".into(),
+                read_only: true,
+            },
+        )
+        .await
+        .proto();
+    let page = s
+        .send(
+            http::Request::get(format!("/join/{}", code.code))
+                .header("accept-language", "ru")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert!(String::from_utf8_lossy(&page.body).contains("только для чтения"));
+    let r = s
+        .send(
+            http::Request::post("/v1/join/redeem")
+                .header("x-selfsync-proto", "1")
+                .body(axum::body::Body::from(
+                    pb::JoinRedeem {
+                        code: code.code,
+                        name: String::new(),
+                    }
+                    .encode_to_vec(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    let tok: pb::JoinToken = r.proto();
+    assert!(s.changes(&tok.token, 0).await.vault.unwrap().read_only);
+    // ro-устройство не выписывает новых кодов — ни обычных, ни ro
+    let r = s
+        .post(
+            "/v1/join",
+            &tok.token,
+            &pb::JoinCreate {
+                name: "x".into(),
+                read_only: true,
+            },
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
 }
