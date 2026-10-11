@@ -95,6 +95,18 @@ enum Cmd {
     Sweep,
     /// Консистентная копия данных в каталог.
     Backup { dir: PathBuf },
+    /// Проверка целостности: базы, хэши блобов, отсутствующие блобы.
+    /// Код выхода: 0 — чисто, 1 — найдены проблемы, 2 — ошибка запуска.
+    Verify {
+        #[arg(long)]
+        vault: Option<String>,
+        /// Восстановить битые и отсутствующие блобы из бэкапа (`selfsync backup`).
+        #[arg(long)]
+        repair_from: Option<PathBuf>,
+        /// Печатать только проблемы (для таймера).
+        #[arg(long)]
+        quiet: bool,
+    },
     /// Проверка живости (код 0/1), для HEALTHCHECK.
     Healthcheck {
         #[arg(
@@ -152,7 +164,15 @@ fn run() -> anyhow::Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let cli = Cli::parse();
-    let config = Config::load(cli.config.as_deref(), cli.data.clone())?;
+    let config = match Config::load(cli.config.as_deref(), cli.data.clone()) {
+        Ok(c) => c,
+        // У verify код 1 занят под «найдены проблемы»: ошибка запуска — 2.
+        Err(e) if matches!(cli.cmd, Some(Cmd::Verify { .. })) => {
+            eprintln!("ошибка: {e:#}");
+            return Ok(ExitCode::from(2));
+        }
+        Err(e) => return Err(e),
+    };
     let Some(command) = cli.cmd else {
         use clap::CommandFactory;
         Cli::command().print_help()?;
@@ -216,6 +236,22 @@ fn run() -> anyhow::Result<ExitCode> {
         )?,
         Cmd::Sweep => cmd::sweep(&config)?,
         Cmd::Backup { dir } => cmd::backup(&config, &dir)?,
+        Cmd::Verify {
+            vault,
+            repair_from,
+            quiet,
+        } => {
+            return Ok(
+                match cmd::verify(&config, vault.as_deref(), repair_from.as_deref(), quiet) {
+                    Ok(true) => ExitCode::SUCCESS,
+                    Ok(false) => ExitCode::from(1),
+                    Err(e) => {
+                        eprintln!("ошибка: {e:#}");
+                        ExitCode::from(2)
+                    }
+                },
+            );
+        }
         Cmd::Healthcheck { url } => {
             return Ok(if cmd::healthcheck(&url) {
                 ExitCode::SUCCESS

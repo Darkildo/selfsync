@@ -80,9 +80,9 @@ From source: `cargo build --release -p selfsync-server` (binary at `target/relea
 ### systemd: start on demand (socket)
 
 ```sh
-sudo cp deploy/systemd/selfsync.{socket,service} deploy/systemd/selfsync-sweep.{service,timer} /etc/systemd/system/
+sudo cp deploy/systemd/selfsync.{socket,service} deploy/systemd/selfsync-{sweep,verify}.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now selfsync.socket selfsync-sweep.timer
+sudo systemctl enable --now selfsync.socket selfsync-sweep.timer selfsync-verify.timer
 ```
 
 Put a reverse proxy with TLS in front of the server. Ready-made configs: [deploy/caddy/Caddyfile.socket](deploy/caddy/Caddyfile.socket) and [deploy/nginx/selfsync-proxy.conf](deploy/nginx/selfsync-proxy.conf). The unit runs with `DynamicUser`, data lives in `/var/lib/selfsync`. Run admin commands like this:
@@ -147,10 +147,23 @@ selfsync import --vault notes --from ~/Notes     # upload an existing folder
 selfsync backup /backups/selfsync-$(date +%F)    # consistent copy while running
 selfsync gc --vault notes                         # garbage collection plan; --yes to run it
 selfsync sweep                                    # erase deleted files older than the retention window (timer)
+selfsync verify                                   # integrity check: databases, blob hashes, missing blobs (timer)
 selfsync healthcheck
 ```
 
-Back up with `backup`: the copy is consistent even while the server is running. To restore, put the directory back. Devices notice that the server went back in time and run a full reconciliation without deleting anything.
+Back up with `backup`: the copy is consistent even while the server is running. To restore, put the directory back. Devices notice that the server went back in time and run a full reconciliation without deleting anything. On the same file system `backup` hard-links blobs instead of copying them, which saves space but does not protect against disk corruption: a damaged blob is damaged in both places. Keep at least one backup on another disk.
+
+**Integrity check.** A silently damaged blob would otherwise surface only when some device tries to download it, maybe a year later. `selfsync verify` checks both databases (`PRAGMA integrity_check`), recomputes the SHA-256 of every blob (the name of a blob is the hash of its stored bytes, encrypted ones included, so no key is needed), looks for blobs that records refer to but that are gone, and checks that an encrypted vault still has a readable key record. Blobs nobody refers to and abandoned uploads are only counted, `gc` removes them. Exit code: 0 — clean, 1 — problems found, 2 — could not run. `--quiet` prints only problems. The check is read-only and safe on a running server.
+
+A damaged or missing blob can be taken from any backup, since storage is content-addressed and the backup holds the same file under the same name: `selfsync verify --repair-from /backups/selfsync-2026-10-01`. Every file from the backup is checked against its hash first; the damaged original is moved to `quarantine/` in the vault directory (`gc` leaves it alone, `backup` copies it).
+
+The `selfsync-verify.timer` unit runs the check weekly; when problems are found the service fails, so it shows up in `systemctl --failed`, and you can hang your own `OnFailure=` notification on it. A one-off run under `DynamicUser`, and in Docker:
+
+```sh
+sudo systemd-run --pipe -p DynamicUser=yes -p User=selfsync -p StateDirectory=selfsync \
+  /usr/local/bin/selfsync verify --repair-from /backups/selfsync-2026-10-01
+docker compose run --rm selfsync verify
+```
 
 ## Obsidian plugin
 

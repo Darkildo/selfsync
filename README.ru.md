@@ -80,9 +80,9 @@ sudo install -m 0755 selfsync-x86_64-unknown-linux-musl /usr/local/bin/selfsync
 ### systemd: запуск по требованию (socket)
 
 ```sh
-sudo cp deploy/systemd/selfsync.{socket,service} deploy/systemd/selfsync-sweep.{service,timer} /etc/systemd/system/
+sudo cp deploy/systemd/selfsync.{socket,service} deploy/systemd/selfsync-{sweep,verify}.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now selfsync.socket selfsync-sweep.timer
+sudo systemctl enable --now selfsync.socket selfsync-sweep.timer selfsync-verify.timer
 ```
 
 Перед сервером нужен обратный прокси с TLS. Готовые конфиги: [deploy/caddy/Caddyfile.socket](deploy/caddy/Caddyfile.socket) и [deploy/nginx/selfsync-proxy.conf](deploy/nginx/selfsync-proxy.conf). Юнит запускается с `DynamicUser`, данные лежат в `/var/lib/selfsync`. Служебные команды выполняются так:
@@ -147,10 +147,23 @@ selfsync import --vault notes --from ~/Notes     # залить существу
 selfsync backup /backups/selfsync-$(date +%F)    # консистентная копия на ходу
 selfsync gc --vault notes                         # план сборки мусора; --yes — выполнить
 selfsync sweep                                    # стереть удалённое старше окна хранения (таймер)
+selfsync verify                                   # проверка целостности: базы, хэши блобов, отсутствующие блобы (таймер)
 selfsync healthcheck
 ```
 
-Резервную копию делайте командой `backup`: она консистентна и при работающем сервере. Восстановление — просто вернуть каталог на место. Устройства заметят, что сервер «помолодел», и выполнят полную сверку, ничего не удаляя.
+Резервную копию делайте командой `backup`: она консистентна и при работающем сервере. Восстановление — просто вернуть каталог на место. Устройства заметят, что сервер «помолодел», и выполнят полную сверку, ничего не удаляя. На той же файловой системе `backup` не копирует блобы, а делает на них жёсткие ссылки. Это экономит место, но от порчи диска не спасает: повреждённый блоб окажется повреждён в обоих местах. Хотя бы одну копию держите на другом диске.
+
+**Проверка целостности.** Тихо испорченный блоб иначе обнаружится, только когда какое-то устройство попробует его скачать, — может быть, через год. `selfsync verify` проверяет обе базы (`PRAGMA integrity_check`), пересчитывает SHA-256 каждого блоба (имя блоба — хэш хранимых байтов, и у зашифрованных тоже, так что ключ не нужен), ищет блобы, на которые ссылаются записи, но которых нет, и проверяет, что у зашифрованного vault'а есть читаемая запись ключа. Блобы без ссылок и брошенные загрузки только подсчитываются, убирает их `gc`. Код выхода: 0 — всё в порядке, 1 — найдены проблемы, 2 — проверку не удалось запустить. `--quiet` печатает только проблемы. Проверка только читает и безопасна на работающем сервере.
+
+Испорченный или пропавший блоб можно взять из любого бэкапа: хранилище адресуется по содержимому, и в бэкапе тот же файл лежит под тем же именем — `selfsync verify --repair-from /backups/selfsync-2026-10-01`. Каждый файл из бэкапа сначала сверяется с хэшем; испорченный оригинал переносится в `quarantine/` в каталоге vault'а (`gc` его не трогает, `backup` копирует).
+
+Юнит `selfsync-verify.timer` запускает проверку раз в неделю. При найденных проблемах служба падает и видна в `systemctl --failed`; уведомление можно повесить своим `OnFailure=`. Разовый запуск под `DynamicUser` и в Docker:
+
+```sh
+sudo systemd-run --pipe -p DynamicUser=yes -p User=selfsync -p StateDirectory=selfsync \
+  /usr/local/bin/selfsync verify --repair-from /backups/selfsync-2026-10-01
+docker compose run --rm selfsync verify
+```
 
 ## Плагин Obsidian
 

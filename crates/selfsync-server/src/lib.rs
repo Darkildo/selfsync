@@ -14,6 +14,7 @@ pub mod modes;
 pub mod state;
 pub mod sweep;
 pub mod throttle;
+pub mod verify;
 
 pub use api::router;
 pub use config::Config;

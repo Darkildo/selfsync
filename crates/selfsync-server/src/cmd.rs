@@ -33,7 +33,7 @@ fn fmt_time(ms: i64) -> String {
     humantime::format_rfc3339_seconds(t).to_string()
 }
 
-fn fmt_bytes(n: u64) -> String {
+pub(crate) fn fmt_bytes(n: u64) -> String {
     const U: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut v = n as f64;
     let mut i = 0;
@@ -402,6 +402,95 @@ pub fn sweep(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Проверка целостности. `Ok(true)` — проблем нет (после лечения — не осталось).
+/// `quiet` — печатать только проблемы.
+pub fn verify(
+    config: &Config,
+    only: Option<&str>,
+    repair_from: Option<&Path>,
+    quiet: bool,
+) -> anyhow::Result<bool> {
+    use std::io::IsTerminal;
+    let names = list_vault_dirs(config);
+    let names = match only {
+        Some(v) if names.iter().any(|n| n == v) => vec![v.to_owned()],
+        Some(v) => bail!("vault «{v}» не найден в {}", config.data_dir.display()),
+        None => names,
+    };
+    if let Some(dir) = repair_from
+        && !dir.is_dir()
+    {
+        bail!("каталог бэкапа {} не найден", dir.display());
+    }
+    let mut clean = true;
+    let server_db = config.data_dir.join("server.db");
+    if server_db.is_file() {
+        let errors = crate::verify::integrity(&db::open(&server_db)?)?;
+        for e in &errors {
+            println!("server.db: {e}");
+        }
+        if errors.is_empty() && !quiet {
+            println!("server.db: в порядке");
+        }
+        clean &= errors.is_empty();
+    }
+    let opts = crate::verify::VerifyOptions {
+        repair_from,
+        progress: !quiet && std::io::stderr().is_terminal(),
+    };
+    for name in names {
+        let r = crate::verify::verify_vault(config, &name, opts)?;
+        if !quiet {
+            println!(
+                "vault {name}: блобов {} ({}), битых {}, отсутствующих {}, без ссылок {} ({}), \
+                 брошенных загрузок {}, {:.1} с",
+                r.blobs,
+                fmt_bytes(r.bytes),
+                r.corrupt.len(),
+                r.missing.len(),
+                r.orphans,
+                fmt_bytes(r.orphan_bytes),
+                r.uploads,
+                r.elapsed.as_secs_f64()
+            );
+        }
+        for e in &r.db_errors {
+            println!("vault {name}: база: {e}");
+        }
+        if let Some(k) = &r.key_problem {
+            println!("vault {name}: {k}");
+        }
+        for h in &r.corrupt {
+            println!("vault {name}: битый блоб {}", h.to_hex());
+        }
+        for m in &r.missing {
+            println!(
+                "vault {name}: нет блоба {} ({})",
+                m.hash.to_hex(),
+                m.paths.join(", ")
+            );
+        }
+        for (h, why) in &r.unrepaired {
+            println!("vault {name}: не восстановлен {}: {why}", h.to_hex());
+        }
+        if !quiet {
+            for h in &r.repaired {
+                println!("vault {name}: восстановлен из бэкапа {}", h.to_hex());
+            }
+            if r.orphans > 0 || r.uploads > 0 {
+                println!("  блобы без ссылок и брошенные загрузки убирает `selfsync gc --yes`");
+            }
+            if repair_from.is_none() && !(r.corrupt.is_empty() && r.missing.is_empty()) {
+                println!(
+                    "  восстановить из бэкапа: `selfsync verify --repair-from <каталог бэкапа>`"
+                );
+            }
+        }
+        clean &= r.clean();
+    }
+    Ok(clean)
+}
+
 fn link_or_copy(src: &Path, dst: &Path) -> std::io::Result<()> {
     if dst.exists() {
         return Ok(());
@@ -444,6 +533,14 @@ pub fn backup(config: &Config, dest: &Path) -> anyhow::Result<()> {
             std::fs::create_dir_all(&d)?;
             link_or_copy(&v.blobs.path_of(&h), &d.join(&hex))?;
             count += 1;
+        }
+        // Битые оригиналы из `verify --repair-from` — для разбора, если понадобится.
+        if let Ok(rd) = std::fs::read_dir(v.blobs.quarantine_dir()) {
+            let q = vdest.join("quarantine");
+            std::fs::create_dir_all(&q)?;
+            for e in rd.flatten() {
+                link_or_copy(&e.path(), &q.join(e.file_name()))?;
+            }
         }
         println!(
             "vault {name}: скопирован ({})",

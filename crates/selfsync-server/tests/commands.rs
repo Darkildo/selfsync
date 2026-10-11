@@ -342,3 +342,315 @@ fn throttle_check_cost() {
         assert!(per < Duration::from_micros(100), "{per:?}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// verify
+// ---------------------------------------------------------------------------
+
+use selfsync_server::verify::{self, VerifyOptions};
+
+/// Хэш блоба, который `write_file` кладёт для этого содержимого.
+fn blob_hash(content: &[u8]) -> Hash {
+    Hash::of(&blob::encode(content, None))
+}
+
+/// Испортить байт на месте (тот же inode — как «тихая» порча диска).
+fn flip_byte(path: &std::path::Path) {
+    use std::io::{Seek, SeekFrom, Write};
+    let mut f = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    f.seek(SeekFrom::Start(3)).unwrap();
+    f.write_all(b"\xff").unwrap();
+}
+
+/// Заменить файл другим содержимым (новый inode: жёсткие ссылки бэкапа не задеты).
+fn replace_file(path: &std::path::Path, data: &[u8]) {
+    std::fs::remove_file(path).unwrap();
+    std::fs::write(path, data).unwrap();
+}
+
+fn run_verify(data: &std::path::Path, args: &[&str]) -> (i32, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_selfsync"))
+        .arg("verify")
+        .args(args)
+        .arg("--data")
+        .arg(data)
+        .output()
+        .unwrap();
+    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+    (out.status.code().unwrap(), text)
+}
+
+async fn two_files(s: &TestServer) {
+    let t = s.token("notes", "a");
+    s.write_file(&t, "a.md", 0, b"first file").await;
+    s.write_file(&t, "dir/b.md", 0, b"second file").await;
+}
+
+#[tokio::test]
+async fn verify_clean_store_is_ok() {
+    let s = TestServer::new();
+    two_files(&s).await;
+    let r = verify::verify_vault(s.config(), "notes", VerifyOptions::default()).unwrap();
+    assert!(r.clean(), "{r:?}");
+    assert_eq!(r.blobs, 2);
+    assert!(r.bytes > 0);
+    assert_eq!((r.orphans, r.uploads), (0, 0));
+    let (code, out) = run_verify(&s.config().data_dir, &[]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("server.db: в порядке"), "{out}");
+    assert!(out.contains("vault notes: блобов 2"), "{out}");
+    // --quiet на чистом хранилище молчит
+    let (code, out) = run_verify(&s.config().data_dir, &["--quiet"]);
+    assert_eq!((code, out.as_str()), (0, ""));
+}
+
+#[tokio::test]
+async fn verify_detects_corrupt_blob() {
+    let s = TestServer::new();
+    two_files(&s).await;
+    let v = open_vault(s.config(), "notes", 1).unwrap();
+    let h = blob_hash(b"first file");
+    flip_byte(&v.blobs.path_of(&h));
+    let r = verify::verify_vault(s.config(), "notes", VerifyOptions::default()).unwrap();
+    assert_eq!(r.corrupt, vec![h]);
+    assert!(!r.clean());
+    let (code, out) = run_verify(&s.config().data_dir, &["--quiet"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains(&format!("битый блоб {}", h.to_hex())), "{out}");
+    assert!(
+        !out.contains("server.db"),
+        "--quiet печатает только проблемы: {out}"
+    );
+}
+
+#[tokio::test]
+async fn verify_detects_missing_blob() {
+    let s = TestServer::new();
+    two_files(&s).await;
+    let v = open_vault(s.config(), "notes", 1).unwrap();
+    let h = blob_hash(b"second file");
+    std::fs::remove_file(v.blobs.path_of(&h)).unwrap();
+    let r = verify::verify_vault(s.config(), "notes", VerifyOptions::default()).unwrap();
+    assert_eq!(r.missing.len(), 1);
+    assert_eq!(r.missing[0].hash, h);
+    assert_eq!(r.missing[0].paths, ["dir/b.md"]);
+    let (code, out) = run_verify(&s.config().data_dir, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains(&format!("нет блоба {} (dir/b.md)", h.to_hex())),
+        "{out}"
+    );
+    assert!(out.contains("--repair-from"), "подсказка про бэкап: {out}");
+}
+
+#[tokio::test]
+async fn verify_repairs_from_backup() {
+    let s = TestServer::new();
+    let t = s.token("notes", "a");
+    two_files(&s).await;
+    let bk = tempfile::tempdir().unwrap();
+    let bk = bk.path().join("bk");
+    cmd::backup(s.config(), &bk).unwrap();
+    let v = open_vault(s.config(), "notes", 1).unwrap();
+    let a = blob_hash(b"first file");
+    let b = blob_hash(b"second file");
+    replace_file(&v.blobs.path_of(&a), b"garbage");
+    std::fs::remove_file(v.blobs.path_of(&b)).unwrap();
+    let (code, out) = run_verify(
+        &s.config().data_dir,
+        &["--repair-from", bk.to_str().unwrap()],
+    );
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!("восстановлен из бэкапа {}", a.to_hex())),
+        "{out}"
+    );
+    // битый оригинал — в карантине, на месте — проверенная копия
+    let q = v.dir.join("quarantine").join(a.to_hex());
+    assert_eq!(std::fs::read(&q).unwrap(), b"garbage");
+    let r = verify::verify_vault(s.config(), "notes", VerifyOptions::default()).unwrap();
+    assert!(r.clean(), "{r:?}");
+    // клиент снова получает файл
+    let got = s
+        .call(
+            http::Method::GET,
+            &format!("/v1/blobs/{}", b.to_hex()),
+            Some(&t),
+            vec![],
+            &[],
+        )
+        .await;
+    assert_eq!(
+        got.body.as_ref(),
+        blob::encode(b"second file", None).as_slice()
+    );
+    // gc карантин не трогает, backup его копирует
+    cmd::gc(s.config(), None, GcOptions::default(), true).unwrap();
+    assert!(q.is_file());
+    let bk2 = tempfile::tempdir().unwrap();
+    cmd::backup(s.config(), &bk2.path().join("bk")).unwrap();
+    assert!(
+        bk2.path()
+            .join("bk/vaults/notes/quarantine")
+            .join(a.to_hex())
+            .is_file()
+    );
+}
+
+#[tokio::test]
+async fn verify_rejects_bad_backup_blob() {
+    let s = TestServer::new();
+    two_files(&s).await;
+    let bk = tempfile::tempdir().unwrap();
+    let bk = bk.path().join("bk");
+    cmd::backup(s.config(), &bk).unwrap();
+    let v = open_vault(s.config(), "notes", 1).unwrap();
+    let a = blob_hash(b"first file");
+    let hex = a.to_hex();
+    replace_file(&v.blobs.path_of(&a), b"garbage");
+    replace_file(
+        &bk.join("vaults/notes/blobs").join(&hex[..2]).join(&hex),
+        b"also garbage",
+    );
+    let opts = VerifyOptions {
+        repair_from: Some(&bk),
+        progress: false,
+    };
+    let r = verify::verify_vault(s.config(), "notes", opts).unwrap();
+    assert_eq!(r.corrupt, vec![a]);
+    assert_eq!(r.unrepaired, vec![(a, "в бэкапе тоже повреждён")]);
+    assert!(r.repaired.is_empty());
+    // оригинал не тронут, карантина нет
+    assert_eq!(std::fs::read(v.blobs.path_of(&a)).unwrap(), b"garbage");
+    assert!(!v.dir.join("quarantine").exists());
+    let (code, out) = run_verify(
+        &s.config().data_dir,
+        &["--quiet", "--repair-from", bk.to_str().unwrap()],
+    );
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("не восстановлен"), "{out}");
+}
+
+#[tokio::test]
+async fn verify_checks_vault_key_record() {
+    let s = TestServer::new();
+    two_files(&s).await;
+    let v = open_vault(s.config(), "notes", 1).unwrap();
+    {
+        let c = v.pool.get().unwrap();
+        selfsync_server::db::vault::set_meta_blob(&c, "vault_key", b"not a record").unwrap();
+    }
+    let r = verify::verify_vault(s.config(), "notes", VerifyOptions::default()).unwrap();
+    assert!(r.key_problem.as_deref().unwrap().contains("не разбирается"));
+    {
+        let c = v.pool.get().unwrap();
+        c.execute("DELETE FROM meta WHERE key = 'vault_key'", [])
+            .unwrap();
+        // зашифрованный путь без записи ключа
+        c.execute(
+            "UPDATE files SET path = CAST(x'01' || substr(path, 2) AS BLOB) WHERE path = (SELECT MIN(path) FROM files)",
+            [],
+        )
+        .unwrap();
+    }
+    let r = verify::verify_vault(s.config(), "notes", VerifyOptions::default()).unwrap();
+    assert!(
+        r.key_problem
+            .as_deref()
+            .unwrap()
+            .contains("нет записи ключа")
+    );
+}
+
+#[tokio::test]
+async fn verify_runs_alongside_uploads() {
+    let s = TestServer::new();
+    let t = s.token("notes", "a");
+    for i in 0..50 {
+        s.write_file(&t, &format!("n{i}.md"), 0, format!("note {i}").as_bytes())
+            .await;
+    }
+    // незавершённая загрузка: часть уже в uploads/
+    let data: Vec<u8> = (0..20_000u32).map(|i| (i % 251) as u8).collect();
+    let h = Hash::of(&data);
+    let st: pb::UploadState = s
+        .post(
+            "/v1/uploads",
+            &t,
+            &pb::UploadStart {
+                hash: h.to_vec(),
+                size: data.len() as u64,
+            },
+        )
+        .await
+        .proto();
+    let id = st.upload_id;
+    let r = s
+        .call(
+            http::Method::PUT,
+            &format!("/v1/uploads/{id}"),
+            Some(&t),
+            data[..10_000].to_vec(),
+            &[("content-range", "bytes 0-9999/20000")],
+        )
+        .await;
+    assert!(r.status.is_success());
+    let v = open_vault(s.config(), "notes", 1).unwrap();
+    let part = std::fs::read(v.blobs.upload_path(&id)).unwrap();
+    // обход в другом потоке, сервер тем временем пишет
+    let config = s.config().clone();
+    let walker = std::thread::spawn(move || {
+        verify::verify_vault(&config, "notes", VerifyOptions::default()).unwrap()
+    });
+    for i in 0..20 {
+        let r = s
+            .write_file(
+                &t,
+                &format!("live{i}.md"),
+                0,
+                format!("live {i}").as_bytes(),
+            )
+            .await;
+        assert!(matches!(r.result, Some(pb::op_result::Result::Applied(_))));
+    }
+    let r = walker.join().unwrap();
+    assert!(r.clean(), "{r:?}");
+    assert_eq!(std::fs::read(v.blobs.upload_path(&id)).unwrap(), part);
+    // загрузка продолжается как ни в чём не бывало
+    let r = s
+        .call(
+            http::Method::PUT,
+            &format!("/v1/uploads/{id}"),
+            Some(&t),
+            data[10_000..].to_vec(),
+            &[("content-range", "bytes 10000-19999/20000")],
+        )
+        .await;
+    assert!(r.status.is_success());
+    let r = s
+        .call(
+            http::Method::POST,
+            &format!("/v1/uploads/{id}/commit"),
+            Some(&t),
+            vec![],
+            &[],
+        )
+        .await;
+    assert!(r.status.is_success(), "{}", r.status);
+    assert!(v.blobs.exists(&h));
+}
+
+#[test]
+fn verify_start_errors_exit_2() {
+    let data = tempfile::tempdir().unwrap();
+    let (code, out) = run_verify(data.path(), &["--vault", "nope"]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("не найден"), "{out}");
+    let (code, _) = run_verify(data.path(), &["--repair-from", "/nonexistent/backup"]);
+    assert_eq!(code, 2);
+}

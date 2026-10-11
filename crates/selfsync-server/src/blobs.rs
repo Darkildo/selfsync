@@ -74,7 +74,13 @@ impl BlobStore {
         std::fs::metadata(self.path_of(h)).ok().map(|m| m.len())
     }
 
-    fn temp_path(&self) -> io::Result<PathBuf> {
+    /// Битые блобы, вынутые `verify --repair-from` (`gc` их не трогает).
+    pub fn quarantine_dir(&self) -> PathBuf {
+        self.root.join("quarantine")
+    }
+
+    /// Новый временный файл в `uploads/` (та же ФС, что `blobs/`).
+    pub fn temp_path(&self) -> io::Result<PathBuf> {
         let mut r = [0u8; 12];
         getrandom::fill(&mut r).map_err(|e| io::Error::other(e.to_string()))?;
         let name: String = r.iter().map(|b| format!("{b:02x}")).collect();

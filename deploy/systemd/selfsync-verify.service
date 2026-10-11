@@ -1,0 +1,29 @@
+# Проверка целостности хранилища: базы, хэши блобов, отсутствующие блобы.
+# Найдены проблемы — код 1, юнит переходит в failed (видно в `systemctl --failed`).
+# Уведомление выберите сами, например добавьте в [Unit]:
+#   OnFailure=notify-admin@%n.service
+[Unit]
+Description=selfsync: verify storage integrity
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/selfsync verify --quiet
+DynamicUser=yes
+User=selfsync
+Group=selfsync
+StateDirectory=selfsync
+StateDirectoryMode=0700
+# Обход читает каждый блоб: не мешать серверу и остальной системе.
+Nice=10
+IOSchedulingClass=idle
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+UMask=0077
