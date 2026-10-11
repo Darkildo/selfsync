@@ -54,8 +54,8 @@ async function renderSettings(plugin: LoadedPlugin): Promise<obsidian.Setting[]>
   return obsidian.settings.filter((s) => !s.hidden);
 }
 
-async function loadPlugin(vault: string, token: string): Promise<LoadedPlugin> {
-  const app = obsidian.stubApp(vault, { server: server.url, token, deviceName: "stub" });
+async function loadPlugin(vault: string, token: string, extra: Record<string, unknown> = {}): Promise<LoadedPlugin> {
+  const app = obsidian.stubApp(vault, { server: server.url, token, deviceName: "stub", ...extra });
   const require = Module.createRequire(import.meta.url);
   const Plugin = (require(join(PLUGIN, "main.js")) as { default: new (a: unknown, m: unknown) => LoadedPlugin }).default;
   const plugin = new Plugin(app, { id: "selfsync", dir: ".obsidian/plugins/selfsync" });
@@ -132,4 +132,40 @@ test("main.js: устройство только для чтения — ста�
   ro.onunload();
   await fsp.rm(rwVault, { recursive: true, force: true });
   await fsp.rm(roVault, { recursive: true, force: true });
+});
+
+test("main.js: пришли настройки Obsidian — одно уведомление о перезапуске", async () => {
+  const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-cfg-"));
+  // Старые настройки (до пресетов): каталог настроек в пользовательских исключениях.
+  const plugin = await loadPlugin(vault, server.token("cfgplugin", "obsidian"), {
+    excludes: [".obsidian/"],
+    configSync: undefined,
+  });
+  const p = plugin as unknown as { settings: { excludes: string[]; configSync: Record<string, boolean> }; saveSettings(o: unknown): Promise<void> };
+  assert.deepEqual(p.settings.excludes, [], "строка каталога настроек перенесена в итоговые правила");
+  p.settings.configSync.hotkeys = true;
+  await p.saveSettings({ reconfigure: true });
+  const other = await TestClient.create(server, {
+    name: "other",
+    token: server.token("cfgplugin", "other"),
+    config: { excludes: [], hardExcludes: [] },
+  });
+  await other.write(".obsidian/hotkeys.json", '{"k":1}\n');
+  await other.write(".obsidian/app.json", '{"x":1}\n');
+  await other.sync();
+  const before = obsidian.shown.length;
+  plugin.runner?.send({ type: "syncNow" });
+  await plugin.runner?.idle();
+  assert.equal(await fsp.readFile(join(vault, ".obsidian/hotkeys.json"), "utf8"), '{"k":1}\n');
+  await assert.rejects(fsp.readFile(join(vault, ".obsidian/app.json")), "app.json — другой пресет");
+  const restart = (): number => obsidian.shown.slice(before).filter((m) => m.includes("Перезапустите Obsidian")).length;
+  assert.equal(restart(), 1);
+  await other.write(".obsidian/hotkeys.json", '{"k":2}\n');
+  await other.sync();
+  plugin.runner?.send({ type: "syncNow" });
+  await plugin.runner?.idle();
+  assert.equal(restart(), 1, "не чаще раза в сессию");
+  plugin.onunload();
+  await other.stop();
+  await fsp.rm(vault, { recursive: true, force: true });
 });

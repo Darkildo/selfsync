@@ -661,3 +661,26 @@ async fn lock_prevents_parallel_run() {
     drop(held);
     assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn excludes_with_reinclude_from_config() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "reinc", "a");
+    let (b, mut cb) = folder(&srv, "reinc", "b");
+    cb.excludes = vec![".obsidian/".into(), "!.obsidian/hotkeys.json".into()];
+    cb.save(b.path()).unwrap();
+    let cb = Config::load(b.path()).unwrap();
+    std::fs::create_dir_all(a.path().join(".obsidian")).unwrap();
+    std::fs::write(a.path().join(".obsidian/hotkeys.json"), "{}\n").unwrap();
+    std::fs::write(a.path().join(".obsidian/app.json"), "{}\n").unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    assert!(b.path().join(".obsidian/hotkeys.json").exists());
+    assert!(!b.path().join(".obsidian/app.json").exists());
+    // правило убрали из конфига при остановленном клиенте — app.json приходит
+    let mut cb = cb;
+    cb.excludes = vec![];
+    cb.save(b.path()).unwrap();
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    assert!(b.path().join(".obsidian/app.json").exists());
+}

@@ -130,19 +130,11 @@ impl Loop {
                 self.status = status;
             }
             Action::Notify { notice } => {
-                if let (
-                    Some(h),
-                    Notice::Synced {
-                        pulled,
-                        pushed,
-                        paths,
-                    },
-                ) = (&self.hook, &notice)
-                {
+                if let (Some(h), Notice::Synced { pulled, pushed }) = (&self.hook, &notice) {
                     h.send(Batch {
-                        pulled: u64::from(*pulled),
-                        pushed: u64::from(*pushed),
-                        paths: paths.iter().cloned().collect(),
+                        pulled: pulled.len() as u64,
+                        pushed: pushed.len() as u64,
+                        paths: pulled.iter().chain(pushed).cloned().collect(),
                     });
                 }
                 notify_user(&notice);
@@ -193,8 +185,8 @@ pub const READ_ONLY_MARKER: &str = "read-only";
 
 fn notify_user(n: &Notice) {
     match n {
-        Notice::Synced { pulled, pushed, .. } => {
-            tracing::info!("синк: пришло {pulled}, отправлено {pushed}")
+        Notice::Synced { pulled, pushed } => {
+            tracing::info!("синк: пришло {}, отправлено {}", pulled.len(), pushed.len())
         }
         Notice::ReadOnly { pending } => tracing::warn!(
             "устройство только для чтения: локальные правки ({pending}) на сервер не отправляются"

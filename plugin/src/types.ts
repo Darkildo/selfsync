@@ -5,6 +5,8 @@ export interface EngineConfig {
   deviceName?: string;
   excludes?: string[];
   hardExcludes?: string[];
+  /** Не сливать построчно: при расхождении побеждает более поздняя версия. */
+  noMerge?: string[];
   caseInsensitive?: boolean;
   /** Какие имена может хранить ФС устройства: записи с другими не скачиваются. */
   nameRules?: NameRules;
@@ -66,7 +68,7 @@ export type Notice =
   | { kind: "rejected"; path: string; code: string }
   | { kind: "caseCollision"; path: string; existing: string }
   | { kind: "tooLarge"; path: string; size: number }
-  | { kind: "synced"; pulled: number; pushed: number; paths: string[] }
+  | { kind: "synced"; pulled: string[]; pushed: string[] }
   | { kind: "readOnly"; pending: number }
   | { kind: "unsupportedName"; path: string }
   | { kind: "nonPortableName"; path: string }

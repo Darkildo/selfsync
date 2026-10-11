@@ -199,7 +199,26 @@ From Obsidian's community plugins (search for "Selfsync"), or by hand: copy `mai
 - **Deleted files** — the "Restore deleted files" command opens the server's trash.
 - **File history** — from the file context menu or a command.
 
-The vault's configuration folder (`.obsidian/` by default; settings differ between devices) and `.trash/` are not synced by default. Exclusions are configurable.
+The vault's configuration folder (`.obsidian/` by default; settings differ between devices) and `.trash/` are not synced by default. Exclusions are configurable: one pattern per line, and `!pattern` brings back something an earlier line excluded (the last matching line wins, as in `.gitignore`).
+
+### Obsidian settings between devices
+
+Under "Obsidian settings" in the plugin settings, choose what to carry across. Everything is off by default, which is how 0.1.x behaved.
+
+| Toggle | Syncs | Note |
+|---|---|---|
+| Appearance | `appearance.json`, `themes/` | theme and fonts |
+| Hotkeys | `hotkeys.json` | |
+| CSS snippets | `snippets/` | |
+| Plugin list | `community-plugins.json`, `core-plugins*.json`, `plugins/*/main.js`, `manifest.json`, `styles.css` | which plugins are on and their code, without their settings |
+| Plugin settings | `plugins/*/data.json` | off by default: plugin settings often depend on the device (paths, keys) |
+| Editor and general | `app.json`, `graph.json`, `types.json` | `app.json` also holds platform-specific options |
+
+Window layout (`workspace*.json`) and caches never sync. selfsync's own folder with the token never syncs either, even with "Plugin settings" on. Your exclusion lines apply on top of the toggles; the resulting rules are shown under "Resulting rules".
+
+Settings files are not merged line by line (that would break the JSON): when two devices changed the same file, the later change wins, with no conflict copy. If your version was newer, the other one stays in the server history; if the other one was newer, yours goes to the trash. Turning a toggle off only stops syncing: the files stay on the server and on other devices. Turning it back on brings over what changed meanwhile. Obsidian does not reread all its settings on the fly, so after settings arrive from another device the plugin suggests a restart (once per session).
+
+The command-line client syncs `.obsidian/` as before (except `workspace*.json`); its `excludes` in `.selfsync/config.toml` understand `!` too.
 
 ### Mobile limitations
 

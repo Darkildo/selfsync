@@ -865,11 +865,13 @@ fn synced_since(w: &World, c: usize, from: usize) -> Vec<(u32, u32, Vec<String>)
     w.clients[c].notices[from..]
         .iter()
         .filter_map(|n| match n {
-            Notice::Synced {
-                pulled,
-                pushed,
-                paths,
-            } => Some((*pulled, *pushed, paths.clone())),
+            Notice::Synced { pulled, pushed } => {
+                let n = |v: &Vec<String>| u32::try_from(v.len()).unwrap();
+                let mut paths: Vec<String> = pulled.iter().chain(pushed).cloned().collect();
+                paths.sort();
+                paths.dedup();
+                Some((n(pulled), n(pushed), paths))
+            }
             _ => None,
         })
         .collect()

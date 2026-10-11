@@ -441,14 +441,9 @@ async fn sync_task(cx: Ctx) {
     let (pulled, pushed) =
         cx.with_mut(|s| (std::mem::take(&mut s.pulled), std::mem::take(&mut s.pushed)));
     if !pulled.is_empty() || !pushed.is_empty() {
-        let n = |x: &std::collections::BTreeSet<String>| u32::try_from(x.len()).unwrap_or(u32::MAX);
-        let (np, ns) = (n(&pulled), n(&pushed));
-        let mut paths = pulled;
-        paths.extend(pushed);
         cx.notify(Notice::Synced {
-            pulled: np,
-            pushed: ns,
-            paths: paths.into_iter().collect(),
+            pulled: pulled.into_iter().collect(),
+            pushed: pushed.into_iter().collect(),
         });
     }
     cx.set_status(|_| {});

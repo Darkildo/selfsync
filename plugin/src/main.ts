@@ -11,6 +11,7 @@ import { AdapterBackend } from "./io/adapter.ts";
 import type { FileBackend } from "./io/backend.ts";
 import { ObsidianHttp } from "./io/http.ts";
 import { NodeBackend } from "./io/node.ts";
+import { buildRules, DEFAULT_CONFIG_SYNC, inConfigDir, migrateUserExcludes } from "./configsync.ts";
 import { DEFAULT_SETTINGS, SelfsyncSettingTab, type Settings } from "./settings.ts";
 import type { EngineConfig, LogLevel, NameRules, Notice as EngineNotice, SyncStatus } from "./types.ts";
 import { ConflictsModal } from "./ui/conflicts.ts";
@@ -97,8 +98,11 @@ export default class SelfsyncPlugin extends Plugin {
   async loadSettings(): Promise<void> {
     const saved = (await this.loadData()) as Partial<Settings> | null;
     this.settings = { ...DEFAULT_SETTINGS, ...saved };
-    // Каталог настроек Obsidian не обязательно `.obsidian`: его можно переименовать.
-    if (!saved?.excludes) this.settings.excludes = [`${this.app.vault.configDir}/`];
+    this.settings.configSync = { ...DEFAULT_CONFIG_SYNC, ...saved?.configSync };
+    // До пресетов каталог настроек стоял в пользовательских исключениях.
+    if (saved && !saved.configSync) {
+      this.settings.excludes = migrateUserExcludes(this.app.vault.configDir, this.settings.excludes);
+    }
     if (!this.settings.deviceName) this.settings.deviceName = defaultDeviceName();
   }
 
@@ -116,9 +120,12 @@ export default class SelfsyncPlugin extends Plugin {
   engineConfig(): EngineConfig {
     return {
       deviceName: this.settings.deviceName,
-      excludes: this.settings.excludes,
+      // Каталог настроек Obsidian (не обязательно `.obsidian`) — по пресетам.
+      excludes: buildRules(this.app.vault.configDir, this.settings.configSync, this.settings.excludes),
       // Каталог плагина (индекс, кэш, токен) и локальная корзина Obsidian — никогда.
       hardExcludes: [`${this.pluginDir}/`, ".trash/"],
+      // Файлы настроек — JSON: построчное слияние дало бы невалидный файл.
+      noMerge: [`${this.app.vault.configDir}/**`],
       caseInsensitive: !Platform.isLinux,
       nameRules: nameRules(),
       debounceMs: Math.round(this.settings.debounceSec * 1000),
@@ -252,11 +259,23 @@ export default class SelfsyncPlugin extends Plugin {
     this.statusEl.setAttribute("aria-label", tip);
   }
 
+  private configNoticeShown = false;
+
+  /** Пришли файлы настроек: Obsidian перечитывает не все сам — подсказать перезапуск. */
+  private configArrived(pulled: string[]): void {
+    if (this.configNoticeShown) return;
+    if (!pulled.some((p) => inConfigDir(this.app.vault.configDir, p) && !p.startsWith(`${this.pluginDir}/`))) return;
+    this.configNoticeShown = true;
+    new Notice(t("configSync.restart"), 0);
+  }
+
   private showNotice(n: EngineNotice): void {
     if (n.kind === "synced") {
       // Список путей может быть длинным: в журнал — сводка и начало списка.
-      const more = n.paths.length > 5 ? ` …+${n.paths.length - 5}` : "";
-      this.addLog("info", `synced: pulled ${n.pulled}, pushed ${n.pushed}: ${n.paths.slice(0, 5).join(", ")}${more}`);
+      const paths = [...n.pulled, ...n.pushed];
+      const more = paths.length > 5 ? ` …+${paths.length - 5}` : "";
+      this.addLog("info", `synced: pulled ${n.pulled.length}, pushed ${n.pushed.length}: ${paths.slice(0, 5).join(", ")}${more}`);
+      this.configArrived(n.pulled);
       return;
     }
     this.addLog("info", `notice ${JSON.stringify(n)}`);

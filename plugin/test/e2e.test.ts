@@ -6,6 +6,8 @@ import * as fsp from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
+import { buildRules, DEFAULT_CONFIG_SYNC } from "../src/configsync.ts";
+import type { EngineConfig } from "../src/types.ts";
 import { TestClient, TestServer } from "./harness.ts";
 
 let server: TestServer;
@@ -34,7 +36,7 @@ describe("синк между двумя устройствами", () => {
 
     // Ядро сообщает, что изменил цикл (уведомление synced).
     const synced = b.notices.filter((n) => n.kind === "synced");
-    assert.ok(synced.some((n) => n.kind === "synced" && n.pulled > 0 && n.paths.includes("notes/one.md")), JSON.stringify(synced));
+    assert.ok(synced.some((n) => n.kind === "synced" && n.pulled.includes("notes/one.md")), JSON.stringify(synced));
 
     await b.write("notes/one.md", "# one\nfirst\nfrom b\n");
     await b.sync();
@@ -326,5 +328,80 @@ describe("настройки", () => {
     await a.stop();
     await b.stop();
     await fresh.stop();
+  });
+});
+
+describe("настройки Obsidian", () => {
+  const ALL = { appearance: true, hotkeys: true, snippets: true, pluginList: true, pluginSettings: true, editor: true };
+  /** Конфигурация ядра, как её собирает плагин. */
+  const cfg = (presets: typeof DEFAULT_CONFIG_SYNC): EngineConfig => ({
+    excludes: buildRules(".obsidian", presets, []),
+    hardExcludes: [".obsidian/plugins/selfsync/", ".trash/"],
+    noMerge: [".obsidian/**"],
+  });
+  const settingsFiles: Record<string, string> = {
+    ".obsidian/hotkeys.json": '{"a":1}\n',
+    ".obsidian/appearance.json": '{"theme":"obsidian"}\n',
+    ".obsidian/themes/Minimal/theme.css": "body{}\n",
+    ".obsidian/snippets/wide.css": ".x{}\n",
+    ".obsidian/community-plugins.json": '["dataview"]\n',
+    ".obsidian/plugins/dataview/main.js": "module.exports={}\n",
+    ".obsidian/plugins/dataview/manifest.json": '{"id":"dataview"}\n',
+    ".obsidian/plugins/dataview/data.json": '{"x":1}\n',
+    ".obsidian/app.json": '{"vimMode":true}\n',
+    // никогда
+    ".obsidian/plugins/selfsync/data.json": '{"token":"ns_secret"}\n',
+    ".obsidian/workspace.json": '{"layout":1}\n',
+    ".obsidian/cache/x.lock": "1\n",
+  };
+
+  test("пресеты переносят выбранное, токен selfsync и раскладка окон не уходят никогда", async () => {
+    const token = server.token("cfgsync", "a");
+    const a = await TestClient.create(server, { name: "a", token, config: cfg(ALL) });
+    const b = await TestClient.create(server, { name: "b", token: server.token("cfgsync", "b"), config: cfg(ALL) });
+    // «Сервер глазами всего»: клиент без исключений видит всё, что на сервере.
+    const all = await TestClient.create(server, { name: "all", token: server.token("cfgsync", "all"), config: { excludes: [], hardExcludes: [] } });
+    for (const [p, text] of Object.entries(settingsFiles)) await a.write(p, text);
+    await a.sync();
+    await b.sync();
+    await all.sync();
+    const onServer = await all.files();
+    for (const p of Object.keys(settingsFiles)) {
+      const never = p.includes("/selfsync/") || p.endsWith("workspace.json") || p.includes("/cache/");
+      assert.equal(onServer.has(p), !never, `${p} на сервере`);
+      assert.equal(await b.read(p), never ? null : settingsFiles[p], `${p} у b`);
+    }
+    // выключенный пресет: файлы остаются и на сервере, и у второго устройства
+    await a.restart({ ...cfg({ ...ALL, hotkeys: false }) });
+    await a.write(".obsidian/hotkeys.json", '{"changed":"here only"}\n');
+    await a.sync();
+    await all.sync();
+    assert.equal((await all.files()).get(".obsidian/hotkeys.json"), '{"a":1}\n');
+    await b.sync();
+    assert.equal(await b.read(".obsidian/hotkeys.json"), '{"a":1}\n');
+    for (const c of [a, b, all]) await c.stop();
+  });
+
+  test("одновременная правка hotkeys.json: валидный JSON, без копий", async () => {
+    const a = await TestClient.create(server, { name: "a", token: server.token("cfgmerge", "a"), config: cfg(ALL) });
+    const b = await TestClient.create(server, { name: "b", token: server.token("cfgmerge", "b"), config: cfg(ALL) });
+    await a.write(".obsidian/hotkeys.json", '{\n  "a": 1,\n  "b": 2\n}\n');
+    await a.sync();
+    await b.sync();
+    await a.write(".obsidian/hotkeys.json", '{\n  "a": "from a",\n  "b": 2\n}\n');
+    await new Promise((r) => setTimeout(r, 20));
+    await b.write(".obsidian/hotkeys.json", '{\n  "a": 1,\n  "b": "from b"\n}\n');
+    await a.sync();
+    await b.sync();
+    await a.sync();
+    const ta = await a.read(".obsidian/hotkeys.json");
+    assert.equal(ta, await b.read(".obsidian/hotkeys.json"));
+    assert.deepEqual(JSON.parse(ta ?? ""), { a: 1, b: "from b" }, "побеждает более поздняя правка");
+    for (const c of [a, b]) {
+      const names = [...(await c.files()).keys()];
+      assert.ok(!names.some((n) => n.includes("(conflict") || n.includes(" (")), names.join(", "));
+      assert.ok(!c.notices.some((n) => n.kind === "conflict"));
+    }
+    for (const c of [a, b]) await c.stop();
   });
 });

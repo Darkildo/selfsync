@@ -2,6 +2,7 @@
 
 import { type App, Notice, PluginSettingTab, requireApiVersion, Setting, type SettingDefinitionItem } from "obsidian";
 
+import { buildRules, type ConfigSync, DEFAULT_CONFIG_SYNC, type Preset, PRESETS } from "./configsync.ts";
 import { t } from "./i18n.ts";
 import type SelfsyncPlugin from "./main.ts";
 import type { DeviceView } from "./types.ts";
@@ -18,6 +19,8 @@ export interface Settings {
   vault: string;
   deviceName: string;
   excludes: string[];
+  /** Какие части каталога настроек Obsidian синхронизировать. */
+  configSync: ConfigSync;
   useWait: boolean;
   debounceSec: number;
   pollActiveSec: number;
@@ -29,8 +32,9 @@ export const DEFAULT_SETTINGS: Settings = {
   token: "",
   vault: "",
   deviceName: "",
-  // По умолчанию — каталог настроек vault'а, его подставляет loadSettings.
+  // Каталог настроек исключается в итоговых правилах сам (configsync.ts).
   excludes: [],
+  configSync: { ...DEFAULT_CONFIG_SYNC },
   useWait: false,
   debounceSec: 2.5,
   pollActiveSec: 15,
@@ -114,6 +118,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     return [
       { heading: t("settings.connection"), rows: this.connectionRows() },
       { heading: t("settings.sync"), rows: this.syncRows() },
+      { heading: t("configSync.heading"), rows: this.configSyncRows() },
       { heading: t("encryption.heading"), rows: [this.encryptionRow()], needsRunner: true },
       {
         heading: t("devices.heading"),
@@ -257,6 +262,40 @@ export class SelfsyncSettingTab extends PluginSettingTab {
         row.setName(t("status.readOnly")).setDesc(t("readOnly.desc"));
       },
     };
+  }
+
+  /** Пресеты каталога настроек и итоговые правила. */
+  private configSyncRows(): Row[] {
+    const s = this.plugin.settings;
+    const rows: Row[] = PRESETS.map((p: Preset) => ({
+      name: t(`configSync.${p}`),
+      desc: t(`configSync.${p}Desc`),
+      build: (row: Setting) =>
+        row
+          .setName(t(`configSync.${p}`))
+          .setDesc(t(`configSync.${p}Desc`))
+          .addToggle((x) =>
+            x.setValue(s.configSync[p]).onChange(async (v) => {
+              s.configSync[p] = v;
+              await this.plugin.saveSettings({ reconfigure: true });
+              this.refresh();
+            }),
+          ),
+    }));
+    rows.push({
+      name: t("configSync.rules"),
+      desc: t("configSync.rulesDesc"),
+      build: (row) => {
+        row.setName(t("configSync.rules")).setDesc(t("configSync.rulesDesc"));
+        // Раскрываемый блок: что на самом деле получает синк.
+        const el = (row as { descEl?: HTMLElement }).descEl;
+        if (!el?.createEl) return;
+        const details = el.createEl("details");
+        details.createEl("summary", { text: t("configSync.rulesShow") });
+        details.createEl("pre", { text: buildRules(this.app.vault.configDir, s.configSync, s.excludes).join("\n") });
+      },
+    });
+    return rows;
   }
 
   private encryptionRow(): Row {

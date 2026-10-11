@@ -82,6 +82,8 @@ impl Config {
             device_name: self.device_name.clone(),
             excludes: self.excludes.clone(),
             hard_excludes: vec![format!("{STATE_DIR}/"), format!("{TRASH_DIR}/")],
+            // Настройки Obsidian — JSON: при расхождении побеждает поздняя версия.
+            no_merge: vec![".obsidian/**".into()],
             case_insensitive: cfg!(any(target_os = "macos", target_os = "windows")),
             name_rules: if cfg!(target_os = "windows") {
                 NameRules::Windows
