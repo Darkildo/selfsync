@@ -32,11 +32,25 @@ fn proto_req<M: Message>(method: &str, path: String, m: &M) -> HttpRequest {
     req(method, path, m.encode_to_vec(), Some(CONTENT_TYPE_PROTOBUF))
 }
 
+/// `Retry-After` в секундах (сервер шлёт только число). Нет или не разбирается —
+/// минута: повторять раньше бессмысленно, лимитер продлит блокировку.
+fn retry_after(headers: &[(String, String)]) -> u64 {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("retry-after"))
+        .and_then(|(_, v)| v.trim().parse::<u64>().ok())
+        .unwrap_or(60)
+        .clamp(1, 24 * 60 * 60)
+}
+
 /// Ошибка из ответа сервера.
-fn error_of(status: u16, body: &[u8]) -> SyncError {
+fn error_of(status: u16, headers: &[(String, String)], body: &[u8]) -> SyncError {
     let e = pb::Error::decode(body).unwrap_or_default();
     match status {
         401 => SyncError::Unauthorized,
+        429 => SyncError::RateLimited {
+            retry_after_s: retry_after(headers),
+        },
         426 => SyncError::ProtoUnsupported(e.supported_proto),
         s if s >= 500 => SyncError::Server {
             status: s,
@@ -51,20 +65,20 @@ fn error_of(status: u16, body: &[u8]) -> SyncError {
 }
 
 async fn call<T: Message + Default>(cx: &Ctx, r: HttpRequest) -> SyncResult<T> {
-    let (status, _, body) = cx.http(r).await?;
+    let (status, headers, body) = cx.http(r).await?;
     if (200..300).contains(&status) {
         T::decode(&body[..]).map_err(|e| SyncError::Protocol(e.to_string()))
     } else {
-        Err(error_of(status, &body))
+        Err(error_of(status, &headers, &body))
     }
 }
 
 async fn call_empty(cx: &Ctx, r: HttpRequest) -> SyncResult<u16> {
-    let (status, _, body) = cx.http(r).await?;
+    let (status, headers, body) = cx.http(r).await?;
     if (200..300).contains(&status) {
         Ok(status)
     } else {
-        Err(error_of(status, &body))
+        Err(error_of(status, &headers, &body))
     }
 }
 
@@ -138,11 +152,11 @@ pub async fn get_blob(cx: &Ctx, h: &Hash, range: Option<(u64, u64)>) -> SyncResu
         r.headers
             .push(("range".to_owned(), format!("bytes={a}-{b}")));
     }
-    let (status, _, body) = cx.http(r).await?;
+    let (status, headers, body) = cx.http(r).await?;
     match status {
         200 | 206 => Ok(body),
         404 => Err(SyncError::BlobGone),
-        s => Err(error_of(s, &body)),
+        s => Err(error_of(s, &headers, &body)),
     }
 }
 
@@ -185,13 +199,13 @@ pub async fn upload_part(
         format!("bytes {offset}-{end}/{total}"),
     ));
     r.timeout_ms = TRANSFER_TIMEOUT_MS;
-    let (status, _, body) = cx.http(r).await?;
+    let (status, headers, body) = cx.http(r).await?;
     match status {
         200 => pb::UploadState::decode(&body[..])
             .map(Some)
             .map_err(|e| SyncError::Protocol(e.to_string())),
         409 => Ok(None),
-        s => Err(error_of(s, &body)),
+        s => Err(error_of(s, &headers, &body)),
     }
 }
 
@@ -216,13 +230,13 @@ pub async fn put_vault_key(
         r.headers
             .push(("if-match".to_owned(), format!("\"{expected}\"")));
     }
-    let (status, _, body) = cx.http(r).await?;
+    let (status, headers, body) = cx.http(r).await?;
     match status {
         200 => pb::VaultKeyResponse::decode(&body[..])
             .map(Some)
             .map_err(|e| SyncError::Protocol(e.to_string())),
         412 => Ok(None),
-        s => Err(error_of(s, &body)),
+        s => Err(error_of(s, &headers, &body)),
     }
 }
 
@@ -259,7 +273,7 @@ pub async fn purge_plaintext(cx: &Ctx, max_seq: u64) -> SyncResult<bool> {
         "/v1/vaultkey/migration/purge".into(),
         &pb::MigrationPurge { max_seq },
     );
-    let (status, _, body) = cx.http(r).await?;
+    let (status, headers, body) = cx.http(r).await?;
     match status {
         200 => Ok(true),
         409 => {
@@ -268,10 +282,10 @@ pub async fn purge_plaintext(cx: &Ctx, max_seq: u64) -> SyncResult<bool> {
                 "plaintext_changed" => Ok(false),
                 // Маркера уже нет: purge прошёл, а ответ потерялся.
                 "no_migration" => Ok(true),
-                _ => Err(error_of(409, &body)),
+                _ => Err(error_of(409, &headers, &body)),
             }
         }
-        s => Err(error_of(s, &body)),
+        s => Err(error_of(s, &headers, &body)),
     }
 }
 

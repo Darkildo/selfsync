@@ -15,7 +15,8 @@ pub const JOIN_TTL_MS: i64 = 15 * 60 * 1000;
 /// `last_seen` обновляется не чаще раза в минуту.
 const LAST_SEEN_STEP_MS: i64 = 60 * 1000;
 
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
 CREATE TABLE devices (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   vault       TEXT NOT NULL,
@@ -36,7 +37,16 @@ CREATE TABLE join_codes (
   used_at     INTEGER,
   used_by     INTEGER
 );
-"];
+",
+    "
+CREATE TABLE throttle (
+  key           TEXT PRIMARY KEY,
+  window_start  INTEGER NOT NULL,
+  failures      INTEGER NOT NULL,
+  blocked_until INTEGER
+);
+",
+];
 
 pub fn migrate_server(c: &mut Connection) -> rusqlite::Result<()> {
     migrate(c, MIGRATIONS)

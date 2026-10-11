@@ -160,6 +160,8 @@ pub struct Client {
     /// Байты тел HTTP-запросов и ответов (проверка докачки).
     pub sent_bytes: u64,
     pub recv_bytes: u64,
+    /// Число HTTP-запросов (проверка, что клиент выжидает `Retry-After`).
+    pub requests: u64,
 }
 
 /// Учёт токенов для инварианта.
@@ -300,6 +302,7 @@ impl World {
             kills: 0,
             sent_bytes: 0,
             recv_bytes: 0,
+            requests: 0,
         };
         self.clients.push(client);
         self.start_client(self.clients.len() - 1);
@@ -383,6 +386,7 @@ impl World {
             b = b.header("authorization", format!("Bearer {}", self.clients[c].token));
         }
         self.clients[c].sent_bytes += req.body.len() as u64;
+        self.clients[c].requests += 1;
         let Ok(request) = b.body(Body::from(req.body)) else {
             return IoResult::Failed {
                 message: "bad request".into(),

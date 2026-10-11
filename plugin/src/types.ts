@@ -49,6 +49,8 @@ export interface SyncStatus {
   lastSync: number;
   conflicts: number;
   encrypted: boolean;
+  /** При `reason === "rate_limited"`: раньше этого момента (мс) запросов не будет. */
+  retryAt: number;
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -113,7 +115,7 @@ export interface DeviceView {
 
 export type UiResult =
   | { type: "ok" }
-  | { type: "error"; code: string; message: string }
+  | { type: "error"; code: string; message: string; retryAfter?: number }
   | { type: "deleted"; items: DeletedView[] }
   | { type: "history"; revisions: RevisionView[] }
   | { type: "devices"; vault: string; devices: DeviceView[] }

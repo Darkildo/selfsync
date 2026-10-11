@@ -42,6 +42,18 @@ pub enum Outcome {
     Interrupted,
 }
 
+/// Причина состояния для человека. Для 429 — сколько ждать.
+fn reason_text(s: &SyncStatus) -> String {
+    match s.reason.as_deref() {
+        Some("rate_limited") => {
+            let secs = ((s.retry_at - now_ms()).max(0) + 999) / 1000;
+            format!("сервер ограничил попытки, следующая через {secs} с")
+        }
+        Some(r) => r.to_owned(),
+        None => String::new(),
+    }
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -98,16 +110,8 @@ impl Loop {
         match a {
             Action::Wake { at } => self.wake = Some(at),
             Action::Status { status } => {
-                if status.state != self.status.state {
-                    tracing::info!(
-                        "состояние: {:?}{}",
-                        status.state,
-                        status
-                            .reason
-                            .as_deref()
-                            .map(|r| format!(" ({r})"))
-                            .unwrap_or_default()
-                    );
+                if status.state != self.status.state || status.retry_at != self.status.retry_at {
+                    tracing::info!("состояние: {:?} ({})", status.state, reason_text(&status));
                 }
                 self.status = status;
             }
@@ -279,7 +283,7 @@ pub async fn run(dir: &Path, cfg: &Config, opts: Options) -> anyhow::Result<Outc
             match s.state {
                 SyncState::Idle if s.last_sync > 0 => return Ok(Outcome::Synced),
                 SyncState::Offline | SyncState::Error => {
-                    return Ok(Outcome::Failed(s.reason.clone().unwrap_or_default()));
+                    return Ok(Outcome::Failed(reason_text(s)));
                 }
                 SyncState::Blocked => {
                     return Ok(Outcome::Blocked(s.reason.clone().unwrap_or_default()));

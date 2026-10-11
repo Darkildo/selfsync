@@ -21,6 +21,46 @@ pub struct Config {
     pub max_blob_size: u64,
     pub max_body_size: u64,
     pub log: String,
+    pub rate: RateConfig,
+    /// Доверять `X-Forwarded-For` (адрес клиента для лимитера).
+    pub trusted_proxy: bool,
+}
+
+/// Порог неудач за окно и блокировка после него. `attempts == 0` — лимит выключен.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateRule {
+    pub attempts: u32,
+    pub window: Duration,
+    pub block: Duration,
+}
+
+/// Лимиты неудачных попыток (`throttle.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateConfig {
+    /// `redeem:<адрес>`: коды подключения с одного адреса.
+    pub redeem: RateRule,
+    /// `redeem:*`: со всех адресов за то же окно (`0` — выключено).
+    pub redeem_global: u32,
+    /// `auth:<адрес>`: ответы 401 на предъявленный токен.
+    pub auth: RateRule,
+}
+
+impl Default for RateConfig {
+    fn default() -> Self {
+        RateConfig {
+            redeem: RateRule {
+                attempts: 10,
+                window: Duration::from_secs(15 * 60),
+                block: Duration::from_secs(15 * 60),
+            },
+            redeem_global: 200,
+            auth: RateRule {
+                attempts: 30,
+                window: Duration::from_secs(60),
+                block: Duration::from_secs(60),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -32,6 +72,22 @@ struct FileConfig {
     max_blob_size: Option<String>,
     max_body_size: Option<String>,
     log: Option<String>,
+    trusted_proxy: Option<bool>,
+    #[serde(default)]
+    rate: FileRate,
+}
+
+/// Секция `[rate]`: те же ключи, что `SELFSYNC_RATE_*`, в нижнем регистре.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileRate {
+    redeem_attempts: Option<u32>,
+    redeem_window: Option<String>,
+    redeem_block: Option<String>,
+    redeem_global: Option<u32>,
+    auth_attempts: Option<u32>,
+    auth_window: Option<String>,
+    auth_block: Option<String>,
 }
 
 impl Config {
@@ -81,6 +137,11 @@ impl Config {
         let log = env("SELFSYNC_LOG")
             .or(file.log)
             .unwrap_or_else(|| "info".to_owned());
+        let trusted_proxy = match env("SELFSYNC_TRUSTED_PROXY") {
+            Some(s) => parse_bool("SELFSYNC_TRUSTED_PROXY", &s)?,
+            None => file.trusted_proxy.unwrap_or(false),
+        };
+        let rate = load_rate(&env, file.rate)?;
         Ok(Config {
             data_dir,
             public_url,
@@ -88,6 +149,8 @@ impl Config {
             max_blob_size,
             max_body_size,
             log,
+            rate,
+            trusted_proxy,
         })
     }
 
@@ -100,7 +163,75 @@ impl Config {
             max_blob_size: DEFAULT_MAX_BLOB,
             max_body_size: DEFAULT_MAX_BODY,
             log: "warn".to_owned(),
+            rate: RateConfig::default(),
+            trusted_proxy: false,
         }
+    }
+}
+
+fn load_rate(env: &dyn Fn(&str) -> Option<String>, file: FileRate) -> anyhow::Result<RateConfig> {
+    let d = RateConfig::default();
+    let count = |name: &str, f: Option<u32>, def: u32| -> anyhow::Result<u32> {
+        match env(name) {
+            Some(s) => s
+                .trim()
+                .parse()
+                .with_context(|| format!("{name}: нужно целое число ≥ 0, получено «{s}»")),
+            None => Ok(f.unwrap_or(def)),
+        }
+    };
+    // Окно и блокировка — не меньше секунды: `0` здесь почти наверняка опечатка,
+    // а выключается лимит порогом.
+    let span = |name: &str, f: Option<String>, def: Duration| -> anyhow::Result<Duration> {
+        let Some(s) = env(name).or(f) else {
+            return Ok(def);
+        };
+        let v = parse_duration(&s).with_context(|| name.to_owned())?;
+        if v < Duration::from_secs(1) {
+            bail!("{name}: не меньше секунды (выключить лимит — порогом 0), получено «{s}»");
+        }
+        Ok(v)
+    };
+    Ok(RateConfig {
+        redeem: RateRule {
+            attempts: count(
+                "SELFSYNC_RATE_REDEEM_ATTEMPTS",
+                file.redeem_attempts,
+                d.redeem.attempts,
+            )?,
+            window: span(
+                "SELFSYNC_RATE_REDEEM_WINDOW",
+                file.redeem_window,
+                d.redeem.window,
+            )?,
+            block: span(
+                "SELFSYNC_RATE_REDEEM_BLOCK",
+                file.redeem_block,
+                d.redeem.block,
+            )?,
+        },
+        redeem_global: count(
+            "SELFSYNC_RATE_REDEEM_GLOBAL",
+            file.redeem_global,
+            d.redeem_global,
+        )?,
+        auth: RateRule {
+            attempts: count(
+                "SELFSYNC_RATE_AUTH_ATTEMPTS",
+                file.auth_attempts,
+                d.auth.attempts,
+            )?,
+            window: span("SELFSYNC_RATE_AUTH_WINDOW", file.auth_window, d.auth.window)?,
+            block: span("SELFSYNC_RATE_AUTH_BLOCK", file.auth_block, d.auth.block)?,
+        },
+    })
+}
+
+fn parse_bool(name: &str, s: &str) -> anyhow::Result<bool> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => bail!("{name}: ожидается 1 или 0, получено «{s}»"),
     }
 }
 
@@ -144,6 +275,34 @@ mod tests {
         assert_eq!(parse_size("16 MB").unwrap(), 16_000_000);
         assert_eq!(parse_size("100").unwrap(), 100);
         assert!(parse_size("12XB").is_err());
+    }
+
+    fn rate_from(pairs: &[(&str, &str)], file: &str) -> anyhow::Result<RateConfig> {
+        let env = |k: &str| {
+            pairs
+                .iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| (*v).to_owned())
+        };
+        let file: FileConfig = toml::from_str(file).unwrap();
+        load_rate(&env, file.rate)
+    }
+
+    #[test]
+    fn rate_settings() {
+        assert_eq!(rate_from(&[], "").unwrap(), RateConfig::default());
+        let r = rate_from(
+            &[("SELFSYNC_RATE_AUTH_WINDOW", "5m")],
+            "[rate]\nredeem_attempts = 0\nauth_window = \"2m\"\nauth_block = \"30s\"",
+        )
+        .unwrap();
+        assert_eq!(r.redeem.attempts, 0);
+        assert_eq!(r.auth.window, Duration::from_secs(300)); // окружение приоритетнее
+        assert_eq!(r.auth.block, Duration::from_secs(30));
+        let e = rate_from(&[("SELFSYNC_RATE_REDEEM_BLOCK", "500ms")], "").unwrap_err();
+        assert!(format!("{e:#}").contains("не меньше секунды"));
+        assert!(rate_from(&[("SELFSYNC_RATE_REDEEM_GLOBAL", "-1")], "").is_err());
+        assert!(toml::from_str::<FileConfig>("[rate]\nbogus = 1").is_err());
     }
 
     #[test]

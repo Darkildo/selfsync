@@ -14,6 +14,7 @@ NoNewPrivileges=true
 Notify=true
 Environment=SELFSYNC_DATA_DIR=/data
 #Environment=SELFSYNC_PUBLIC_URL=https://notes.example.com
+#Environment=SELFSYNC_TRUSTED_PROXY=1
 
 [Service]
 # Выход по простою — штатное завершение.

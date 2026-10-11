@@ -204,6 +204,7 @@ export default class SelfsyncPlugin extends Plugin {
     const tmp = new Runner({ deviceName: device }, null, this.executor(server), { log: (l, m) => this.addLog(l, m) });
     try {
       const r = await tmp.command({ type: "redeem", code, name: device });
+      if (r.type === "error" && r.code === "rate_limited") return t("connect.rateLimited", { n: r.retryAfter ?? 0 });
       if (r.type === "error") return r.message;
       if (r.type !== "token") return r.type;
       this.settings.server = server;

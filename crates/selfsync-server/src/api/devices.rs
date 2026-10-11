@@ -10,6 +10,7 @@ use super::{AuthCtx, Proto, check_proto, public_base};
 use crate::db::server;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
+use crate::throttle;
 
 pub async fn list(
     State(st): State<AppState>,
@@ -85,18 +86,30 @@ pub async fn join_redeem(
     req: Request,
 ) -> ApiResult<Proto<pb::JoinToken>> {
     check_proto(req.headers())?;
+    let ip = throttle::client_ip(&st.config, req.headers(), req.extensions());
+    let keys = throttle::redeem_keys(&st.config.rate, ip);
     let body = axum::body::to_bytes(req.into_body(), 64 * 1024)
         .await
         .map_err(|_| ApiError::bad_request("bad_body", "не удалось прочитать тело"))?;
     let r = pb::JoinRedeem::decode(body)
         .map_err(|_| ApiError::bad_request("bad_protobuf", "тело не разбирается"))?;
     let code = r.code.trim().to_ascii_lowercase();
-    if code.len() != 16 {
-        return Err(ApiError::not_found("code_invalid"));
-    }
     let name = r.name.chars().take(128).collect::<String>();
     let res = st
-        .server_db(move |c| Ok(server::redeem_join_code(c, &code, &name)?))
+        .server_db(move |c| {
+            if let Some(secs) = throttle::check_now(c, &keys)? {
+                return Err(ApiError::too_many(secs));
+            }
+            let res = if code.len() == 16 {
+                server::redeem_join_code(c, &code, &name)?
+            } else {
+                None
+            };
+            if res.is_none() {
+                throttle::fail_now(c, &keys)?;
+            }
+            Ok(res)
+        })
         .await?;
     let Some((device_id, token, vault, device_name)) = res else {
         // Неизвестный, истёкший и уже использованный код неотличимы.

@@ -252,6 +252,17 @@ impl Engine {
         if !started || blocked {
             return false;
         }
+        let limited = cx.with_mut(|s| match s.rate_limited_until {
+            Some(u) if u > now => true,
+            Some(_) => {
+                s.rate_limited_until = None;
+                false
+            }
+            None => false,
+        });
+        if limited {
+            return false;
+        }
         let mut spawned = false;
         let due_now = due.is_some_and(|d| d <= now) || next_poll.is_some_and(|p| p <= now);
         if due_now && !self.running(Kind::Sync) && !paused_pw {
@@ -281,13 +292,15 @@ impl Engine {
     }
 
     fn emit_wake(&mut self) {
-        let wake = self
-            .st
-            .borrow()
-            .sync_due
-            .into_iter()
-            .chain(self.st.borrow().next_poll)
-            .min();
+        let wake = {
+            let s = self.st.borrow();
+            let w = s.sync_due.into_iter().chain(s.next_poll).min();
+            // Под ограничением 429 будить не раньше его конца.
+            match (w, s.rate_limited_until) {
+                (Some(w), Some(u)) => Some(w.max(u)),
+                (w, _) => w,
+            }
+        };
         let changed = {
             let mut s = self.st.borrow_mut();
             if s.wake_at != wake {
@@ -342,6 +355,7 @@ async fn sync_task(cx: Ctx) {
                 s.paused = None;
                 s.status.state = SyncState::Idle;
                 s.status.reason = None;
+                s.status.retry_at = 0;
                 s.status.last_sync = now;
                 let recent = now - s.last_activity < 120_000;
                 if *changed || recent {
@@ -355,6 +369,11 @@ async fn sync_task(cx: Ctx) {
             Err(e) => {
                 let (state, reason, retry) = match e {
                     SyncError::Network(_) => (SyncState::Offline, "offline".to_owned(), true),
+                    SyncError::RateLimited { retry_after_s } => {
+                        s.rate_limit(now, *retry_after_s);
+                        s.sync_due = s.rate_limited_until;
+                        (SyncState::Error, "rate_limited".to_owned(), false)
+                    }
                     SyncError::Server { .. } => (SyncState::Error, "server_error".to_owned(), true),
                     SyncError::Unauthorized => {
                         s.blocked = Some("unauthorized".into());
@@ -440,6 +459,12 @@ async fn wait_task(cx: Ctx) {
                     cx.with_mut(|s| s.wait_disabled = true);
                     return;
                 }
+            }
+            Err(SyncError::RateLimited { retry_after_s }) => {
+                let now = cx.now();
+                cx.with_mut(|s| s.rate_limit(now, retry_after_s));
+                cx.set_status(|_| {});
+                return;
             }
             Err(_) => {
                 cx.with_mut(|s| s.wait_disabled = true);

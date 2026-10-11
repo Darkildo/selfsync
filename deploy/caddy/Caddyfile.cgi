@@ -20,6 +20,7 @@ notes.example.com {
 		env SELFSYNC_DATA_DIR=/var/lib/selfsync SELFSYNC_PUBLIC_URL=https://notes.example.com SELFSYNC_LOG=warn
 		# Отдача блобов потоком, без буферизации ответа целиком.
 		unbuffered_output
+		# Адрес клиента приходит в REMOTE_ADDR; SELFSYNC_TRUSTED_PROXY не нужен.
 	}
 
 	respond 404

@@ -126,7 +126,11 @@ pub async fn run(state: AppState, listener: AnyListener, idle: Duration) -> anyh
     tracing::info!(listen = %listener.describe(), idle_s = idle.as_secs(), "selfsync слушает");
     let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
     match listener {
-        AnyListener::Tcp(l) => axum::serve(l, app).with_graceful_shutdown(shutdown).await?,
+        AnyListener::Tcp(l) => {
+            // Адрес соединения — для лимитера (`throttle::client_ip`).
+            let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
+            axum::serve(l, app).with_graceful_shutdown(shutdown).await?;
+        }
         AnyListener::Unix(l) => axum::serve(l, app).with_graceful_shutdown(shutdown).await?,
     }
     let _ = sd_notify::notify(&[sd_notify::NotifyState::Stopping]);

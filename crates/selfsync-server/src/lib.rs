@@ -13,6 +13,7 @@ pub mod gc;
 pub mod modes;
 pub mod state;
 pub mod sweep;
+pub mod throttle;
 
 pub use api::router;
 pub use config::Config;

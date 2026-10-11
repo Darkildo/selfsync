@@ -1,13 +1,15 @@
 //! `GET /join/{code}` — страница подключения нового устройства. Без внешних
 //! ресурсов, открывается с телефона. Код при просмотре не расходуется.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Request, State};
 use axum::response::{Html, IntoResponse, Response};
 use http::{HeaderMap, StatusCode, header};
 
 use super::public_base;
 use crate::db::server;
+use crate::error::ApiError;
 use crate::state::AppState;
+use crate::throttle;
 
 struct Texts {
     lang: &'static str,
@@ -23,6 +25,9 @@ struct Texts {
     expires: &'static str,
     invalid_title: &'static str,
     invalid: &'static str,
+    limited_title: &'static str,
+    /// `{n}` — секунды до следующей попытки.
+    limited: &'static str,
 }
 
 const RU: Texts = Texts {
@@ -39,6 +44,8 @@ const RU: Texts = Texts {
     expires: "Ссылка одноразовая и действует 15 минут.",
     invalid_title: "Ссылка недействительна",
     invalid: "Код подключения истёк или уже использован. Создайте новый в настройках плагина на подключённом устройстве.",
+    limited_title: "Слишком много попыток",
+    limited: "С этого адреса было слишком много неверных кодов. Повторите через {n} с.",
 };
 
 const EN: Texts = Texts {
@@ -55,6 +62,8 @@ const EN: Texts = Texts {
     expires: "The link works once and expires in 15 minutes.",
     invalid_title: "Link is not valid",
     invalid: "The connection code has expired or was already used. Create a new one in the plugin settings on a connected device.",
+    limited_title: "Too many attempts",
+    limited: "Too many wrong codes came from this address. Try again in {n} s.",
 };
 
 fn texts(headers: &HeaderMap) -> &'static Texts {
@@ -103,32 +112,56 @@ code{background:#f3f4f6;padding:.15rem .35rem;border-radius:.3rem;word-break:bre
 .muted{color:#6b7280;font-size:.9rem}
 @media (prefers-color-scheme:dark){body{background:#111827;color:#e5e7eb}code{background:#1f2937}.muted{color:#9ca3af}}";
 
-pub async fn page(
-    State(st): State<AppState>,
-    Path(code): Path<String>,
-    headers: HeaderMap,
-) -> Response {
-    let t = texts(&headers);
+fn simple_page(t: &Texts, status: StatusCode, title: &str, text: &str) -> Response {
+    let html = format!(
+        "<!doctype html><html lang=\"{}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{title}</title><style>{STYLE}</style></head><body><h1>{title}</h1><p>{text}</p></body></html>",
+        t.lang
+    );
+    (status, Html(html)).into_response()
+}
+
+/// Просмотр страницы — та же попытка угадать код, что и redeem: общий лимит.
+pub async fn page(State(st): State<AppState>, Path(code): Path<String>, req: Request) -> Response {
+    let headers = req.headers();
+    let t = texts(headers);
+    let keys = throttle::redeem_keys(
+        &st.config.rate,
+        throttle::client_ip(&st.config, headers, req.extensions()),
+    );
     let code = code.trim().to_ascii_lowercase();
-    let valid = if code.len() == 16 && code.bytes().all(|b| b.is_ascii_alphanumeric()) {
-        let c2 = code.clone();
-        st.server_db(move |c| Ok(server::peek_join_code(c, &c2)?))
-            .await
-            .ok()
-            .flatten()
-    } else {
-        None
-    };
-    let mut resp = match valid {
-        None => {
-            let html = format!(
-                "<!doctype html><html lang=\"{}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{}</title><style>{STYLE}</style></head><body><h1>{}</h1><p>{}</p></body></html>",
-                t.lang, t.invalid_title, t.invalid_title, t.invalid
-            );
-            (StatusCode::NOT_FOUND, Html(html)).into_response()
+    let c2 = code.clone();
+    let looked = st
+        .server_db(move |c| {
+            if let Some(secs) = throttle::check_now(c, &keys)? {
+                return Err(ApiError::too_many(secs));
+            }
+            let found = if c2.len() == 16 && c2.bytes().all(|b| b.is_ascii_alphanumeric()) {
+                server::peek_join_code(c, &c2)?
+            } else {
+                None
+            };
+            if found.is_none() {
+                throttle::fail_now(c, &keys)?;
+            }
+            Ok(found)
+        })
+        .await;
+    let valid = match looked {
+        Ok(v) => v,
+        Err(e) if e.retry_after.is_some() => {
+            let secs = e.retry_after.unwrap_or(1);
+            let text = t.limited.replace("{n}", &secs.to_string());
+            let mut r = simple_page(t, StatusCode::TOO_MANY_REQUESTS, t.limited_title, &text);
+            r.headers_mut()
+                .insert(header::RETRY_AFTER, http::HeaderValue::from(secs));
+            return finish(r);
         }
+        Err(_) => None,
+    };
+    let resp = match valid {
+        None => simple_page(t, StatusCode::NOT_FOUND, t.invalid_title, t.invalid),
         Some((vault, name)) => {
-            let base = public_base(&st, &headers);
+            let base = public_base(&st, headers);
             let link = format!(
                 "obsidian://selfsync-connect?server={}&code={}",
                 pct(&base),
@@ -161,6 +194,10 @@ pub async fn page(
             Html(html).into_response()
         }
     };
+    finish(resp)
+}
+
+fn finish(mut resp: Response) -> Response {
     let h = resp.headers_mut();
     h.insert(
         header::CACHE_CONTROL,

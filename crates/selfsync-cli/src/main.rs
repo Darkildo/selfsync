@@ -160,6 +160,11 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     cfg.save(&dir)?;
                     println!("подключено к vault «{vault}» как «{}»", cfg.device_name);
                 }
+                UiResult::Error {
+                    code, retry_after, ..
+                } if code == "rate_limited" => anyhow::bail!(
+                    "слишком много неверных кодов с этого адреса, подождите {retry_after} с"
+                ),
                 UiResult::Error { message, .. } => anyhow::bail!("сервер отказал: {message}"),
                 other => anyhow::bail!("неожиданный ответ: {other:?}"),
             }

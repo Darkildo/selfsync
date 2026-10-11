@@ -10,6 +10,7 @@ const en = {
   "status.error": "Sync error",
   "status.needPassword": "Password needed",
   "status.blocked": "Sync stopped",
+  "status.rateLimited": "Too many attempts, next one at {time}",
   "status.notConfigured": "Not connected",
   "status.pending": "{n} pending",
   "status.conflicts": "conflicts: {n}",
@@ -74,6 +75,7 @@ const en = {
   "connect.submit": "Connect",
   "connect.done": "Connected to vault «{vault}»",
   "connect.failed": "Could not connect: {message}",
+  "connect.rateLimited": "too many wrong codes from this address, wait {n} s",
 
   "password.title": "Encryption password",
   "password.unlockDesc": "The vault is encrypted. Enter the password set when encryption was enabled.",
@@ -153,6 +155,7 @@ const ru: Record<Key, string> = {
   "status.error": "Ошибка синхронизации",
   "status.needPassword": "Нужен пароль",
   "status.blocked": "Синхронизация остановлена",
+  "status.rateLimited": "Слишком много попыток, следующая в {time}",
   "status.notConfigured": "Не подключено",
   "status.pending": "к отправке: {n}",
   "status.conflicts": "конфликтов: {n}",
@@ -217,6 +220,7 @@ const ru: Record<Key, string> = {
   "connect.submit": "Подключить",
   "connect.done": "Подключено к vault «{vault}»",
   "connect.failed": "Не удалось подключиться: {message}",
+  "connect.rateLimited": "слишком много неверных кодов с этого адреса, подождите {n} с",
 
   "password.title": "Пароль шифрования",
   "password.unlockDesc": "Vault зашифрован. Введите пароль, заданный при включении шифрования.",
@@ -361,5 +365,8 @@ export function noticeText(n: Notice): string | null {
 
 export function stateText(s: SyncStatus | null): string {
   if (!s) return t("status.notConfigured");
+  if (s.reason === "rate_limited" && s.retryAt > Date.now()) {
+    return t("status.rateLimited", { time: new Date(s.retryAt).toLocaleTimeString() });
+  }
   return t(`status.${s.state}`);
 }

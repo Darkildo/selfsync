@@ -24,6 +24,7 @@ fn error_result(e: &SyncError) -> UiResult {
     let code = match e {
         SyncError::Network(_) => "offline",
         SyncError::Unauthorized => "unauthorized",
+        SyncError::RateLimited { .. } => "rate_limited",
         SyncError::Paused(r) | SyncError::Blocked(r) => r.as_str(),
         SyncError::Http { code, .. } | SyncError::Server { code, .. } => code.as_str(),
         _ => "error",
@@ -31,6 +32,10 @@ fn error_result(e: &SyncError) -> UiResult {
     UiResult::Error {
         code: code.to_owned(),
         message: e.to_string(),
+        retry_after: match e {
+            SyncError::RateLimited { retry_after_s } => *retry_after_s,
+            _ => 0,
+        },
     }
 }
 

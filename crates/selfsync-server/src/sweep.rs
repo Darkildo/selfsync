@@ -1,7 +1,7 @@
 //! Sweeper без постоянного процесса (раздел 5.4): стирает удалённые файлы с истёкшим
-//! окном хранения. Запускается systemd-таймером (`selfsync sweep`), а в режимах
-//! socket/serve — один раз в фоне после первого запроса, если прошлый проход был
-//! давно. В CGI не запускается никогда.
+//! окном хранения и старые счётчики лимитера. Запускается systemd-таймером
+//! (`selfsync sweep`), а в режимах socket/serve — один раз в фоне после первого
+//! запроса, если прошлый проход был давно. В CGI не запускается никогда.
 
 use std::time::Duration;
 
@@ -28,9 +28,21 @@ pub fn sweep_vault(config: &Config, name: &str, now: i64) -> anyhow::Result<Swee
     Ok(SweepReport { paths, blobs })
 }
 
+/// Счётчики лимитера старше суток (`server.db`). Возвращает число удалённых строк.
+pub fn sweep_throttle(config: &Config, now: i64) -> anyhow::Result<usize> {
+    let path = config.data_dir.join("server.db");
+    if !path.is_file() {
+        return Ok(0);
+    }
+    let mut c = crate::db::open(&path)?;
+    crate::db::server::migrate_server(&mut c)?;
+    Ok(crate::throttle::cleanup(&c, now)?)
+}
+
 /// Все vault'ы на диске.
 pub fn sweep_all(config: &Config) -> anyhow::Result<Vec<(String, SweepReport)>> {
     let now = now_ms();
+    sweep_throttle(config, now)?;
     let mut out = Vec::new();
     for name in list_vault_dirs(config) {
         let r = sweep_vault(config, &name, now)?;
@@ -62,6 +74,9 @@ pub fn spawn_after_first_request(st: &AppState) {
         tokio::time::sleep(Duration::from_millis(200)).await;
         let res = tokio::task::spawn_blocking(move || {
             let now = now_ms();
+            if let Err(e) = sweep_throttle(&config, now) {
+                tracing::warn!(error = %e, "уборка счётчиков лимитера не удалась");
+            }
             let mut done = Vec::new();
             for name in list_vault_dirs(&config) {
                 if due(&config, &name, now) {

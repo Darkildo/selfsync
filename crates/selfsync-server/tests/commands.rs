@@ -286,3 +286,59 @@ fn token_cli_roundtrip() {
     assert!(lt.contains("https://n.example/join/"));
     assert!(lt.contains('█'), "QR в терминале");
 }
+
+#[test]
+fn sweep_cleans_old_throttle_rows() {
+    let s = TestServer::new();
+    let now = selfsync_server::db::now_ms();
+    {
+        let pool = s.state.server_pool().unwrap();
+        let c = pool.get().unwrap();
+        c.execute(
+            "INSERT INTO throttle (key, window_start, failures, blocked_until) VALUES
+               ('redeem:old', ?1, 3, NULL),
+               ('redeem:blocked', ?1, 10, ?2),
+               ('redeem:fresh', ?3, 1, NULL)",
+            rusqlite::params![now - 2 * DAY_MS, now + 3_600_000, now],
+        )
+        .unwrap();
+    }
+    cmd::sweep(s.config()).unwrap();
+    let pool = s.state.server_pool().unwrap();
+    let c = pool.get().unwrap();
+    let mut st = c.prepare("SELECT key FROM throttle ORDER BY key").unwrap();
+    let keys: Vec<String> = st
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(keys, ["redeem:blocked", "redeem:fresh"]);
+}
+
+/// Добавка лимитера на горячем пути авторизации — один `SELECT` по ключу. Замер:
+/// `cargo test --release -p selfsync-server --test commands throttle_check_cost -- --ignored --nocapture`.
+#[test]
+#[ignore = "замер, не проверка"]
+fn throttle_check_cost() {
+    use selfsync_server::throttle;
+    let s = TestServer::new();
+    let pool = s.state.server_pool().unwrap();
+    let c = pool.get().unwrap();
+    let rate = s.config().rate;
+    // таблица с тысячей чужих адресов, наш — без записи и с записью
+    for i in 0..1000 {
+        let ip = format!("10.0.{}.{}", i / 256, i % 256).parse().ok();
+        throttle::fail_now(&c, &throttle::auth_keys(&rate, ip)).unwrap();
+    }
+    let n = 20_000;
+    for ip in ["192.0.2.1", "10.0.0.1"] {
+        let keys = throttle::auth_keys(&rate, ip.parse().ok());
+        let t = std::time::Instant::now();
+        for _ in 0..n {
+            throttle::check_now(&c, &keys).unwrap();
+        }
+        let per = t.elapsed() / n;
+        println!("check {ip}: {per:?} на запрос");
+        assert!(per < Duration::from_micros(100), "{per:?}");
+    }
+}

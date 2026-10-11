@@ -23,6 +23,7 @@ use selfsync_proto::{CONTENT_TYPE_PROTOBUF, HEADER_PROTO, PROTO_VERSION};
 
 use crate::error::{ApiError, ApiResult};
 use crate::state::{AppState, Vault};
+use crate::throttle;
 
 /// Устройство, от имени которого выполняется запрос.
 #[derive(Clone)]
@@ -123,11 +124,23 @@ async fn auth(State(st): State<AppState>, mut req: Request, next: Next) -> Respo
     if let Err(e) = check_proto(req.headers()) {
         return e.into_response();
     }
+    // Запрос без токена ничего не перебирает и в БД не ходит: не считается.
     let Some(token) = bearer(req.headers()) else {
         return ApiError::unauthorized().into_response();
     };
+    let ip = throttle::client_ip(&st.config, req.headers(), req.extensions());
+    let keys = throttle::auth_keys(&st.config.rate, ip);
     let found = st
-        .server_db(move |c| Ok(crate::db::server::authenticate(c, &token)?))
+        .server_db(move |c| {
+            if let Some(secs) = throttle::check_now(c, &keys)? {
+                return Err(ApiError::too_many(secs));
+            }
+            let dev = crate::db::server::authenticate(c, &token)?;
+            if dev.is_none() {
+                throttle::fail_now(c, &keys)?;
+            }
+            Ok(dev)
+        })
         .await;
     let dev = match found {
         Ok(Some(d)) => d,

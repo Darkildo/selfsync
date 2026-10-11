@@ -743,3 +743,49 @@ fn local_file_vanishing_mid_pull_does_not_drop_server_file() {
     );
     finish(&mut w);
 }
+
+#[test]
+fn rate_limited_client_waits_retry_after() {
+    let mut w = World::new(quiet(2));
+    let tok = base_note(&mut w, 0, "a.md");
+    // Лимитер сервера заблокировал общий ключ (в симуляции у запросов нет адреса).
+    let block = |w: &World, until: i64| {
+        let pool = w.state.server_pool().unwrap();
+        pool.get()
+            .unwrap()
+            .execute(
+                "INSERT OR REPLACE INTO throttle (key, window_start, failures, blocked_until)
+                 VALUES ('auth:*', 0, 30, ?1)",
+                [until],
+            )
+            .unwrap();
+    };
+    block(&w, selfsync_server::db::now_ms() + 120_000);
+    w.user_edit(1, "a.md");
+    w.sync(1);
+    let st = w.clients[1].status.clone().unwrap();
+    assert_eq!(st.reason.as_deref(), Some("rate_limited"));
+    let retry_at = st.retry_at;
+    let wait = retry_at - w.client_now(1);
+    assert!((119_000..=120_000).contains(&wait), "{wait}");
+    // ни «синхронизировать сейчас», ни таймеры не шлют запросов до конца ожидания
+    let before = w.clients[1].requests;
+    w.sync(1);
+    w.now += 60_000;
+    w.tick(1);
+    w.drain(1);
+    w.sync(1);
+    assert_eq!(w.clients[1].requests, before, "повтор раньше Retry-After");
+    assert!(w.clients[1].wake.is_some_and(|at| at >= retry_at));
+    // блокировка снята, время вышло — синк проходит сам
+    block(&w, 0);
+    w.now = retry_at;
+    w.tick(1);
+    w.drain(1);
+    let st = w.clients[1].status.clone().unwrap();
+    assert_eq!(st.reason, None, "{st:?}");
+    assert_eq!(st.retry_at, 0);
+    assert!(w.clients[1].requests > before);
+    finish(&mut w);
+    assert!(server_text(&w, "a.md").contains(&tok));
+}

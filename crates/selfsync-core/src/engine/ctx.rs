@@ -31,6 +31,8 @@ pub enum SyncError {
     },
     #[error("токен не принят")]
     Unauthorized,
+    #[error("слишком много неудачных попыток, повтор через {retry_after_s} с")]
+    RateLimited { retry_after_s: u64 },
     #[error("протокол не поддерживается сервером")]
     ProtoUnsupported(u32),
     #[error("ответ сервера не разбирается: {0}")]
@@ -82,6 +84,9 @@ pub(crate) struct State {
     pub wake_at: Option<i64>,
     /// `/v1/wait` отвечает мгновенно (CGI) — переключиться на опрос.
     pub wait_disabled: bool,
+    /// Сервер ответил 429: до этого момента ни синка, ни long-poll (иначе клиент
+    /// сам продлевает свою блокировку). «Синхронизировать сейчас» не отменяет.
+    pub rate_limited_until: Option<i64>,
 
     /// Синк остановлен до вмешательства пользователя (код причины).
     pub blocked: Option<String>,
@@ -127,6 +132,7 @@ impl State {
             last_activity: 0,
             wake_at: None,
             wait_disabled: false,
+            rate_limited_until: None,
             blocked: None,
             paused: None,
             server_state: None,
@@ -135,6 +141,15 @@ impl State {
             notified: BTreeSet::new(),
             hold_seq: None,
         }
+    }
+
+    /// Запомнить `Retry-After` из ответа 429.
+    pub fn rate_limit(&mut self, now: i64, retry_after_s: u64) {
+        let until = now.saturating_add(
+            i64::try_from(retry_after_s.saturating_mul(1000)).unwrap_or(i64::MAX / 2),
+        );
+        self.rate_limited_until = Some(self.rate_limited_until.map_or(until, |u| u.max(until)));
+        self.status.retry_at = until;
     }
 
     pub fn encrypted(&self) -> bool {

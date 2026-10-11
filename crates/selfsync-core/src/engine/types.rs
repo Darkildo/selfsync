@@ -416,6 +416,9 @@ pub struct SyncStatus {
     pub last_sync: i64,
     pub conflicts: u32,
     pub encrypted: bool,
+    /// Сервер ограничил попытки (`reason == "rate_limited"`): следующий запрос не
+    /// раньше этого момента, мс. `0` — ограничения нет.
+    pub retry_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -606,6 +609,9 @@ pub enum UiResult {
     Error {
         code: String,
         message: String,
+        /// Для `rate_limited`: через сколько секунд можно повторить.
+        #[serde(default)]
+        retry_after: u64,
     },
     Deleted {
         items: Vec<DeletedView>,

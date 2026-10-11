@@ -10,6 +10,8 @@ Type=notify
 ExecStart=/usr/local/bin/selfsync socket
 Environment=SELFSYNC_IDLE_TIMEOUT=10m
 #Environment=SELFSYNC_PUBLIC_URL=https://notes.example.com
+# За обратным прокси (deploy/nginx, deploy/caddy): адрес клиента из X-Forwarded-For.
+#Environment=SELFSYNC_TRUSTED_PROXY=1
 DynamicUser=yes
 # Одинаковое имя у основного сервиса и sweeper'а: один и тот же динамический UID.
 User=selfsync

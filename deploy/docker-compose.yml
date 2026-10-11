@@ -29,6 +29,8 @@ x-selfsync: &selfsync
     SELFSYNC_DATA_DIR: /data
     SELFSYNC_PUBLIC_URL: https://notes.example.com
     SELFSYNC_LOG: info
+    # За обратным прокси: адрес клиента из X-Forwarded-For (лимит неудачных попыток).
+    # SELFSYNC_TRUSTED_PROXY: "1"
   # Порт наружу не публикуется: доступ только из сети обратного прокси.
   networks: [proxy]
 

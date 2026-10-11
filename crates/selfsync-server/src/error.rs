@@ -12,6 +12,8 @@ pub struct ApiError {
     pub status: StatusCode,
     pub code: &'static str,
     pub message: String,
+    /// `Retry-After`, секунды (для 429).
+    pub retry_after: Option<u64>,
 }
 
 impl ApiError {
@@ -20,6 +22,7 @@ impl ApiError {
             status,
             code,
             message: message.into(),
+            retry_after: None,
         }
     }
 
@@ -45,6 +48,18 @@ impl ApiError {
 
     pub fn too_large(message: impl Into<String>) -> Self {
         Self::new(StatusCode::PAYLOAD_TOO_LARGE, "too_large", message)
+    }
+
+    /// Слишком много неудачных попыток: ждать `secs` секунд.
+    pub fn too_many(secs: u64) -> Self {
+        ApiError {
+            retry_after: Some(secs),
+            ..Self::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limited",
+                format!("слишком много неудачных попыток, повторите через {secs} с"),
+            )
+        }
     }
 
     /// Внутренняя ошибка: подробности — только в лог.
@@ -105,6 +120,10 @@ impl IntoResponse for ApiError {
             header::CONTENT_TYPE,
             HeaderValue::from_static(CONTENT_TYPE_PROTOBUF),
         );
+        if let Some(secs) = self.retry_after {
+            resp.headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from(secs));
+        }
         resp
     }
 }

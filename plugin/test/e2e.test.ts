@@ -126,6 +126,25 @@ describe("подключение", () => {
     await fresh.stop();
   });
 
+  test("лимит неверных кодов: 429 с временем ожидания", async () => {
+    // Свой сервер: блокировка адреса 127.0.0.1 не должна задеть соседние тесты.
+    const own = await TestServer.start();
+    try {
+      const fresh = await TestClient.create(own, { name: "guess" });
+      for (let i = 0; i < 10; i++) {
+        const r = await fresh.runner.command({ type: "redeem", code: "aaaaaaaaaaaaaaaa", name: "guess" });
+        assert.ok(r.type === "error" && r.code === "code_invalid", JSON.stringify(r));
+      }
+      const r = await fresh.runner.command({ type: "redeem", code: "aaaaaaaaaaaaaaaa", name: "guess" });
+      assert.ok(r.type === "error" && r.code === "rate_limited", JSON.stringify(r));
+      const wait = r.type === "error" ? (r.retryAfter ?? 0) : 0;
+      assert.ok(wait > 800 && wait <= 900, String(wait));
+      await fresh.stop();
+    } finally {
+      await own.stop();
+    }
+  });
+
   test("отозванный токен останавливает синк", async () => {
     const token = server.token("revoke", "gone");
     const c = await TestClient.create(server, { name: "gone", token });

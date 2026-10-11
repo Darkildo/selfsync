@@ -17,6 +17,7 @@ use tower::ServiceExt;
 
 use crate::api::router;
 use crate::state::AppState;
+use crate::throttle::PeerAddr;
 
 /// Включён ли CGI автоматически (fcgiwrap запускает бинарь без аргументов).
 pub fn detected() -> bool {
@@ -109,7 +110,15 @@ where
         // Ровно CONTENT_LENGTH байт, потоком: большие тела не читаются в память.
         Body::from_stream(ReaderStream::with_capacity(stdin.take(len), 64 * 1024))
     };
-    Ok(b.body(body)?)
+    let mut req = b.body(body)?;
+    // Адрес клиента для лимитера (`throttle::client_ip`).
+    if let Some(ip) = env
+        .get("REMOTE_ADDR")
+        .and_then(|a| a.trim().parse::<std::net::IpAddr>().ok())
+    {
+        req.extensions_mut().insert(PeerAddr(ip));
+    }
+    Ok(req)
 }
 
 /// Пишет ответ в CGI-формате: `Status:`, заголовки, пустая строка, тело потоком.
@@ -214,6 +223,7 @@ mod tests {
             ("HTTP_AUTHORIZATION", "Bearer ns_x"),
             ("HTTP_X_SELFSYNC_PROTO", "1"),
             ("HTTPS", "on"),
+            ("REMOTE_ADDR", "192.0.2.7"),
         ]);
         let stdin: &'static [u8] = b"helloEXTRA";
         let req = build_request(&e, stdin).unwrap();
@@ -222,6 +232,8 @@ mod tests {
         assert_eq!(req.headers()["authorization"], "Bearer ns_x");
         assert_eq!(req.headers()["x-selfsync-proto"], "1");
         assert_eq!(req.headers()["x-forwarded-proto"], "https");
+        let peer = req.extensions().get::<PeerAddr>().unwrap();
+        assert_eq!(peer.0.to_string(), "192.0.2.7");
         let body = axum::body::to_bytes(req.into_body(), 100).await.unwrap();
         assert_eq!(&body[..], b"hello");
     }

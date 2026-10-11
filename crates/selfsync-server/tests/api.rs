@@ -920,3 +920,207 @@ async fn unknown_route_is_404() {
         .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
 }
+
+/// Обмен кода с адресом соединения `peer` и, если задан, `X-Forwarded-For`.
+async fn redeem_from(s: &TestServer, code: &str, peer: &str, xff: Option<&str>) -> Resp {
+    let mut b = http::Request::post("/v1/join/redeem")
+        .header("x-selfsync-proto", "1")
+        .extension(selfsync_server::throttle::PeerAddr(peer.parse().unwrap()));
+    if let Some(x) = xff {
+        b = b.header("x-forwarded-for", x);
+    }
+    let body = pb::JoinRedeem {
+        code: code.into(),
+        name: "x".into(),
+    };
+    s.send(
+        b.body(axum::body::Body::from(body.encode_to_vec()))
+            .unwrap(),
+    )
+    .await
+}
+
+const WRONG_CODE: &str = "aaaaaaaaaaaaaaaa";
+
+#[tokio::test]
+async fn redeem_rate_limited() {
+    let s = TestServer::new();
+    let t = s.token("notes", "laptop");
+    let code: pb::JoinCode = s
+        .post("/v1/join", &t, &pb::JoinCreate { name: "x".into() })
+        .await
+        .proto();
+    for _ in 0..10 {
+        let r = redeem_from(&s, WRONG_CODE, "198.51.100.1", None).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND);
+    }
+    // 11-я попытка отвергается даже с верным кодом
+    let r = redeem_from(&s, &code.code, "198.51.100.1", None).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(r.error().code, "rate_limited");
+    let secs: u64 = r.headers["retry-after"].to_str().unwrap().parse().unwrap();
+    assert!((899..=900).contains(&secs), "{secs}");
+    // страница подключения с того же адреса — тоже 429
+    let page = s
+        .send(
+            http::Request::get(format!("/join/{}", code.code))
+                .header("accept-language", "ru")
+                .extension(selfsync_server::throttle::PeerAddr(
+                    "198.51.100.1".parse().unwrap(),
+                ))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(page.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(page.headers.contains_key("retry-after"));
+    assert!(String::from_utf8_lossy(&page.body).contains("Слишком много попыток"));
+    // другой адрес не затронут
+    let r = redeem_from(&s, WRONG_CODE, "198.51.100.2", None).await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    // блокировка истекла — верный код снова работает
+    {
+        let pool = s.state.server_pool().unwrap();
+        pool.get()
+            .unwrap()
+            .execute("UPDATE throttle SET blocked_until = 1", [])
+            .unwrap();
+    }
+    let r = redeem_from(&s, &code.code, "198.51.100.1", None).await;
+    let tok: pb::JoinToken = r.proto();
+    assert_eq!(tok.vault, "notes");
+}
+
+#[tokio::test]
+async fn redeem_global_limit_without_address() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = selfsync_server::Config::for_tests(dir.path().to_path_buf());
+    config.rate.redeem_global = 3;
+    let s = TestServer::with_config(dir, config, Mode::Serve);
+    // без адреса (Unix-сокет без прокси) считается только общий ключ
+    let send = || async {
+        s.send(
+            http::Request::post("/v1/join/redeem")
+                .header("x-selfsync-proto", "1")
+                .body(axum::body::Body::from(
+                    pb::JoinRedeem {
+                        code: WRONG_CODE.into(),
+                        name: String::new(),
+                    }
+                    .encode_to_vec(),
+                ))
+                .unwrap(),
+        )
+        .await
+    };
+    for _ in 0..3 {
+        assert_eq!(send().await.status, StatusCode::NOT_FOUND);
+    }
+    let r = send().await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(r.headers["retry-after"], "60");
+    // общий ключ действует и на клиентов с адресом
+    let r = redeem_from(&s, WRONG_CODE, "198.51.100.9", None).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn trusted_proxy_header() {
+    // без флага X-Forwarded-For не влияет на ключ: все попытки — с адреса прокси
+    let s = TestServer::new();
+    for i in 0..10 {
+        let xff = format!("203.0.113.{i}");
+        let r = redeem_from(&s, WRONG_CODE, "127.0.0.1", Some(&xff)).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND);
+    }
+    let r = redeem_from(&s, WRONG_CODE, "127.0.0.1", Some("203.0.113.99")).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+
+    // с флагом ключ — крайний правый адрес из заголовка
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = selfsync_server::Config::for_tests(dir.path().to_path_buf());
+    config.trusted_proxy = true;
+    let s = TestServer::with_config(dir, config, Mode::Serve);
+    for _ in 0..10 {
+        let r = redeem_from(&s, WRONG_CODE, "127.0.0.1", Some("10.9.9.9, 203.0.113.1")).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND);
+    }
+    let r = redeem_from(&s, WRONG_CODE, "127.0.0.1", Some("203.0.113.1")).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    // подделанный левый адрес не помогает, другой правый — другой клиент
+    let r = redeem_from(
+        &s,
+        WRONG_CODE,
+        "127.0.0.1",
+        Some("203.0.113.1, 203.0.113.2"),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn auth_rate_limited() {
+    let s = TestServer::new();
+    let good = s.token("notes", "laptop");
+    let get = |token: String, peer: &'static str| {
+        let s = &s;
+        async move {
+            s.send(
+                http::Request::get("/v1/changes")
+                    .header("x-selfsync-proto", "1")
+                    .header("authorization", format!("Bearer {token}"))
+                    .extension(selfsync_server::throttle::PeerAddr(peer.parse().unwrap()))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+        }
+    };
+    // запросы без токена не считаются
+    for _ in 0..50 {
+        let r = s
+            .send(
+                http::Request::get("/v1/changes")
+                    .header("x-selfsync-proto", "1")
+                    .extension(selfsync_server::throttle::PeerAddr(
+                        "198.51.100.5".parse().unwrap(),
+                    ))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(
+        get(good.clone(), "198.51.100.5").await.status,
+        StatusCode::OK
+    );
+    for _ in 0..30 {
+        let r = get("ns_wrong".into(), "198.51.100.5").await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    }
+    let r = get(good.clone(), "198.51.100.5").await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(r.headers["retry-after"], "60");
+    assert_eq!(get(good, "198.51.100.6").await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn rate_limits_can_be_disabled() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = selfsync_server::Config::for_tests(dir.path().to_path_buf());
+    config.rate.redeem.attempts = 0;
+    config.rate.redeem_global = 0;
+    let s = TestServer::with_config(dir, config, Mode::Serve);
+    for _ in 0..30 {
+        let r = redeem_from(&s, WRONG_CODE, "198.51.100.1", None).await;
+        assert_eq!(r.status, StatusCode::NOT_FOUND);
+    }
+    let pool = s.state.server_pool().unwrap();
+    let n: i64 = pool
+        .get()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM throttle", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0);
+}

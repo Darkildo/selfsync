@@ -529,3 +529,108 @@ fn serve_unix_socket_and_healthcheck() {
         .unwrap();
     assert!(!bad.success());
 }
+
+fn redeem_body(code: &str) -> Vec<u8> {
+    pb::JoinRedeem {
+        code: code.into(),
+        name: "x".into(),
+    }
+    .encode_to_vec()
+}
+
+#[test]
+fn cgi_throttle_persists_between_processes() {
+    let data = tempfile::tempdir().unwrap();
+    let addr = [("REMOTE_ADDR", "198.51.100.1")];
+    let body = redeem_body("aaaaaaaaaaaaaaaa");
+    // каждый вызов — отдельный процесс; счётчик живёт в server.db
+    for _ in 0..10 {
+        let r = cgi(
+            data.path(),
+            "POST",
+            "/v1/join/redeem",
+            "",
+            None,
+            &body,
+            &addr,
+        );
+        assert_eq!(r.status, 404);
+    }
+    let r = cgi(
+        data.path(),
+        "POST",
+        "/v1/join/redeem",
+        "",
+        None,
+        &body,
+        &addr,
+    );
+    assert_eq!(r.status, 429);
+    assert!(r.header("retry-after").is_some());
+    assert_eq!(pb::Error::decode(&r.body[..]).unwrap().code, "rate_limited");
+    // другой REMOTE_ADDR — другой счётчик
+    let r = cgi(
+        data.path(),
+        "POST",
+        "/v1/join/redeem",
+        "",
+        None,
+        &body,
+        &[("REMOTE_ADDR", "198.51.100.2")],
+    );
+    assert_eq!(r.status, 404);
+}
+
+#[test]
+fn serve_tcp_keys_by_connection_address() {
+    let data = tempfile::tempdir().unwrap();
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let listen = format!("127.0.0.1:{port}");
+    let mut child = Command::new(BIN)
+        .args(["serve", "--listen", &listen, "--data"])
+        .arg(data.path())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let addr: std::net::SocketAddr = listen.parse().unwrap();
+    let start = Instant::now();
+    while TcpStream::connect(addr).is_err() {
+        assert!(start.elapsed() < Duration::from_secs(5));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let (st, _) = http_get(addr, "/v1/changes", Some("ns_wrong"));
+    assert_eq!(st, 401);
+    child.kill().unwrap();
+    let _ = child.wait();
+    let c = rusqlite::Connection::open(data.path().join("server.db")).unwrap();
+    let key: String = c
+        .query_row("SELECT key FROM throttle", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(key, "auth:127.0.0.1");
+}
+
+#[test]
+fn bad_rate_config_fails_to_start() {
+    let data = tempfile::tempdir().unwrap();
+    let out = Command::new(BIN)
+        .args(["serve", "--listen", "127.0.0.1:0", "--data"])
+        .arg(data.path())
+        .env("SELFSYNC_RATE_REDEEM_WINDOW", "0")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("SELFSYNC_RATE_REDEEM_WINDOW"), "{err}");
+    let out = Command::new(BIN)
+        .args(["serve", "--listen", "127.0.0.1:0", "--data"])
+        .arg(data.path())
+        .env("SELFSYNC_RATE_AUTH_ATTEMPTS", "many")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("SELFSYNC_RATE_AUTH_ATTEMPTS"));
+}
