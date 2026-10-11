@@ -280,16 +280,16 @@ async fn apply_folder(cx: &Ctx, it: &Item) -> SyncResult<bool> {
     let existing = cx.with(|s| s.index.files.get(&it.key).map(|f| f.folder));
     match existing {
         Some(true) => {
-            cx.with_mut(|s| {
-                if let Some(f) = s.index.files.get_mut(&it.key) {
-                    f.base_rev = it.r.rev;
-                    if f.local.is_none() {
-                        // Папку удалили локально, а на сервере её снова создали — вернуть.
-                        f.local = Some(dir_obs());
-                    }
-                }
+            let restored = cx.with_mut(|s| {
+                let f = s.index.files.get_mut(&it.key)?;
+                f.base_rev = it.r.rev;
+                // Папку удалили локально, а на сервере её снова создали — вернуть.
+                f.local.is_none().then(|| f.local = Some(dir_obs()))
             });
             cx.mkdir(&it.key).await?;
+            if restored.is_some() {
+                cx.touched(&it.key);
+            }
             Ok(false)
         }
         Some(false) => {
@@ -301,6 +301,7 @@ async fn apply_folder(cx: &Ctx, it: &Item) -> SyncResult<bool> {
         }
         None => {
             cx.mkdir(&it.key).await?;
+            cx.touched(&it.key);
             cx.with_mut(|s| {
                 s.index.files.insert(
                     it.key.clone(),

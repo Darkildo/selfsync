@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 selfsync-core.workspace = true
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["process"] }
 reqwest.workspace = true
 rustls.workspace = true
 notify.workspace = true
@@ -24,6 +24,7 @@ toml = { version = "0.9", default-features = false, features = ["std", "parse", 
 tracing.workspace = true
 tracing-subscriber.workspace = true
 libc.workspace = true
+humantime.workspace = true
 
 [dev-dependencies]
 selfsync-server.workspace = true

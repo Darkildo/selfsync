@@ -859,3 +859,73 @@ fn read_only_client_receives_but_does_not_send() {
 fn read_only_client_against_old_server_learns_from_403() {
     read_only_scenario(true);
 }
+
+/// Последнее `Synced` клиента с начала отсчёта: (pulled, pushed, paths).
+fn synced_since(w: &World, c: usize, from: usize) -> Vec<(u32, u32, Vec<String>)> {
+    w.clients[c].notices[from..]
+        .iter()
+        .filter_map(|n| match n {
+            Notice::Synced {
+                pulled,
+                pushed,
+                paths,
+            } => Some((*pulled, *pushed, paths.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn synced_notice_lists_cycle_changes() {
+    let mut w = World::new(quiet(2));
+    w.sync(0);
+    w.sync(1);
+    // пустой цикл — без уведомления
+    let n0 = w.clients[0].notices.len();
+    w.sync(0);
+    assert!(synced_since(&w, 0, n0).is_empty());
+    base_note(&mut w, 0, "a.md");
+    base_note(&mut w, 0, "dir/b.md");
+    w.sync(0);
+    let s = synced_since(&w, 0, n0);
+    assert_eq!(s.len(), 1, "{s:?}");
+    assert_eq!(s[0].1, 3, "{s:?}"); // папка dir и два файла
+    assert_eq!(s[0].0, 0, "{s:?}");
+    assert!(s[0].2.contains(&"dir/b.md".to_owned()));
+    let n1 = w.clients[1].notices.len();
+    w.sync(1);
+    let s = synced_since(&w, 1, n1);
+    assert_eq!(s.len(), 1, "{s:?}");
+    assert_eq!((s[0].1, s[0].2.contains(&"a.md".to_owned())), (0, true));
+    // удаление и переименование тоже попадают в список
+    w.user_delete(0, "a.md");
+    w.user_rename(0, "dir/b.md", "dir/c.md");
+    w.sync(0);
+    let n1 = w.clients[1].notices.len();
+    w.sync(1);
+    let s = synced_since(&w, 1, n1);
+    let paths: Vec<String> = s.iter().flat_map(|x| x.2.clone()).collect();
+    for p in ["a.md", "dir/b.md", "dir/c.md"] {
+        assert!(paths.contains(&p.to_owned()), "{p}: {paths:?}");
+    }
+    // зашифрованный vault: пути открытые
+    w.encrypted_password = Some(PASSWORD.to_owned());
+    w.deliver(
+        0,
+        Event::EnableEncryption {
+            password: PASSWORD.into(),
+            remember: true,
+        },
+    );
+    w.drain(0);
+    finish(&mut w);
+    base_note(&mut w, 0, "secret/d.md");
+    w.sync(0);
+    let n1 = w.clients[1].notices.len();
+    w.sync(1);
+    let s = synced_since(&w, 1, n1);
+    assert!(
+        s.iter().any(|x| x.2.contains(&"secret/d.md".to_owned())),
+        "{s:?}"
+    );
+}

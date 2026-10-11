@@ -348,6 +348,9 @@ export function noticeText(n: Notice): string | null {
       return t("notice.caseCollision", { path: n.path, existing: n.existing });
     case "tooLarge":
       return t("notice.tooLarge", { path: n.path, size: formatBytes(n.size) });
+    case "synced":
+      // Пока только в журнал (см. showNotice).
+      return null;
     case "readOnly":
       return t("notice.readOnly", { n: n.pending });
     case "unsupportedName":

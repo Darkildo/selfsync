@@ -67,6 +67,7 @@ fn once(password: Option<&str>) -> Options {
         password: password.map(str::to_owned),
         remember_key: true,
         enable_encryption: false,
+        hook: None,
     }
 }
 
@@ -160,6 +161,7 @@ async fn encrypt_then_password_on_other_device() {
 
     let enable = Options {
         enable_encryption: true,
+        hook: None,
         ..once(Some(PW))
     };
     assert_eq!(
@@ -287,4 +289,134 @@ async fn read_only_folder_receives_and_keeps_local_edits() {
         matches!(&r, UiResult::Error { code, .. } if code == "read_only"),
         "{r:?}"
     );
+}
+
+fn with_hook(command: String, timeout: Duration) -> Options {
+    Options {
+        hook: Some(selfsync_cli::hook::HookConfig { command, timeout }),
+        ..once(None)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn exec_runs_after_changes_with_env() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "hook", "a");
+    let (b, cb) = folder(&srv, "hook", "b");
+    let out = tempfile::tempdir().unwrap();
+    let marker = out.path().join("marker");
+    let cmd = format!(
+        "printf '%s %s %s\\n' \"$SELFSYNC_PULLED\" \"$SELFSYNC_PUSHED\" \"$(pwd)\" > '{m}'; \
+         cat \"$SELFSYNC_CHANGES_FILE\" >> '{m}'; test \"$SELFSYNC_DIR\" = \"$(pwd)\"",
+        m = marker.display()
+    );
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    std::fs::create_dir_all(a.path().join("dir")).unwrap();
+    std::fs::write(a.path().join("dir/n.md"), "x\n").unwrap();
+    std::fs::write(a.path().join("top.md"), "y\n").unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    let r = runner::run(
+        b.path(),
+        &cb,
+        with_hook(cmd.clone(), Duration::from_secs(30)),
+    )
+    .await
+    .unwrap();
+    assert_eq!(r, Outcome::Synced);
+    let text = std::fs::read_to_string(&marker).unwrap();
+    let mut lines = text.lines();
+    let head = lines.next().unwrap();
+    let canon = b.path().canonicalize().unwrap();
+    assert_eq!(head, format!("3 0 {}", canon.display()), "{text}");
+    let paths: Vec<&str> = lines.collect();
+    assert_eq!(paths, ["dir", "dir/n.md", "top.md"]);
+    // пустой цикл — хук не запускается
+    std::fs::remove_file(&marker).unwrap();
+    let r = runner::run(
+        b.path(),
+        &cb,
+        with_hook(cmd.clone(), Duration::from_secs(30)),
+    )
+    .await
+    .unwrap();
+    assert_eq!(r, Outcome::Synced);
+    assert!(!marker.exists());
+    // своя отправка — тоже повод
+    std::fs::write(b.path().join("from-b.md"), "z\n").unwrap();
+    runner::run(b.path(), &cb, with_hook(cmd, Duration::from_secs(30)))
+        .await
+        .unwrap();
+    let text = std::fs::read_to_string(&marker).unwrap();
+    assert!(text.starts_with("0 1 "), "{text}");
+    assert!(text.lines().any(|l| l == "from-b.md"), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn exec_failure_and_timeout_do_not_stop_sync() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "hookfail", "a");
+    let out = tempfile::tempdir().unwrap();
+    let marker = out.path().join("late");
+    std::fs::write(a.path().join("one.md"), "1\n").unwrap();
+    let r = runner::run(
+        a.path(),
+        &ca,
+        with_hook("exit 3".into(), Duration::from_secs(30)),
+    )
+    .await
+    .unwrap();
+    assert_eq!(r, Outcome::Synced, "код хука на исход не влияет");
+    // таймаут: хук и его дочерние процессы убиты, синк завершён
+    std::fs::write(a.path().join("two.md"), "2\n").unwrap();
+    let cmd = format!("(sleep 3; touch '{}') & wait", marker.display());
+    let t = std::time::Instant::now();
+    let r = runner::run(a.path(), &ca, with_hook(cmd, Duration::from_millis(300)))
+        .await
+        .unwrap();
+    assert_eq!(r, Outcome::Synced);
+    assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    assert!(!marker.exists(), "дочерний процесс хука тоже остановлен");
+}
+
+#[tokio::test]
+async fn exec_runs_coalesce_while_hook_is_busy() {
+    use selfsync_cli::hook::{Batch, Hook, HookConfig};
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".selfsync")).unwrap();
+    let log = dir.path().join("runs.log");
+    let cmd = format!(
+        "sleep 0.5; echo \"$SELFSYNC_PULLED $(tr '\\n' ' ' < \"$SELFSYNC_CHANGES_FILE\")\" >> '{}'",
+        log.display()
+    );
+    let hook = Hook::start(
+        dir.path(),
+        HookConfig {
+            command: cmd,
+            timeout: Duration::from_secs(10),
+        },
+    );
+    let batch = |n: u64, p: &str| Batch {
+        pulled: n,
+        pushed: 0,
+        paths: [p.to_owned()].into(),
+    };
+    hook.send(batch(1, "a.md"));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    // два цикла, пока первый хук работает, — один повторный запуск
+    hook.send(batch(2, "b.md"));
+    hook.send(batch(3, "c.md"));
+    hook.finish().await;
+    let runs = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(runs, "1 a.md \n5 b.md c.md \n", "{runs}");
+}
+
+#[test]
+fn git_excluded_by_default_for_new_configs() {
+    let cfg = Config::default();
+    let ex = selfsync_core::exclude::Excludes::new(&cfg.excludes);
+    assert!(ex.is_excluded(".git/HEAD"));
+    // старый конфиг с явным списком остаётся как был
+    let old: Config = toml::from_str("excludes = [\".obsidian/workspace*.json\"]").unwrap();
+    assert!(!selfsync_core::exclude::Excludes::new(&old.excludes).is_excluded(".git/HEAD"));
 }

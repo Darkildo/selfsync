@@ -26,6 +26,12 @@ pub struct Config {
     pub debounce_ms: u64,
     pub poll_active_ms: u64,
     pub poll_idle_max_ms: u64,
+    /// Команда после каждого цикла, который что-то изменил (как `run --exec`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exec: Option<String>,
+    /// Таймаут хука (`humantime`, по умолчанию 10m).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exec_timeout: Option<String>,
 }
 
 impl Default for Config {
@@ -35,11 +41,15 @@ impl Default for Config {
             token: String::new(),
             vault: String::new(),
             device_name: hostname(),
-            excludes: vec![".obsidian/workspace*.json".into()],
+            // `.git/` — для папок, которые хук коммитит в git: репозиторий не должен
+            // уезжать на телефоны. Старые конфиги с явным списком не меняются.
+            excludes: vec![".obsidian/workspace*.json".into(), ".git/".into()],
             use_wait: false,
             debounce_ms: 2500,
             poll_active_ms: 15_000,
             poll_idle_max_ms: 300_000,
+            exec: None,
+            exec_timeout: None,
         }
     }
 }

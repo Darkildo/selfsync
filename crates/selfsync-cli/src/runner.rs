@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 
 use crate::config::{Config, STATE_DIR, write_private};
 use crate::exec::Exec;
+use crate::hook::{Batch, Hook, HookConfig};
 
 pub struct Options {
     /// Один цикл синка и выход (cron, скрипты, тесты).
@@ -29,6 +30,8 @@ pub struct Options {
     pub remember_key: bool,
     /// Включить шифрование vault'а паролем `password` (после первой синхронизации).
     pub enable_encryption: bool,
+    /// Команда после каждого цикла, который что-то изменил (`run --exec`).
+    pub hook: Option<HookConfig>,
 }
 
 /// Чем закончился запуск.
@@ -69,6 +72,7 @@ struct Loop {
     status: SyncStatus,
     ui: HashMap<u64, UiResult>,
     key_path: PathBuf,
+    hook: Option<Hook>,
 }
 
 impl Loop {
@@ -88,6 +92,7 @@ impl Loop {
             status: SyncStatus::default(),
             ui: HashMap::new(),
             key_path,
+            hook: None,
         }
     }
 
@@ -124,7 +129,24 @@ impl Loop {
                 }
                 self.status = status;
             }
-            Action::Notify { notice } => notify_user(&notice),
+            Action::Notify { notice } => {
+                if let (
+                    Some(h),
+                    Notice::Synced {
+                        pulled,
+                        pushed,
+                        paths,
+                    },
+                ) = (&self.hook, &notice)
+                {
+                    h.send(Batch {
+                        pulled: u64::from(*pulled),
+                        pushed: u64::from(*pushed),
+                        paths: paths.iter().cloned().collect(),
+                    });
+                }
+                notify_user(&notice);
+            }
             Action::Log { level, message } => match level {
                 LogLevel::Debug => tracing::debug!("{message}"),
                 LogLevel::Info => tracing::info!("{message}"),
@@ -171,6 +193,9 @@ pub const READ_ONLY_MARKER: &str = "read-only";
 
 fn notify_user(n: &Notice) {
     match n {
+        Notice::Synced { pulled, pushed, .. } => {
+            tracing::info!("синк: пришло {pulled}, отправлено {pushed}")
+        }
         Notice::ReadOnly { pending } => tracing::warn!(
             "устройство только для чтения: локальные правки ({pending}) на сервер не отправляются"
         ),
@@ -234,8 +259,24 @@ fn watch(
     Ok(w)
 }
 
-/// Синхронизация папки: до Ctrl-C или (с `once`) до конца одного цикла.
+/// Синхронизация папки: до Ctrl-C или (с `once`) до конца одного цикла. С `once`
+/// хук, если задан, успевает выполниться до выхода; его код на исход не влияет.
 pub async fn run(dir: &Path, cfg: &Config, opts: Options) -> anyhow::Result<Outcome> {
+    let once = opts.once;
+    let hook = opts.hook.clone().map(|h| Hook::start(dir, h));
+    let (outcome, hook) = run_loop(dir, cfg, opts, hook).await?;
+    if once && let Some(h) = hook {
+        h.finish().await;
+    }
+    Ok(outcome)
+}
+
+async fn run_loop(
+    dir: &Path,
+    cfg: &Config,
+    opts: Options,
+    hook: Option<Hook>,
+) -> anyhow::Result<(Outcome, Option<Hook>)> {
     let exec = Arc::new(Exec::new(dir, &cfg.server, Some(cfg.token.clone()))?);
     let index = std::fs::read(exec.index_path()).ok();
     let key = std::fs::read(exec.key_path()).ok();
@@ -246,6 +287,7 @@ pub async fn run(dir: &Path, cfg: &Config, opts: Options) -> anyhow::Result<Outc
         Arc::clone(&exec),
         tx.clone(),
     );
+    lp.hook = hook;
     let _watcher = if opts.watch && !opts.once {
         Some(watch(dir, tx.clone())?)
     } else {
@@ -268,7 +310,7 @@ pub async fn run(dir: &Path, cfg: &Config, opts: Options) -> anyhow::Result<Outc
         tokio::select! {
             ev = rx.recv() => match ev {
                 Some(ev) => lp.feed(ev),
-                None => return Ok(Outcome::Interrupted),
+                None => return Ok((Outcome::Interrupted, lp.hook.take())),
             },
             () = tokio::time::sleep(lp.sleep()) => {
                 lp.wake = None;
@@ -276,7 +318,7 @@ pub async fn run(dir: &Path, cfg: &Config, opts: Options) -> anyhow::Result<Outc
             }
             _ = tokio::signal::ctrl_c() => {
                 // Дать дописать начатое: индекс сохраняется после каждого файла.
-                return Ok(Outcome::Interrupted);
+                return Ok((Outcome::Interrupted, lp.hook.take()));
             }
         }
         if lp.status.state == SyncState::NeedPassword && !password_sent {
@@ -289,7 +331,7 @@ pub async fn run(dir: &Path, cfg: &Config, opts: Options) -> anyhow::Result<Outc
                     });
                     lp.feed(Event::SyncNow);
                 }
-                None if opts.once => return Ok(Outcome::NeedPassword),
+                None if opts.once => return Ok((Outcome::NeedPassword, lp.hook.take())),
                 None => {}
             }
         }
@@ -304,15 +346,20 @@ pub async fn run(dir: &Path, cfg: &Config, opts: Options) -> anyhow::Result<Outc
                             s.pending
                         );
                     }
-                    return Ok(Outcome::Synced);
+                    return Ok((Outcome::Synced, lp.hook.take()));
                 }
                 SyncState::Offline | SyncState::Error => {
-                    return Ok(Outcome::Failed(reason_text(s)));
+                    return Ok((Outcome::Failed(reason_text(s)), lp.hook.take()));
                 }
                 SyncState::Blocked => {
-                    return Ok(Outcome::Blocked(s.reason.clone().unwrap_or_default()));
+                    return Ok((
+                        Outcome::Blocked(s.reason.clone().unwrap_or_default()),
+                        lp.hook.take(),
+                    ));
                 }
-                SyncState::NeedPassword if password_sent => return Ok(Outcome::NeedPassword),
+                SyncState::NeedPassword if password_sent => {
+                    return Ok((Outcome::NeedPassword, lp.hook.take()));
+                }
                 _ => {}
             }
         }

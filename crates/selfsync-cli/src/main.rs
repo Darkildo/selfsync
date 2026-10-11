@@ -58,6 +58,14 @@ enum Cmd {
         /// Не запоминать ключ в .selfsync/key.
         #[arg(long)]
         no_remember: bool,
+        /// Команда оболочки после каждого цикла, который что-то изменил (в папке, с
+        /// SELFSYNC_DIR, SELFSYNC_PULLED, SELFSYNC_PUSHED, SELFSYNC_CHANGES_FILE).
+        /// По умолчанию — `exec` из .selfsync/config.toml.
+        #[arg(long)]
+        exec: Option<String>,
+        /// Хук дольше этого останавливается (по умолчанию 10m).
+        #[arg(long)]
+        exec_timeout: Option<String>,
     },
     /// Включить сквозное шифрование vault'а (пароль понадобится всем устройствам).
     Encrypt {
@@ -173,14 +181,28 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             once,
             password_file,
             no_remember,
+            exec,
+            exec_timeout,
         } => {
             let cfg = Config::load(&dir)?;
+            let hook = match exec.or_else(|| cfg.exec.clone()) {
+                Some(command) if !command.trim().is_empty() => {
+                    let timeout = match exec_timeout.or_else(|| cfg.exec_timeout.clone()) {
+                        Some(t) => humantime::parse_duration(t.trim())
+                            .with_context(|| format!("неверный таймаут хука: {t}"))?,
+                        None => selfsync_cli::hook::DEFAULT_TIMEOUT,
+                    };
+                    Some(selfsync_cli::hook::HookConfig { command, timeout })
+                }
+                _ => None,
+            };
             let opts = Options {
                 once,
                 watch: true,
                 password: read_password(password_file)?,
                 remember_key: !no_remember,
                 enable_encryption: false,
+                hook,
             };
             return Ok(outcome(runner::run(&dir, &cfg, opts).await?));
         }
@@ -194,6 +216,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 password: Some(password),
                 remember_key: true,
                 enable_encryption: true,
+                hook: None,
             };
             let code = outcome(runner::run(&dir, &cfg, opts).await?);
             if code == ExitCode::SUCCESS {
@@ -213,6 +236,15 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 }
             );
             println!("устройство: {}", cfg.device_name);
+            if dir.join(".git").exists()
+                && !selfsync_core::exclude::Excludes::new(&cfg.excludes).is_excluded(".git/HEAD")
+            {
+                println!(
+                    "внимание:   .git не исключён — репозиторий уйдёт на все устройства; \
+                     добавьте \".git/\" в excludes в {}",
+                    Config::path(&dir).display()
+                );
+            }
             match std::fs::read(dir.join(STATE_DIR).join("index.bin"))
                 .ok()
                 .map(|b| Index::decode(&b))

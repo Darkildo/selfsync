@@ -32,6 +32,10 @@ describe("синк между двумя устройствами", () => {
     await b.sync();
     assert.equal(await b.read("notes/one.md"), "# one\nfirst\n");
 
+    // Ядро сообщает, что изменил цикл (уведомление synced).
+    const synced = b.notices.filter((n) => n.kind === "synced");
+    assert.ok(synced.some((n) => n.kind === "synced" && n.pulled > 0 && n.paths.includes("notes/one.md")), JSON.stringify(synced));
+
     await b.write("notes/one.md", "# one\nfirst\nfrom b\n");
     await b.sync();
     await a.sync();

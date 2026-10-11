@@ -66,6 +66,7 @@ export type Notice =
   | { kind: "rejected"; path: string; code: string }
   | { kind: "caseCollision"; path: string; existing: string }
   | { kind: "tooLarge"; path: string; size: number }
+  | { kind: "synced"; pulled: number; pushed: number; paths: string[] }
   | { kind: "readOnly"; pending: number }
   | { kind: "unsupportedName"; path: string }
   | { kind: "nonPortableName"; path: string }

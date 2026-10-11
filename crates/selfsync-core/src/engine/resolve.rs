@@ -560,6 +560,7 @@ pub(crate) async fn resolve_delete(cx: &Ctx, key: &str, r: Remote) -> SyncResult
     }
     if r.folder {
         cx.mkdir(key).await?;
+        cx.touched(key);
         cx.with_mut(|s| {
             if let Some(f) = s.index.files.get_mut(key) {
                 f.base_rev = r.rev;

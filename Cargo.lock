@@ -1991,6 +1991,7 @@ version = "0.1.3"
 dependencies = [
  "anyhow",
  "clap",
+ "humantime",
  "libc",
  "notify",
  "reqwest",

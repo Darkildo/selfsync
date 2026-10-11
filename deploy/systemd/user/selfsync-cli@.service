@@ -7,6 +7,16 @@
 # Для папки с «/» в пути имя экземпляра экранируйте: systemd-escape --path.
 # Зашифрованный vault: один раз `selfsync-cli run --once --password-file …` —
 # ключ запомнится в .selfsync/key, и служба будет стартовать без пароля.
+#
+# Хук после каждого синка, который что-то изменил, — например, коммит в git
+# (`systemctl --user edit selfsync-cli@notes`):
+#   [Service]
+#   Environment=GIT_AUTHOR_NAME=selfsync GIT_AUTHOR_EMAIL=selfsync@localhost
+#   Environment=GIT_COMMITTER_NAME=selfsync GIT_COMMITTER_EMAIL=selfsync@localhost
+#   ExecStart=
+#   ExecStart=%h/.local/bin/selfsync-cli run --dir %h/%I --exec 'git add -A && git commit -qm "selfsync: $SELFSYNC_PULLED in, $SELFSYNC_PUSHED out" || true'
+# Хук запускается в папке; список изменённых путей — в $SELFSYNC_CHANGES_FILE.
+# .git/ исключён из синка по умолчанию в конфигах, созданных клиентом с поддержкой --exec.
 
 [Unit]
 Description=selfsync: синхронизация папки %h/%I

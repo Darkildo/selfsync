@@ -253,6 +253,12 @@ export default class SelfsyncPlugin extends Plugin {
   }
 
   private showNotice(n: EngineNotice): void {
+    if (n.kind === "synced") {
+      // Список путей может быть длинным: в журнал — сводка и начало списка.
+      const more = n.paths.length > 5 ? ` …+${n.paths.length - 5}` : "";
+      this.addLog("info", `synced: pulled ${n.pulled}, pushed ${n.pushed}: ${n.paths.slice(0, 5).join(", ")}${more}`);
+      return;
+    }
     this.addLog("info", `notice ${JSON.stringify(n)}`);
     const text = noticeText(n);
     if (!text) return;

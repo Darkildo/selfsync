@@ -225,6 +225,16 @@ selfsync-cli status --dir ~/notes
 
 The client keeps its state in `<folder>/.selfsync/` (token and key with mode 0600) and puts deleted files into `<folder>/.trash/`. To run it as a service: [deploy/systemd/user/selfsync-cli@.service](deploy/systemd/user/selfsync-cli@.service), `systemctl --user enable --now selfsync-cli@notes`.
 
+**A command after each sync.** `run --exec CMD` (or `exec = "..."` in `.selfsync/config.toml`) runs `sh -c CMD` in the folder after every cycle that changed something — commit to git, rebuild a Quartz or Hugo site, take a backup:
+
+```sh
+cd ~/notes && git init
+selfsync-cli run --dir ~/notes --exec 'git add -A && git commit -qm "selfsync: $SELFSYNC_PULLED in, $SELFSYNC_PUSHED out" || true'
+selfsync-cli run --dir ~/site --exec 'npx quartz build' --exec-timeout 30m
+```
+
+The hook gets `SELFSYNC_DIR`, `SELFSYNC_PULLED` (paths changed here by the sync), `SELFSYNC_PUSHED` (paths sent) and `SELFSYNC_CHANGES_FILE`: a file with all those paths, one per line (decrypted for an encrypted vault). Hooks never overlap: cycles that finish while one is running are merged into a single next run. A non-zero exit code or a timeout (`--exec-timeout`, 10 minutes by default; the whole process group is killed) is logged and does not stop syncing. With `--once`, the hook finishes before the client exits, and the exit code does not depend on it. `.git/` is excluded by default in configs created by this version; for an older config `status` warns if the folder has a `.git` that would be synced.
+
 ## Encryption
 
 Turn on encryption from the plugin settings or with `selfsync-cli encrypt` on a vault that is already in use. Existing files are re-uploaded encrypted, then the plaintext copies on the server are erased. The server sees only ciphertext of contents and names, sizes and modification times. The password cannot be recovered: without it the server copy is unreadable (local files on your devices stay). The threat model and what encryption does not hide are in [SECURITY.md](SECURITY.md) (in Russian).

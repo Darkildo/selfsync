@@ -410,14 +410,21 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
     match (p.item, r) {
         (Item::Mkdir { key }, R::Applied(a)) => {
             cx.with_mut(|s| {
+                if !a.noop {
+                    s.pushed.insert(key.clone());
+                }
                 if let Some(f) = s.index.files.get_mut(&key) {
                     f.base_rev = a.rev;
                     f.pending_put = None;
                 }
             });
         }
-        (Item::Rename { key, .. }, R::Applied(a)) => {
+        (Item::Rename { key, from }, R::Applied(a)) => {
             cx.with_mut(|s| {
+                if !a.noop {
+                    s.pushed.insert(from);
+                    s.pushed.insert(key.clone());
+                }
                 if let Some(f) = s.index.files.get_mut(&key) {
                     f.server_path = None;
                     // Содержимое источника неизвестно (его меняли): сверить через Put.
@@ -437,6 +444,9 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
                 return Ok(());
             };
             cx.with_mut(|s| {
+                if !a.noop {
+                    s.pushed.insert(key.clone());
+                }
                 if let Some(f) = s.index.files.get_mut(&key) {
                     f.base_rev = a.rev;
                     f.base_blob = Some(h);
@@ -450,8 +460,11 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
                 cx.cache_put(obs.plain, c).await;
             }
         }
-        (Item::Delete { key }, R::Applied(_)) => {
+        (Item::Delete { key }, R::Applied(a)) => {
             cx.with_mut(|s| {
+                if !a.noop {
+                    s.pushed.insert(key.clone());
+                }
                 if s.index.files.get(&key).is_some_and(|f| f.local.is_none()) {
                     s.index.files.remove(&key);
                 }

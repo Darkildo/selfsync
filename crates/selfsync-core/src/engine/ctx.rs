@@ -97,6 +97,10 @@ pub(crate) struct State {
     pub read_only_forced: bool,
     /// Уведомление `ReadOnly` уже показано в этой сессии.
     pub read_only_notified: bool,
+    /// Что изменил текущий цикл: локальные пути, тронутые синком, и отправленные.
+    /// В конце цикла — `Notice::Synced`.
+    pub pulled: BTreeSet<String>,
+    pub pushed: BTreeSet<String>,
 
     /// Синк остановлен до вмешательства пользователя (код причины).
     pub blocked: Option<String>,
@@ -146,6 +150,8 @@ impl State {
             read_only: false,
             read_only_forced: false,
             read_only_notified: false,
+            pulled: BTreeSet::new(),
+            pushed: BTreeSet::new(),
             blocked: None,
             paused: None,
             server_state: None,
@@ -350,7 +356,28 @@ impl Ctx {
     }
 
     /// Атомарная запись. `Ok(None)` — условие не выполнено (файл изменился).
+    /// Синк изменил локальный путь (для `Notice::Synced`). `mkdir` — «убедиться,
+    /// что есть», поэтому новые папки отмечает вызывающий.
+    pub(crate) fn touched(&self, path: &str) {
+        self.with_mut(|s| {
+            s.pulled.insert(path.to_owned());
+        });
+    }
+
     pub async fn write(
+        &self,
+        path: &str,
+        data: Vec<u8>,
+        expect: Expect,
+    ) -> SyncResult<Option<FileMeta>> {
+        let r = self.write_inner(path, data, expect).await;
+        if matches!(r, Ok(Some(_))) {
+            self.touched(path);
+        }
+        r
+    }
+
+    async fn write_inner(
         &self,
         path: &str,
         data: Vec<u8>,
@@ -432,6 +459,19 @@ impl Ctx {
         path: &str,
         expect: Expect,
     ) -> SyncResult<Option<FileMeta>> {
+        let r = self.commit_temp_inner(temp, path, expect).await;
+        if matches!(r, Ok(Some(_))) {
+            self.touched(path);
+        }
+        r
+    }
+
+    async fn commit_temp_inner(
+        &self,
+        temp: &str,
+        path: &str,
+        expect: Expect,
+    ) -> SyncResult<Option<FileMeta>> {
         let (t, p) = (temp.to_owned(), path.to_owned());
         match self
             .hub
@@ -472,13 +512,21 @@ impl Ctx {
 
     /// В корзину. `Ok(false)` — файл изменился (условие не выполнено).
     pub async fn trash(&self, path: &str, expect: Expect) -> SyncResult<bool> {
-        let path = path.to_owned();
+        let key = path.to_owned();
         match self
             .hub
-            .submit(|id| Action::Trash { id, path, expect })
+            .submit(|id| Action::Trash {
+                id,
+                path: key,
+                expect,
+            })
             .await
         {
-            IoResult::Done | IoResult::NotFound => Ok(true),
+            IoResult::Done => {
+                self.touched(path);
+                Ok(true)
+            }
+            IoResult::NotFound => Ok(true),
             IoResult::Precondition => Ok(false),
             other => Err(io_err("trash", other)),
         }
@@ -486,6 +534,15 @@ impl Ctx {
 
     /// Переименование. `Ok(None)` — назначение занято или источника нет.
     pub async fn rename(&self, from: &str, to: &str) -> SyncResult<Option<FileMeta>> {
+        let r = self.rename_inner(from, to).await;
+        if matches!(r, Ok(Some(_))) {
+            self.touched(from);
+            self.touched(to);
+        }
+        r
+    }
+
+    async fn rename_inner(&self, from: &str, to: &str) -> SyncResult<Option<FileMeta>> {
         let (f, t) = (from.to_owned(), to.to_owned());
         match self
             .hub
@@ -512,8 +569,8 @@ impl Ctx {
     }
 
     pub async fn mkdir(&self, path: &str) -> SyncResult<()> {
-        let path = path.to_owned();
-        match self.hub.submit(|id| Action::Mkdir { id, path }).await {
+        let key = path.to_owned();
+        match self.hub.submit(|id| Action::Mkdir { id, path: key }).await {
             IoResult::Done | IoResult::Stat { .. } => Ok(()),
             other => Err(io_err("mkdir", other)),
         }
@@ -521,9 +578,13 @@ impl Ctx {
 
     /// Удалить пустую папку. `Ok(false)` — не пуста.
     pub async fn rmdir(&self, path: &str) -> SyncResult<bool> {
-        let path = path.to_owned();
-        match self.hub.submit(|id| Action::Rmdir { id, path }).await {
-            IoResult::Done | IoResult::NotFound => Ok(true),
+        let key = path.to_owned();
+        match self.hub.submit(|id| Action::Rmdir { id, path: key }).await {
+            IoResult::Done => {
+                self.touched(path);
+                Ok(true)
+            }
+            IoResult::NotFound => Ok(true),
             IoResult::Precondition => Ok(false),
             other => Err(io_err("rmdir", other)),
         }
