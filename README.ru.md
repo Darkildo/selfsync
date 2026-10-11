@@ -223,6 +223,20 @@ selfsync-cli encrypt --dir ~/notes --password-file ~/.notes-pass
 selfsync-cli status --dir ~/notes
 ```
 
+История, корзина сервера и конфликты доступны и без Obsidian. Каждая такая команда сначала выполняет цикл синка (нужен актуальный индекс, а для зашифрованного vault'а — ключ: `--password-file` или `SELFSYNC_PASSWORD`, как у `run`); меняющие команды дожидаются ещё одного цикла, так что к их завершению результат уже на сервере. Коды выхода — как у `run --once`, `--json` даёт вывод для скриптов.
+
+```sh
+selfsync-cli history notes/plan.md          # ревизии: номер, время, размер, устройство
+selfsync-cli revert notes/plan.md --rev 3   # неотправленная текущая версия остаётся копией рядом
+selfsync-cli trash                          # удалённое на сервере и когда сотрётся (--all — и просроченное)
+selfsync-cli restore notes/old.md
+selfsync-cli purge notes/old.md --yes       # стереть из корзины окончательно, вместе с историей
+selfsync-cli conflicts
+selfsync-cli resolve 4 --keep mine          # both | mine | server
+```
+
+С папкой одновременно работает один процесс (`.selfsync/lock`): если `run` запущен службой, сначала остановите её (`systemctl --user stop selfsync-cli@notes`).
+
 Служебные данные клиент хранит в `<папка>/.selfsync/` (токен и ключ с правами 0600), удалённое кладёт в `<папка>/.trash/`. Чтобы клиент работал службой, есть [deploy/systemd/user/selfsync-cli@.service](deploy/systemd/user/selfsync-cli@.service): `systemctl --user enable --now selfsync-cli@notes`.
 
 **Команда после синка.** `run --exec CMD` (или `exec = "..."` в `.selfsync/config.toml`) запускает `sh -c CMD` в папке после каждого цикла, который что-то изменил: коммит в git, сборка Quartz или Hugo, бэкап.

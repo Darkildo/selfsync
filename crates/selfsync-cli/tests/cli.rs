@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use selfsync_cli::config::Config;
-use selfsync_cli::runner::{self, Options, Outcome};
+use selfsync_cli::runner::{self, Options, Outcome, VaultCommand};
 use selfsync_core::engine::{UiCommand, UiResult};
 use selfsync_server::{AppState, Mode};
 
@@ -419,4 +419,245 @@ fn git_excluded_by_default_for_new_configs() {
     // старый конфиг с явным списком остаётся как был
     let old: Config = toml::from_str("excludes = [\".obsidian/workspace*.json\"]").unwrap();
     assert!(!selfsync_core::exclude::Excludes::new(&old.excludes).is_excluded(".git/HEAD"));
+}
+
+async fn vault_cmd(
+    dir: &Path,
+    cfg: &Config,
+    pw: Option<&str>,
+    cmd: VaultCommand,
+) -> (Outcome, Option<UiResult>) {
+    runner::with_vault(dir, cfg, pw.map(str::to_owned), true, cmd)
+        .await
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn history_and_revert() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "hist", "a");
+    let (b, cb) = folder(&srv, "hist", "b");
+    std::fs::write(a.path().join("x.md"), "v1\n").unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    std::fs::write(a.path().join("x.md"), "v2\n").unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    let (o, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::History {
+            path: "x.md".into(),
+        }),
+    )
+    .await;
+    assert_eq!(o, Outcome::Synced);
+    let Some(UiResult::History { revisions }) = r else {
+        panic!("{r:?}")
+    };
+    let revs: Vec<u64> = revisions.iter().map(|x| x.rev).collect();
+    assert_eq!(revs, [2, 1]);
+    // откат дожидается цикла синка: второе устройство сразу видит v1
+    let (o, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::RestoreRevision {
+            path: "x.md".into(),
+            rev: 1,
+        }),
+    )
+    .await;
+    assert_eq!((o, r), (Outcome::Synced, Some(UiResult::Ok)));
+    assert_eq!(
+        std::fs::read_to_string(a.path().join("x.md")).unwrap(),
+        "v1\n"
+    );
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    assert_eq!(
+        std::fs::read_to_string(b.path().join("x.md")).unwrap(),
+        "v1\n"
+    );
+    // несуществующая ревизия — ошибка с кодом
+    let (_, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::RestoreRevision {
+            path: "x.md".into(),
+            rev: 99,
+        }),
+    )
+    .await;
+    assert!(
+        matches!(&r, Some(UiResult::Error { code, .. }) if code == "revision_not_found"),
+        "{r:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn trash_restore_and_purge() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "trash", "a");
+    std::fs::write(a.path().join("y.md"), "keep me\n").unwrap();
+    std::fs::write(a.path().join("z.md"), "drop me\n").unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    std::fs::remove_file(a.path().join("y.md")).unwrap();
+    std::fs::remove_file(a.path().join("z.md")).unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    let (_, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::ListDeleted),
+    )
+    .await;
+    let Some(UiResult::Deleted { items }) = r else {
+        panic!("{r:?}")
+    };
+    let mut paths: Vec<&str> = items.iter().map(|x| x.path.as_str()).collect();
+    paths.sort_unstable();
+    assert_eq!(paths, ["y.md", "z.md"]);
+    let (o, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::RestoreDeleted {
+            paths: vec!["y.md".into()],
+        }),
+    )
+    .await;
+    assert_eq!(
+        (o, r),
+        (Outcome::Synced, Some(UiResult::Restored { count: 1 }))
+    );
+    assert_eq!(
+        std::fs::read_to_string(a.path().join("y.md")).unwrap(),
+        "keep me\n",
+        "восстановленный файл пришёл в том же запуске"
+    );
+    let (_, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::PurgeDeleted {
+            paths: vec!["z.md".into()],
+        }),
+    )
+    .await;
+    assert_eq!(r, Some(UiResult::Restored { count: 1 }));
+    let (_, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::ListDeleted),
+    )
+    .await;
+    assert_eq!(r, Some(UiResult::Deleted { items: vec![] }));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn conflicts_resolve_mine() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "conf", "a");
+    let (b, cb) = folder(&srv, "conf", "b");
+    std::fs::write(a.path().join("c.md"), "line\n").unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    std::fs::write(a.path().join("c.md"), "from a\n").unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    std::fs::write(b.path().join("c.md"), "from b\n").unwrap();
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    let (_, r) = vault_cmd(b.path(), &cb, None, VaultCommand::Ui(UiCommand::Conflicts)).await;
+    let Some(UiResult::Conflicts { items }) = r else {
+        panic!("{r:?}")
+    };
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!(items[0].path, "c.md");
+    let copy = items[0].copy.clone();
+    let (o, r) = vault_cmd(
+        b.path(),
+        &cb,
+        None,
+        VaultCommand::Resolve {
+            id: items[0].id,
+            choice: selfsync_core::engine::ConflictChoice::KeepMine,
+        },
+    )
+    .await;
+    assert_eq!((o, r), (Outcome::Synced, Some(UiResult::Ok)));
+    assert_eq!(
+        std::fs::read_to_string(b.path().join("c.md")).unwrap(),
+        "from b\n"
+    );
+    assert!(!b.path().join(&copy).exists(), "копия убрана в корзину");
+    // своя версия уже на сервере
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert_eq!(
+        std::fs::read_to_string(a.path().join("c.md")).unwrap(),
+        "from b\n"
+    );
+    let (_, r) = vault_cmd(b.path(), &cb, None, VaultCommand::Ui(UiCommand::Conflicts)).await;
+    assert_eq!(r, Some(UiResult::Conflicts { items: vec![] }));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn encrypted_vault_commands_need_key() {
+    const PW: &str = "correct horse battery staple";
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "encc", "a");
+    std::fs::create_dir_all(a.path().join("dir")).unwrap();
+    std::fs::write(a.path().join("dir/s.md"), "secret v1\n").unwrap();
+    let enable = Options {
+        enable_encryption: true,
+        ..once(Some(PW))
+    };
+    assert_eq!(
+        runner::run(a.path(), &ca, enable).await.unwrap(),
+        Outcome::Synced
+    );
+    std::fs::write(a.path().join("dir/s.md"), "secret v2\n").unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    // новое устройство без ключа: до команды не доходит, код «нужен пароль»
+    let (c, cc) = folder(&srv, "encc", "c");
+    let hist = || {
+        VaultCommand::Ui(UiCommand::History {
+            path: "dir/s.md".into(),
+        })
+    };
+    let (o, r) = vault_cmd(c.path(), &cc, None, hist()).await;
+    assert_eq!((o, r), (Outcome::NeedPassword, None));
+    // с паролем — история по открытому имени
+    let (o, r) = vault_cmd(c.path(), &cc, Some(PW), hist()).await;
+    assert_eq!(o, Outcome::Synced);
+    let Some(UiResult::History { revisions }) = r else {
+        panic!("{r:?}")
+    };
+    assert!(revisions.len() >= 2, "{revisions:?}");
+    // ключ запомнен: дальше без пароля
+    let (o, _) = vault_cmd(c.path(), &cc, None, hist()).await;
+    assert_eq!(o, Outcome::Synced);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lock_prevents_parallel_run() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "lock", "a");
+    let held = selfsync_cli::exec::Exec::new(a.path(), &srv.url, None).unwrap();
+    let err = runner::with_vault(
+        a.path(),
+        &ca,
+        None,
+        true,
+        VaultCommand::Ui(UiCommand::Conflicts),
+    )
+    .await
+    .unwrap_err();
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("другим процессом") && msg.contains("systemctl --user stop"),
+        "{msg}"
+    );
+    assert!(runner::run(a.path(), &ca, once(None)).await.is_err());
+    drop(held);
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
 }

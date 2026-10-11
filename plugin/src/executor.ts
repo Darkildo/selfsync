@@ -16,6 +16,10 @@ export interface Connection {
 }
 
 export class Executor {
+  /** Снимки индекса пишутся по одному и не старее записанного (общий временный файл). */
+  private indexQueue: Promise<unknown> = Promise.resolve();
+  private indexSaved = 0;
+
   constructor(
     private fs: FileBackend,
     private http: HttpBackend,
@@ -95,9 +99,18 @@ export class Executor {
         if (!cur) return { type: "notFound" };
         return (await this.fs.rmdir(cur.path)) ? { type: "done" } : { type: "precondition" };
       }
-      case "saveIndex":
-        await this.fs.storeWrite(INDEX_FILE, a.data);
+      case "saveIndex": {
+        // Синк и, например, решение конфликта сохраняют индекс параллельно; id
+        // действия растёт в порядке выдачи снимков ядром.
+        const write = this.indexQueue.then(async () => {
+          if (a.id < this.indexSaved) return;
+          this.indexSaved = a.id;
+          await this.fs.storeWrite(INDEX_FILE, a.data);
+        });
+        this.indexQueue = write.catch(() => {});
+        await write;
         return { type: "done" };
+      }
       case "cacheRead": {
         const data = await this.fs.storeRead(`${CACHE_DIR}/${a.key}`);
         return data ? { type: "data", data } : { type: "notFound" };

@@ -223,6 +223,20 @@ selfsync-cli encrypt --dir ~/notes --password-file ~/.notes-pass
 selfsync-cli status --dir ~/notes
 ```
 
+History, the server trash and conflicts work without Obsidian too. Each of these commands first runs a sync cycle (it needs the current index and, for an encrypted vault, the key: `--password-file` or `SELFSYNC_PASSWORD`, as for `run`); commands that change something wait for one more cycle, so the result is already on the server when they return. Exit codes are the same as for `run --once`; `--json` prints machine-readable output.
+
+```sh
+selfsync-cli history notes/plan.md          # revisions: number, time, size, device
+selfsync-cli revert notes/plan.md --rev 3   # an unsent current version is kept as a copy next to it
+selfsync-cli trash                          # deleted on the server and when they expire (--all: expired ones too)
+selfsync-cli restore notes/old.md
+selfsync-cli purge notes/old.md --yes       # erase from the trash for good, with its history
+selfsync-cli conflicts
+selfsync-cli resolve 4 --keep mine          # both | mine | server
+```
+
+Only one process works with a folder at a time (`.selfsync/lock`): while `run` is running as a service, stop it first (`systemctl --user stop selfsync-cli@notes`).
+
 The client keeps its state in `<folder>/.selfsync/` (token and key with mode 0600) and puts deleted files into `<folder>/.trash/`. To run it as a service: [deploy/systemd/user/selfsync-cli@.service](deploy/systemd/user/selfsync-cli@.service), `systemctl --user enable --now selfsync-cli@notes`.
 
 **A command after each sync.** `run --exec CMD` (or `exec = "..."` in `.selfsync/config.toml`) runs `sh -c CMD` in the folder after every cycle that changed something — commit to git, rebuild a Quartz or Hugo site, take a backup:

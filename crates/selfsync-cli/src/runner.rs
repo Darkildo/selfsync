@@ -10,8 +10,8 @@ use std::time::Duration;
 use notify::event::{ModifyKind, RenameMode};
 use notify::{EventKind, RecursiveMode, Watcher};
 use selfsync_core::engine::{
-    Action, Engine, EngineConfig, Event, LogLevel, Notice, SyncState, SyncStatus, UiCommand,
-    UiResult,
+    Action, ConflictChoice, Engine, EngineConfig, Event, LogLevel, Notice, SyncState, SyncStatus,
+    UiCommand, UiResult,
 };
 use tokio::sync::mpsc;
 
@@ -264,19 +264,85 @@ fn watch(
 pub async fn run(dir: &Path, cfg: &Config, opts: Options) -> anyhow::Result<Outcome> {
     let once = opts.once;
     let hook = opts.hook.clone().map(|h| Hook::start(dir, h));
-    let (outcome, hook) = run_loop(dir, cfg, opts, hook).await?;
-    if once && let Some(h) = hook {
+    let end = run_loop(dir, cfg, opts, hook, None).await?;
+    if once && let Some(h) = end.hook {
         h.finish().await;
     }
-    Ok(outcome)
+    Ok(end.outcome)
 }
+
+/// Команда для [`with_vault`].
+#[derive(Debug, Clone)]
+pub enum VaultCommand {
+    /// Команда окна (история, корзина, откат...).
+    Ui(UiCommand),
+    /// Решение по конфликту.
+    Resolve { id: u64, choice: ConflictChoice },
+}
+
+impl VaultCommand {
+    /// Меняет файлы или сервер: после ответа нужен ещё один цикл синка.
+    fn changes(&self) -> bool {
+        matches!(
+            self,
+            VaultCommand::Resolve { .. }
+                | VaultCommand::Ui(
+                    UiCommand::RestoreDeleted { .. }
+                        | UiCommand::PurgeDeleted { .. }
+                        | UiCommand::RestoreRevision { .. }
+                )
+        )
+    }
+}
+
+/// Команда на настоящем движке папки: индекс и ключ загружены, сначала цикл синка
+/// (нужен ключ для имён зашифрованного vault'а и актуальный индекс), потом команда,
+/// для меняющих — ещё один цикл. Без слежения за папкой. Исход — как у
+/// `run --once`; ответ команды — `None`, если до неё не дошло (сеть, пароль).
+pub async fn with_vault(
+    dir: &Path,
+    cfg: &Config,
+    password: Option<String>,
+    remember_key: bool,
+    cmd: VaultCommand,
+) -> anyhow::Result<(Outcome, Option<UiResult>)> {
+    let opts = Options {
+        once: true,
+        watch: false,
+        password,
+        remember_key,
+        enable_encryption: false,
+        hook: None,
+    };
+    let end = run_loop(dir, cfg, opts, None, Some(cmd)).await?;
+    Ok((end.outcome, end.result))
+}
+
+struct LoopEnd {
+    outcome: Outcome,
+    hook: Option<Hook>,
+    result: Option<UiResult>,
+}
+
+/// Где команда `with_vault`.
+enum Stage {
+    /// Ждём первого цикла.
+    Waiting(VaultCommand),
+    /// Отправлена, ждём ответа (`Resolve` ответа не даёт — ждём простоя).
+    Sent { changes: bool, ui: bool },
+    /// Ответ есть, идёт цикл синка после неё.
+    Syncing,
+}
+
+const COMMAND_REQ: u64 = 1;
 
 async fn run_loop(
     dir: &Path,
     cfg: &Config,
     opts: Options,
     hook: Option<Hook>,
-) -> anyhow::Result<(Outcome, Option<Hook>)> {
+    command: Option<VaultCommand>,
+) -> anyhow::Result<LoopEnd> {
     let exec = Arc::new(Exec::new(dir, &cfg.server, Some(cfg.token.clone()))?);
     let index = std::fs::read(exec.index_path()).ok();
     let key = std::fs::read(exec.key_path()).ok();
@@ -292,6 +358,13 @@ async fn run_loop(
         Some(watch(dir, tx.clone())?)
     } else {
         None
+    };
+    let mut stage = command.map(Stage::Waiting);
+    let mut result = None;
+    let end = |lp: &mut Loop, outcome: Outcome, result: Option<UiResult>| LoopEnd {
+        outcome,
+        hook: lp.hook.take(),
+        result,
     };
 
     lp.feed(Event::Start { key });
@@ -310,7 +383,7 @@ async fn run_loop(
         tokio::select! {
             ev = rx.recv() => match ev {
                 Some(ev) => lp.feed(ev),
-                None => return Ok((Outcome::Interrupted, lp.hook.take())),
+                None => return Ok(end(&mut lp, Outcome::Interrupted, result)),
             },
             () = tokio::time::sleep(lp.sleep()) => {
                 lp.wake = None;
@@ -318,7 +391,7 @@ async fn run_loop(
             }
             _ = tokio::signal::ctrl_c() => {
                 // Дать дописать начатое: индекс сохраняется после каждого файла.
-                return Ok((Outcome::Interrupted, lp.hook.take()));
+                return Ok(end(&mut lp, Outcome::Interrupted, result));
             }
         }
         if lp.status.state == SyncState::NeedPassword && !password_sent {
@@ -331,37 +404,73 @@ async fn run_loop(
                     });
                     lp.feed(Event::SyncNow);
                 }
-                None if opts.once => return Ok((Outcome::NeedPassword, lp.hook.take())),
+                None if opts.once => return Ok(end(&mut lp, Outcome::NeedPassword, result)),
                 None => {}
             }
         }
-        if opts.once && lp.settled() {
-            let s = &lp.status;
+        // Стадия команды может смениться без новых событий (ответ без сети) —
+        // поэтому проверка повторяется, пока что-то меняется.
+        'check: loop {
+            if !(opts.once && lp.settled()) {
+                break 'check;
+            }
+            let s = lp.status.clone();
             match s.state {
                 SyncState::Idle if s.last_sync > 0 => {
+                    match stage.take() {
+                        Some(Stage::Waiting(cmd)) => {
+                            let changes = cmd.changes();
+                            let ui = matches!(cmd, VaultCommand::Ui(_));
+                            match cmd {
+                                VaultCommand::Ui(command) => lp.feed(Event::Command {
+                                    req: COMMAND_REQ,
+                                    command,
+                                }),
+                                VaultCommand::Resolve { id, choice } => {
+                                    lp.feed(Event::Resolve { id, choice })
+                                }
+                            }
+                            stage = Some(Stage::Sent { changes, ui });
+                            continue 'check;
+                        }
+                        Some(Stage::Sent { changes, ui }) => {
+                            result = if ui {
+                                lp.ui.remove(&COMMAND_REQ)
+                            } else {
+                                Some(UiResult::Ok)
+                            };
+                            let failed = matches!(result, Some(UiResult::Error { .. }) | None);
+                            if changes && !failed {
+                                tracing::info!("синхронизация…");
+                                lp.feed(Event::SyncNow);
+                                stage = Some(Stage::Syncing);
+                                continue 'check;
+                            }
+                        }
+                        Some(Stage::Syncing) | None => {}
+                    }
                     if s.read_only && s.pending > 0 {
                         eprintln!(
                             "предупреждение: устройство только для чтения — локальных правок, \
-                             которые не уйдут на сервер: {}",
+                         которые не уйдут на сервер: {}",
                             s.pending
                         );
                     }
-                    return Ok((Outcome::Synced, lp.hook.take()));
+                    return Ok(end(&mut lp, Outcome::Synced, result));
                 }
                 SyncState::Offline | SyncState::Error => {
-                    return Ok((Outcome::Failed(reason_text(s)), lp.hook.take()));
+                    return Ok(end(&mut lp, Outcome::Failed(reason_text(&s)), result));
                 }
                 SyncState::Blocked => {
-                    return Ok((
-                        Outcome::Blocked(s.reason.clone().unwrap_or_default()),
-                        lp.hook.take(),
-                    ));
+                    let r = s.reason.clone().unwrap_or_default();
+                    return Ok(end(&mut lp, Outcome::Blocked(r), result));
                 }
                 SyncState::NeedPassword if password_sent => {
-                    return Ok((Outcome::NeedPassword, lp.hook.take()));
+                    return Ok(end(&mut lp, Outcome::NeedPassword, result));
                 }
                 _ => {}
             }
+            break 'check;
         }
     }
 }

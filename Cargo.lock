@@ -1999,6 +1999,7 @@ dependencies = [
  "selfsync-core",
  "selfsync-server",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "toml",

@@ -17,6 +17,47 @@ pub struct Exec {
     server: String,
     token: Option<String>,
     http: reqwest::Client,
+    /// `.selfsync/lock` под flock: индекс папки держит один процесс.
+    _lock: Option<std::fs::File>,
+    /// Снимки индекса пишутся по одному (общий временный файл) и не старее
+    /// записанного: id действия растёт в порядке выдачи снимков ядром.
+    index_saved: tokio::sync::Mutex<u64>,
+}
+
+/// Файл-замок папки в `.selfsync/`.
+pub const LOCK_FILE: &str = "lock";
+
+/// Эксклюзивный замок папки. Ждёт до двух секунд: только что завершившийся запуск
+/// мог ещё не отпустить его (задачи ввода-вывода дочищаются после выхода).
+#[cfg(unix)]
+fn lock_folder(state: &Path) -> anyhow::Result<Option<std::fs::File>> {
+    use std::os::fd::AsRawFd;
+    std::fs::create_dir_all(state)?;
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(state.join(LOCK_FILE))?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        // SAFETY: flock(2) над открытым дескриптором файла, которым мы владеем.
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(Some(f));
+        }
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!(
+                "папка синхронизируется другим процессом ({}). Остановите его, например \
+                 `systemctl --user stop selfsync-cli@<папка>`, и повторите",
+                state.join(LOCK_FILE).display()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[cfg(not(unix))]
+fn lock_folder(_state: &Path) -> anyhow::Result<Option<std::fs::File>> {
+    Ok(None)
 }
 
 fn failed(e: impl std::fmt::Display) -> IoResult {
@@ -39,12 +80,16 @@ impl Exec {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .build()?;
+        let state = root.join(STATE_DIR);
+        let lock = lock_folder(&state)?;
         Ok(Exec {
             root: root.to_path_buf(),
-            state: root.join(STATE_DIR),
+            state,
             server: server.trim_end_matches('/').to_owned(),
             token,
             http,
+            _lock: lock,
+            index_saved: tokio::sync::Mutex::new(0),
         })
     }
 
@@ -202,7 +247,14 @@ impl Exec {
                 }
                 Err(e) => return Err(e),
             },
-            Action::SaveIndex { data, .. } => {
+            Action::SaveIndex { id, data } => {
+                // Задача синка и, например, решение конфликта сохраняют индекс
+                // параллельно: без замка второй rename не находит временный файл.
+                let mut saved = self.index_saved.lock().await;
+                if id < *saved {
+                    return Ok(IoResult::Done);
+                }
+                *saved = id;
                 tokio::fs::create_dir_all(&self.state).await?;
                 let tmp = self.state.join(format!("index.bin{TEMP_SUFFIX}"));
                 write_durable(&tmp, &data).await?;
