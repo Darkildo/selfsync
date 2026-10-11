@@ -207,7 +207,10 @@ impl Engine {
                 });
             }
             Event::Configure { config } => cx.with_mut(|s| {
-                s.excludes = build_excludes(&config);
+                // Новые исключения вступают в силу в начале следующего цикла (см.
+                // `rules_changed`): идущий цикл доработает по старым.
+                s.rules_changed |= build_excludes(&config) != s.excludes;
+                s.no_merge = crate::exclude::Excludes::new(&config.no_merge);
                 s.cfg = config;
                 s.need_full_scan = true;
                 s.sync_due = Some(now);

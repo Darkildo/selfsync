@@ -18,6 +18,10 @@ pub struct EngineConfig {
     pub excludes: Vec<String>,
     /// Исключения, которые пользователь не может снять (каталог плагина).
     pub hard_excludes: Vec<String>,
+    /// Пути (шаблоны как у исключений), которые не сливаются построчно: при
+    /// расхождении побеждает более поздняя mtime, копия рядом не создаётся
+    /// (файлы настроек Obsidian: diff3 дал бы невалидный JSON).
+    pub no_merge: Vec<String>,
     /// Регистронезависимая ФС (Windows, macOS, iOS, Android-хранилище).
     pub case_insensitive: bool,
     /// Какие имена может хранить ФС устройства: записи с другими не скачиваются.
@@ -53,6 +57,7 @@ impl Default for EngineConfig {
             device_name: "device".to_owned(),
             excludes: Vec::new(),
             hard_excludes: Vec::new(),
+            no_merge: Vec::new(),
             case_insensitive: false,
             name_rules: NameRules::Any,
             debounce_ms: 2500,

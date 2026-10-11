@@ -25,6 +25,8 @@ pub(crate) struct Remote {
     pub deleted: bool,
     pub folder: bool,
     pub renamed_to: Option<VaultPath>,
+    /// mtime, сообщённая устройством-автором (для `no_merge`).
+    pub mtime: i64,
 }
 
 impl Remote {
@@ -40,6 +42,7 @@ impl Remote {
             deleted: e.deleted,
             folder: e.folder,
             renamed_to,
+            mtime: e.mtime,
         }
     }
 }
@@ -324,6 +327,9 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
             // Мы ничего не меняли: просто серверная версия.
             return write_remote(cx, key, &r, sb.clone(), local_obs).await;
         }
+        if cx.with(|s| s.no_merge.is_excluded(key)) {
+            return last_write_wins(cx, key, &r, remote_hash, Some(sb.clone()), local_obs).await;
+        }
         // Устройству только для чтения слияние не нужно: результат никуда не уйдёт,
         // а при следующей серверной правке пришлось бы сливать снова. Своя версия —
         // копией рядом, на месте — серверная.
@@ -345,6 +351,9 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
             }
         }
     }
+    if cx.with(|s| s.no_merge.is_excluded(key)) {
+        return last_write_wins(cx, key, &r, remote_hash, remote_bytes, local_obs).await;
+    }
     // Обе версии целиком.
     let initial = f.base_rev == 0 && f.base_plain.is_none();
     keep_both(
@@ -358,6 +367,88 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
         initial,
     )
     .await
+}
+
+/// Файл из `no_merge` разошёлся с сервером: побеждает более поздняя mtime, без
+/// копии рядом и без уведомления. Наша новее — серверная становится базой, и
+/// следующий push кладёт нашу поверх (серверная остаётся в истории). Серверная
+/// новее — наша уходит в корзину, на место встаёт серверная.
+async fn last_write_wins(
+    cx: &Ctx,
+    key: &str,
+    r: &Remote,
+    remote_hash: Hash,
+    remote_bytes: Option<Vec<u8>>,
+    local: LocalObs,
+) -> SyncResult<()> {
+    if local.mtime > r.mtime {
+        cx.with_mut(|s| {
+            if let Some(f) = s.index.files.get_mut(key) {
+                f.base_rev = r.rev;
+                f.base_blob = r.hash;
+                f.base_plain = remote_bytes.as_ref().map(|b| Hash::of(b));
+                f.server_path = None;
+                f.rejected = None;
+                f.pending_put = None;
+            }
+        });
+        cx.log(
+            LogLevel::Info,
+            format!("{key}: своя версия новее серверной — уходит поверх"),
+        );
+        return Ok(());
+    }
+    if !cx
+        .trash(
+            key,
+            Expect::Stat {
+                size: local.size,
+                mtime: local.mtime,
+            },
+        )
+        .await?
+    {
+        // Файл изменился прямо сейчас: разберёмся в следующем цикле.
+        cx.with_mut(|s| {
+            s.dirty.insert(key.to_owned());
+        });
+        return Ok(());
+    }
+    let written = match remote_bytes {
+        Some(sb) => {
+            let sp = Hash::of(&sb);
+            let size = sb.len() as u64;
+            cx.write(key, sb, Expect::Absent).await?.map(|m| LocalObs {
+                size,
+                mtime: m.mtime,
+                plain: sp,
+            })
+        }
+        None => download_to(cx, key, &remote_hash, r.size, Expect::Absent)
+            .await?
+            .map(|x| x.0),
+    };
+    match written {
+        Some(obs) => {
+            cx.with_mut(|s| {
+                if let Some(f) = s.index.files.get_mut(key) {
+                    f.local = Some(obs);
+                }
+            });
+            adopt(cx, key, r, obs.plain);
+        }
+        None => cx.with_mut(|s| {
+            if let Some(f) = s.index.files.get_mut(key) {
+                f.local = None;
+            }
+            s.dirty.insert(key.to_owned());
+        }),
+    }
+    cx.log(
+        LogLevel::Info,
+        format!("{key}: серверная версия новее — своя в корзине"),
+    );
+    cx.save().await
 }
 
 /// Записать серверную версию поверх неизменённой локальной.

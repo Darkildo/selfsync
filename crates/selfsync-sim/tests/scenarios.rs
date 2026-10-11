@@ -929,3 +929,275 @@ fn synced_notice_lists_cycle_changes() {
         "{s:?}"
     );
 }
+
+/// Сколько записей в журнале сервера (каждая операция двигает seq).
+fn seq(w: &World) -> u64 {
+    w.server_seq()
+}
+
+#[test]
+fn excluding_synced_path_changes_nothing_on_server() {
+    let mut w = World::new(quiet(2));
+    let a = base_note(&mut w, 0, "notes/a.md");
+    let b = base_note(&mut w, 0, "top.md");
+    w.sync(0);
+    w.sync(1);
+    let before = seq(&w);
+    // c1 исключает notes/: файлы остаются на месте, на сервер ничего не уходит
+    w.set_excludes(1, &["notes/"]);
+    for _ in 0..3 {
+        w.now += 20_000;
+        w.sync(1);
+    }
+    assert_eq!(seq(&w), before, "исключение не породило операций");
+    assert!(server_text(&w, "notes/a.md").contains(&a));
+    assert!(
+        w.clients[1].fs.read_file("notes/a.md").is_some(),
+        "локальный файл цел"
+    );
+    // пока путь исключён: c0 правит его, c1 удаляет свою копию — сервер не трогается
+    let from_c0 = edit_line(&mut w, 0, "notes/a.md", 2);
+    w.sync(0);
+    w.user_delete(1, "notes/a.md");
+    w.sync(1);
+    assert!(server_text(&w, "notes/a.md").contains(&from_c0));
+    // снова включить: файл приходит с сервера в актуальном виде
+    w.set_excludes(1, &[]);
+    w.sync(1);
+    let text =
+        String::from_utf8(w.clients[1].fs.read_file("notes/a.md").cloned().unwrap()).unwrap();
+    assert!(text.contains(&from_c0), "{text}");
+    assert!(server_text(&w, "top.md").contains(&b));
+    finish(&mut w);
+    assert!(conflict_copies(&w).is_empty());
+}
+
+#[test]
+fn including_subdir_pulls_what_arrived_while_excluded() {
+    let mut w = World::new(quiet(2));
+    base_note(&mut w, 0, "top.md");
+    w.sync(0);
+    w.sync(1);
+    // c1 с самого начала исключает cfg/, кроме cfg/keep.json
+    w.set_excludes(1, &["cfg/", "!cfg/keep.json"]);
+    w.sync(1);
+    let k = w.ledger.fresh(0);
+    w.user_write(
+        0,
+        "cfg/keep.json",
+        format!("{{\"k\":\"{k}\"}}\n").into_bytes(),
+    );
+    let o = w.ledger.fresh(0);
+    w.user_write(
+        0,
+        "cfg/other.json",
+        format!("{{\"o\":\"{o}\"}}\n").into_bytes(),
+    );
+    w.user_write(0, "cfg/sub/deep.json", b"{}\n".to_vec());
+    w.sync(0);
+    w.sync(1);
+    assert!(
+        w.clients[1].fs.read_file("cfg/keep.json").is_some(),
+        "включённый путь приходит"
+    );
+    assert!(w.clients[1].fs.read_file("cfg/other.json").is_none());
+    // c0 продолжает: новая ревизия other.json, пока у c1 он исключён
+    w.user_write(
+        0,
+        "cfg/other.json",
+        format!("{{\"o\":\"{o}\",\"v\":2}}\n").into_bytes(),
+    );
+    w.sync(0);
+    w.sync(1);
+    // включить всё: пропущенное подтягивается повтором журнала
+    let before = seq(&w);
+    w.set_excludes(1, &[]);
+    w.sync(1);
+    let other = String::from_utf8(
+        w.clients[1]
+            .fs
+            .read_file("cfg/other.json")
+            .cloned()
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(other.contains("\"v\":2"), "{other}");
+    assert!(w.clients[1].fs.read_file("cfg/sub/deep.json").is_some());
+    assert_eq!(
+        seq(&w),
+        before,
+        "повтор журнала ничего не записал на сервер"
+    );
+    finish(&mut w);
+    assert!(conflict_copies(&w).is_empty());
+}
+
+#[test]
+fn replay_over_synced_files_is_a_no_op() {
+    let mut w = World::new(quiet(2));
+    for p in ["a.md", "dir/b.md", "dir/sub/c.md", "img/p.png"] {
+        base_note(&mut w, 0, p);
+    }
+    w.sync(0);
+    w.sync(1);
+    edit_line(&mut w, 1, "a.md", 1);
+    w.sync(1);
+    w.sync(0);
+    let before = seq(&w);
+    let snap0 = w.clients[0].fs.snapshot();
+    // Добавить и убрать исключение — второе сужает правила: повтор с начала журнала.
+    w.set_excludes(0, &["zzz/"]);
+    w.sync(0);
+    w.set_excludes(0, &[]);
+    let n0 = w.clients[0].notices.len();
+    let trace_from = w.trace.len();
+    w.sync(0);
+    assert!(
+        w.trace
+            .iter()
+            .skip(trace_from)
+            .any(|l| l.contains("changes?since=0&")),
+        "повтор журнала с начала"
+    );
+    assert_eq!(seq(&w), before, "ни одной записи");
+    assert_eq!(w.clients[0].fs.snapshot(), snap0, "ни одной копии и правки");
+    assert!(w.clients[0].engine.as_ref().unwrap().index().last_seq >= before);
+    let notices: Vec<_> = w.clients[0].notices[n0..]
+        .iter()
+        .filter(|n| !matches!(n, Notice::Synced { .. }))
+        .collect();
+    assert!(notices.is_empty(), "{notices:?}");
+    finish(&mut w);
+}
+
+#[test]
+fn rules_changed_between_restarts_are_applied() {
+    // CLI правит конфиг при остановленной службе: события Configure не будет.
+    let mut w = World::new(quiet(2));
+    base_note(&mut w, 0, "notes/a.md");
+    w.sync(0);
+    w.sync(1);
+    let before = seq(&w);
+    w.clients[1].cfg.excludes = vec![".trash/".into(), "notes/".into()];
+    w.kill(1);
+    w.sync(1);
+    w.user_delete(1, "notes/a.md");
+    w.now += 20_000;
+    w.sync(1);
+    assert_eq!(
+        seq(&w),
+        before,
+        "исключённое после перезапуска не удаляется на сервере"
+    );
+    edit_line(&mut w, 0, "notes/a.md", 1);
+    w.sync(0);
+    w.clients[1].cfg.excludes = vec![".trash/".into()];
+    w.kill(1);
+    w.sync(1);
+    assert!(
+        w.clients[1].fs.read_file("notes/a.md").is_some(),
+        "вернулось после включения"
+    );
+    finish(&mut w);
+}
+
+fn set_no_merge(w: &mut World, c: usize, pats: &[&str]) {
+    w.clients[c].cfg.no_merge = pats.iter().map(|s| (*s).to_owned()).collect();
+    let config = w.clients[c].cfg.clone();
+    w.deliver(c, Event::Configure { config });
+}
+
+fn json(w: &World, c: usize, path: &str) -> String {
+    String::from_utf8(w.clients[c].fs.read_file(path).cloned().unwrap()).unwrap()
+}
+
+#[test]
+fn no_merge_files_take_the_later_version_without_copies() {
+    let mut w = World::new(quiet(2));
+    for c in 0..2 {
+        set_no_merge(&mut w, c, &["cfg/**"]);
+    }
+    let base = "{\n  \"a\": 1,\n  \"b\": 2\n}\n";
+    w.user_write(0, "cfg/hotkeys.json", base.as_bytes().to_vec());
+    w.sync(0);
+    w.sync(1);
+    // обе правки — в соседних строках, diff3 слил бы их в невалидный JSON
+    let t0 = w.ledger.fresh(0);
+    w.user_write(
+        0,
+        "cfg/hotkeys.json",
+        format!("{{\n  \"a\": \"{t0}\",\n  \"b\": 2\n}}\n").into_bytes(),
+    );
+    w.now += 5_000;
+    let t1 = w.ledger.fresh(1);
+    w.user_write(
+        1,
+        "cfg/hotkeys.json",
+        format!("{{\n  \"a\": 1,\n  \"b\": \"{t1}\"\n}}\n").into_bytes(),
+    );
+    // позже правившее устройство синхронизируется первым — его версия и остаётся
+    w.sync(1);
+    w.sync(0);
+    w.sync(1);
+    assert_eq!(
+        json(&w, 0, "cfg/hotkeys.json"),
+        json(&w, 1, "cfg/hotkeys.json")
+    );
+    let text = server_text(&w, "cfg/hotkeys.json");
+    assert!(text.contains(&t1) && !text.contains(&t0), "{text}");
+    assert!(conflict_copies(&w).is_empty(), "без копий рядом");
+    assert!(
+        w.clients.iter().all(|c| c
+            .notices
+            .iter()
+            .all(|n| !matches!(n, Notice::Conflict { .. }))),
+        "без уведомления о конфликте"
+    );
+    // проигравшая версия не потеряна: в корзине устройства
+    w.check_no_loss().unwrap();
+    // своя версия новее серверной — уходит поверх, серверная остаётся в истории
+    let t1b = w.ledger.fresh(1);
+    w.user_write(
+        1,
+        "cfg/hotkeys.json",
+        format!("{{\"v\":\"{t1b}\"}}\n").into_bytes(),
+    );
+    w.sync(1);
+    let t0b = w.ledger.fresh(0);
+    w.now += 5_000;
+    w.user_write(
+        0,
+        "cfg/hotkeys.json",
+        format!("{{\"v\":\"{t0b}\"}}\n").into_bytes(),
+    );
+    w.sync(0);
+    assert!(server_text(&w, "cfg/hotkeys.json").contains(&t0b));
+    let history = w.server_history_texts();
+    assert!(
+        history
+            .iter()
+            .any(|h| String::from_utf8_lossy(h).contains(&t1b)),
+        "проигравшая версия — в истории на сервере"
+    );
+    finish(&mut w);
+    assert!(conflict_copies(&w).is_empty());
+}
+
+#[test]
+fn regular_files_still_merge_next_to_no_merge_ones() {
+    let mut w = World::new(quiet(2));
+    for c in 0..2 {
+        set_no_merge(&mut w, c, &["cfg/**"]);
+    }
+    shared_note(&mut w, "n.md");
+    let a = edit_line(&mut w, 0, "n.md", 0);
+    let b = edit_line(&mut w, 1, "n.md", 4);
+    w.sync(0);
+    w.sync(1);
+    let text = server_text(&w, "n.md");
+    assert!(
+        text.contains(&a) && text.contains(&b),
+        "заметки сливаются как раньше: {text}"
+    );
+    finish(&mut w);
+}

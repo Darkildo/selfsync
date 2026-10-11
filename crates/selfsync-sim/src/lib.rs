@@ -86,6 +86,11 @@ pub struct SimConfig {
     pub encrypt_at: Option<usize>,
     /// Пропускать события Obsidian (правки «снаружи», ловятся полным сканом).
     pub skip_event_rate: f64,
+    /// Вероятность на шаге переключить у клиента дополнительные исключения
+    /// (`notes/` или `deep/` с `!deep/x/y.md`). К успокоению всё возвращается.
+    pub exclude_toggle_rate: f64,
+    /// Шаблоны `no_merge` у всех клиентов (в последней ревизии побеждает поздняя mtime).
+    pub no_merge: Vec<String>,
 }
 
 impl SimConfig {
@@ -103,6 +108,8 @@ impl SimConfig {
             io_fault_rate: 0.0,
             encrypt_at: None,
             skip_event_rate: 0.05,
+            exclude_toggle_rate: 0.0,
+            no_merge: Vec::new(),
         }
     }
 
@@ -135,6 +142,13 @@ impl SimConfig {
         } else {
             None
         };
+        c.exclude_toggle_rate = [0.0, 0.0, 0.01, 0.03][r.idx(4)];
+        // Проигравшая версия no_merge живёт только в истории сервера, а миграция на
+        // шифрование открытую историю стирает: инвариант «ничего не потеряно» для
+        // таких файлов держится только без неё.
+        if c.encrypt_at.is_none() && r.chance(0.2) {
+            c.no_merge = vec!["notes/**".into()];
+        }
         c
     }
 }
@@ -310,6 +324,7 @@ impl World {
             ..Default::default()
         };
         cfg.hard_excludes = vec![".obsidian/plugins/selfsync/".into()];
+        cfg.no_merge = self.cfg.no_merge.clone();
         let client = Client {
             name,
             token,
@@ -332,6 +347,17 @@ impl World {
         };
         self.clients.push(client);
         self.start_client(self.clients.len() - 1);
+    }
+
+    /// Исключения клиента сверх базовых (`.trash/`): событие Configure, и новый
+    /// конфиг переживает перезапуск клиента.
+    pub fn set_excludes(&mut self, c: usize, extra: &[&str]) {
+        let mut ex = vec![".trash/".to_owned()];
+        ex.extend(extra.iter().map(|s| (*s).to_owned()));
+        self.log(format!("c{c} EXCLUDES {ex:?}"));
+        self.clients[c].cfg.excludes = ex;
+        let config = self.clients[c].cfg.clone();
+        self.deliver(c, Event::Configure { config });
     }
 
     /// Сделать устройство клиента устройством только для чтения (токен тот же).
@@ -891,6 +917,12 @@ impl World {
             );
         }
         let c = self.rng.idx(self.clients.len());
+        if self.cfg.exclude_toggle_rate > 0.0 && self.rng.chance(self.cfg.exclude_toggle_rate) {
+            let sets: [&[&str]; 3] = [&[], &["notes/"], &["deep/", "!deep/x/y.md"]];
+            let pick = sets[self.rng.idx(sets.len())];
+            self.set_excludes(c, pick);
+            return;
+        }
         let roll = self.rng.next_u64() % 1000;
         if (roll as f64) < self.cfg.kill_rate * 1000.0 {
             self.kill(c);
@@ -954,6 +986,9 @@ impl World {
         for c in 0..self.clients.len() {
             if self.clients[c].engine.is_none() {
                 self.start_client(c);
+            }
+            if self.clients[c].cfg.excludes != [".trash/"] {
+                self.set_excludes(c, &[]);
             }
             self.deliver(c, Event::Visible);
         }

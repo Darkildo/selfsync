@@ -44,6 +44,29 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
     if cx.with(|s| s.index.migration.is_some()) {
         crypto_flow::migrate(cx).await?;
     }
+    if cx.with_mut(|s| std::mem::take(&mut s.rules_changed)) {
+        let (forgot, replay) = cx.with_mut(|s| {
+            s.excludes = super::ctx::build_excludes(&s.cfg);
+            let forgot = s.index.files.keys().filter(|k| s.is_excluded(k)).count();
+            (forgot, s.apply_rules())
+        });
+        if forgot > 0 {
+            cx.log(
+                LogLevel::Info,
+                format!("исключения: забыто путей {forgot} (на сервере ничего не меняется)"),
+            );
+        }
+        if replay {
+            cx.log(
+                LogLevel::Info,
+                "исключения сузились: журнал сервера перечитывается с начала",
+            );
+        }
+        cx.save().await?;
+    }
+    for temp in cx.with_mut(|s| std::mem::take(&mut s.stale_temps)) {
+        cx.delete_temp(&temp).await?;
+    }
     scan(cx).await?;
     let mut changed = false;
     for _round in 0..3 {

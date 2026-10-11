@@ -269,6 +269,10 @@ fn mark_gone(cx: &Ctx, path: &str, delta: &mut ScanDelta) {
             None => Vec::new(),
         };
         for k in std::iter::once(path.to_owned()).chain(inside) {
+            // Исключённое внутри исчезнувшей папки — не удаление (страховка).
+            if s.is_excluded(&k) {
+                continue;
+            }
             let Some(f) = s.index.files.get_mut(&k) else {
                 continue;
             };
@@ -345,6 +349,15 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
     });
     let mut delta = ScanDelta::default();
     if full {
+        // Страховка: исключённый путь в индексе не должен «исчезнуть» и уйти на
+        // сервер удалением (обычно его уже забыл Configure).
+        let forgot = cx.with_mut(|s| s.forget_excluded());
+        if !forgot.is_empty() {
+            cx.log(
+                LogLevel::Info,
+                format!("забыты исключённые пути: {forgot:?}"),
+            );
+        }
         let listing = cx.list().await?;
         cx.with_mut(|s| {
             s.need_full_scan = false;
@@ -377,7 +390,7 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
                 .collect()
         });
         for p in tracked {
-            if !present.contains_key(&p) {
+            if !present.contains_key(&p) && !cx.with(|s| s.is_excluded(&p)) {
                 mark_gone(cx, &p, &mut delta);
             }
         }
@@ -403,7 +416,9 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
                     }
                 }
                 None => {
-                    if let Ok(vp) = VaultPath::normalize(&raw) {
+                    if let Ok(vp) = VaultPath::normalize(&raw)
+                        && !cx.with(|s| s.is_excluded(vp.as_str()))
+                    {
                         mark_gone(cx, vp.as_str(), &mut delta);
                     }
                 }

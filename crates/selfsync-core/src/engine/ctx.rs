@@ -60,6 +60,8 @@ pub type SyncResult<T> = Result<T, SyncError>;
 pub(crate) struct State {
     pub cfg: EngineConfig,
     pub excludes: Excludes,
+    /// `cfg.no_merge`, разобранный.
+    pub no_merge: Excludes,
     pub index: Index,
     pub keys: Option<VaultKeys>,
     pub master: Option<MasterKey>,
@@ -117,15 +119,25 @@ pub(crate) struct State {
     pub notified: BTreeSet<String>,
     /// Запись, отложенная по временной причине: курсор не уходит дальше неё.
     pub hold_seq: Option<u64>,
+    /// Временные файлы забытых передач (путь стал исключённым) — удалить в цикле.
+    pub stale_temps: Vec<String>,
+    /// Правила исключений сменились (Configure): `excludes` перестраиваются из
+    /// `cfg` и применяются к индексу в начале следующего цикла. Не сразу: идущий
+    /// цикл читал бы журнал уже по новым правилам (пропустил бы записи, ставшие
+    /// исключёнными, и увёл курсор за них) и в конце записал бы свой курсор поверх
+    /// запрошенного повтора.
+    pub rules_changed: bool,
 }
 
 impl State {
     pub fn new(cfg: EngineConfig, index: Index) -> State {
         let excludes = build_excludes(&cfg);
+        let no_merge = Excludes::new(&cfg.no_merge);
         let poll = cfg.poll_active_ms;
-        State {
+        let mut s = State {
             cfg,
             excludes,
+            no_merge,
             index,
             keys: None,
             master: None,
@@ -159,7 +171,60 @@ impl State {
             device_id: 0,
             notified: BTreeSet::new(),
             hold_seq: None,
+            stale_temps: Vec::new(),
+            rules_changed: false,
+        };
+        // Правила могли смениться между запусками (CLI правят конфиг при
+        // остановленной службе): событие Configure тогда не придёт.
+        s.apply_rules();
+        s
+    }
+
+    /// Применить текущие правила исключений к индексу: ставшее исключённым —
+    /// забыть (без операций на сервер, локальные файлы не трогаются), если что-то
+    /// стало включённым — перечитать журнал с начала, чтобы подтянуть пропущенное.
+    /// Возвращает, запрошен ли повтор журнала.
+    pub fn apply_rules(&mut self) -> bool {
+        let lines = rule_lines(&self.cfg);
+        let narrowed = self
+            .index
+            .excludes
+            .as_ref()
+            .is_some_and(|old| rules_narrowed(old, &lines));
+        self.forget_excluded();
+        let replay = narrowed && self.index.initial_done && self.index.last_seq > 0;
+        if replay {
+            self.index.last_seq = 0;
         }
+        self.index.excludes = Some(lines);
+        replay
+    }
+
+    /// Убрать из индекса исключённые пути: ни удаления на сервер, ни отмены там —
+    /// синк их просто больше не видит. Незавершённые передачи отменяются.
+    pub fn forget_excluded(&mut self) -> Vec<String> {
+        let gone: Vec<String> = self
+            .index
+            .files
+            .keys()
+            .filter(|k| self.is_excluded(k))
+            .cloned()
+            .collect();
+        for k in &gone {
+            if let Some(f) = self.index.files.remove(k)
+                && let Some(crate::index::Transfer::Download { temp, .. }) = f.transfer
+            {
+                self.stale_temps.push(temp);
+            }
+            self.dirty.remove(k);
+        }
+        if !gone.is_empty() {
+            let ex = &self.excludes;
+            self.index
+                .conflicts
+                .retain(|c| !ex.is_excluded(&c.path) && !ex.is_excluded(&c.copy));
+        }
+        gone
     }
 
     /// Режим «только чтение» из `VaultState` (`None` — узнали по 403).
@@ -225,10 +290,37 @@ impl State {
     }
 }
 
+/// Правила в том виде, в каком они сохраняются в индексе (жёсткие — с пометкой).
+fn rule_lines(cfg: &EngineConfig) -> Vec<String> {
+    cfg.excludes
+        .iter()
+        .map(|l| l.trim().to_owned())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .chain(
+            cfg.hard_excludes
+                .iter()
+                .map(|h| format!("hard:{}", h.trim())),
+        )
+        .collect()
+}
+
+/// Что-то могло стать включённым: убрано правило (исключение или жёсткое) или
+/// добавлено `!`-правило. Перестановка тоже меняет смысл «последнего правила» —
+/// считается сужением, повтор журнала безопасен.
+fn rules_narrowed(old: &[String], new: &[String]) -> bool {
+    old.iter().any(|l| !new.contains(l))
+        || new.iter().any(|l| l.starts_with('!') && !old.contains(l))
+        || {
+            let common_old: Vec<&String> = old.iter().filter(|l| new.contains(l)).collect();
+            let common_new: Vec<&String> = new.iter().filter(|l| old.contains(l)).collect();
+            common_old != common_new
+        }
+}
+
 pub(crate) fn build_excludes(cfg: &EngineConfig) -> Excludes {
     let mut e = Excludes::new(&cfg.excludes);
     for h in &cfg.hard_excludes {
-        e.push(h);
+        e.push_hard(h);
     }
     e
 }
