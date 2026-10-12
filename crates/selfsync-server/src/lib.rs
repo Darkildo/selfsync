@@ -8,6 +8,7 @@ pub mod blobs;
 pub mod cmd;
 pub mod config;
 pub mod db;
+pub mod doctor;
 pub mod error;
 pub mod gc;
 pub mod modes;

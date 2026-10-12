@@ -17,7 +17,7 @@ use crate::db::{self, now_ms, server, vault};
 use crate::gc::{self, GcOptions};
 use crate::state::{list_vault_dirs, open_vault, vault_dir};
 
-fn server_conn(config: &Config) -> anyhow::Result<rusqlite::Connection> {
+pub(crate) fn server_conn(config: &Config) -> anyhow::Result<rusqlite::Connection> {
     std::fs::create_dir_all(&config.data_dir)
         .with_context(|| format!("не создаётся каталог данных {}", config.data_dir.display()))?;
     let mut c = db::open(&config.data_dir.join("server.db"))?;

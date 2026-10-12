@@ -183,8 +183,11 @@ selfsync backup /backups/selfsync-$(date +%F)    # consistent copy while running
 selfsync gc --vault notes                         # garbage collection plan; --yes to run it
 selfsync sweep                                    # erase deleted files older than the retention window (timer)
 selfsync verify                                   # integrity check: databases, blob hashes, missing blobs (timer)
+selfsync doctor                                   # setup check: data dir, disk, address, proxy, timers, backups, verify, quotas
 selfsync healthcheck
 ```
+
+`selfsync doctor` checks the installation and says what to fix: the data directory (writable, closed to other users), free disk space, the databases, `SELFSYNC_PUBLIC_URL` and TLS, `SELFSYNC_TRUSTED_PROXY` behind a reverse proxy, whether the public address answers (with `curl`, if installed), the verify, backup and sweep timers (with systemd), whether backups are fresh and on another disk, the last `verify` of each vault, and quotas. Exit code 1 means something is broken; warnings alone give 0.
 
 Back up with `backup`: the copy is consistent even while the server is running. To restore, put the directory back. Devices notice that the server went back in time and run a full reconciliation without deleting anything. What a backup protects against depends on how blobs get into it:
 

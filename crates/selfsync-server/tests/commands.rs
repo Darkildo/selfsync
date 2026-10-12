@@ -787,3 +787,86 @@ async fn backup_rotation_keeps_last_n() {
     }
     assert!(cmd::backup_rotate(s.config(), root, 0, true).is_err());
 }
+
+#[tokio::test]
+async fn doctor_reports_setup_problems() {
+    use selfsync_server::doctor::{Level, Options, doctor};
+    use std::os::unix::fs::PermissionsExt;
+    let s = TestServer::new();
+    two_files(&s).await;
+    let mut config = s.config().clone();
+    std::fs::set_permissions(&config.data_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let now = selfsync_server::db::now_ms();
+    let backups = tempfile::tempdir().unwrap();
+    let opts = Options {
+        backup_dir: backups.path().to_path_buf(),
+        systemd: false,
+        external: false,
+        now_ms: now,
+    };
+    let find = |r: &selfsync_server::doctor::Report, what: &str| -> Vec<(Level, String)> {
+        r.findings
+            .iter()
+            .filter(|f| f.what == what)
+            .map(|f| (f.level, f.text.clone()))
+            .collect()
+    };
+    let r = doctor(&config, &opts);
+    assert_eq!(find(&r, "каталог данных")[0].0, Level::Ok);
+    assert_eq!(
+        find(&r, "внешний адрес")[0].0,
+        Level::Warn,
+        "PUBLIC_URL не задан"
+    );
+    let v = find(&r, "vault «notes»");
+    assert!(
+        v.iter()
+            .any(|(l, t)| *l == Level::Warn && t.contains("verify")),
+        "{v:?}"
+    );
+    assert_eq!(
+        find(&r, "бэкапы")[0].0,
+        Level::Warn,
+        "пустой каталог бэкапов"
+    );
+    assert!(!r.failed(), "{:?}", r.findings);
+
+    // verify прошёл, адрес задан; полный vault — отказ.
+    verify::verify_vault(&config, "notes", VerifyOptions::default()).unwrap();
+    config.public_url = Some("https://notes.example.com".into());
+    config.trusted_proxy = true;
+    {
+        let vv = open_vault(&config, "notes", 1).unwrap();
+        let c = vv.pool.get().unwrap();
+        selfsync_server::quota::set_own(
+            &c,
+            &selfsync_server::quota::Own {
+                hard: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    let r = doctor(&config, &opts);
+    assert_eq!(find(&r, "внешний адрес")[0].0, Level::Ok);
+    assert!(find(&r, "прокси").is_empty());
+    let v = find(&r, "vault «notes»");
+    assert!(
+        v.iter()
+            .any(|(l, t)| *l == Level::Ok && t.contains("verify")),
+        "{v:?}"
+    );
+    assert!(
+        v.iter()
+            .any(|(l, t)| *l == Level::Fail && t.contains("место")),
+        "{v:?}"
+    );
+    assert!(r.failed());
+
+    // Каталог данных открыт всем, сервер за прокси без TRUSTED_PROXY.
+    std::fs::set_permissions(&config.data_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    config.trusted_proxy = false;
+    let r = doctor(&config, &opts);
+    assert_eq!(find(&r, "каталог данных")[0].0, Level::Warn);
+    assert_eq!(find(&r, "прокси")[0].0, Level::Warn);
+}

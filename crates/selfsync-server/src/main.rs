@@ -127,6 +127,14 @@ enum Cmd {
         #[arg(long)]
         quiet: bool,
     },
+    /// Проверка установки: каталог данных и место, базы, внешний адрес и прокси,
+    /// таймеры, бэкапы на другом диске, итог verify, квоты. Код выхода: 0 — без
+    /// отказов (предупреждения допустимы), 1 — есть отказы.
+    Doctor {
+        /// Каталог бэкапов `selfsync backup --rotate`.
+        #[arg(long, default_value = "/var/lib/selfsync-backups")]
+        backup_dir: PathBuf,
+    },
     /// Проверка живости (код 0/1), для HEALTHCHECK.
     Healthcheck {
         #[arg(
@@ -333,6 +341,34 @@ fn run() -> anyhow::Result<ExitCode> {
                     }
                 },
             );
+        }
+        Cmd::Doctor { backup_dir } => {
+            use selfsync_server::doctor::{self, Level, Options};
+            let now = i64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_millis()),
+            )
+            .unwrap_or(i64::MAX);
+            let opts = Options {
+                backup_dir,
+                ..Options::new(now)
+            };
+            let report = doctor::doctor(&config, &opts);
+            for f in &report.findings {
+                let mark = match f.level {
+                    Level::Ok => "✓",
+                    Level::Warn => "⚠",
+                    Level::Fail => "✗",
+                    Level::Skip => "–",
+                };
+                println!("{mark} {}: {}", f.what, f.text);
+            }
+            return Ok(if report.failed() {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            });
         }
         Cmd::Healthcheck { url } => {
             return Ok(if cmd::healthcheck(&url) {
