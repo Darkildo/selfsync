@@ -115,6 +115,9 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
             crypto_flow::rekey(cx, password, remember).await?;
         }
     }
+    if !read_only {
+        super::repair::offer_wanted(cx).await?;
+    }
     if read_only && pending > 0 && !cx.with(|s| s.read_only_notified) {
         cx.with_mut(|s| s.read_only_notified = true);
         cx.notify(Notice::ReadOnly {

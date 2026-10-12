@@ -134,6 +134,15 @@ pub async fn blobs_missing(cx: &Ctx, hashes: &[Hash]) -> SyncResult<Vec<Hash>> {
     Ok(out)
 }
 
+/// Блобы, которые сервер просит залить заново.
+pub async fn blobs_wanted(cx: &Ctx) -> SyncResult<Vec<Hash>> {
+    let r: pb::HashList = call(cx, req("GET", "/v1/blobs/wanted".into(), vec![], None)).await?;
+    Ok(r.hashes
+        .iter()
+        .filter_map(|h| Hash::from_slice(h))
+        .collect())
+}
+
 pub async fn put_blob(cx: &Ctx, h: &Hash, data: Vec<u8>) -> SyncResult<()> {
     let mut r = req(
         "PUT",

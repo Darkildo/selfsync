@@ -16,7 +16,8 @@ pub const MAX_OPS: usize = 1000;
 pub const DEFAULT_RETENTION_DAYS: u32 = 30;
 pub const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
 CREATE TABLE files (
   path         BLOB PRIMARY KEY,
   rev          INTEGER NOT NULL,
@@ -61,7 +62,12 @@ CREATE TABLE uploads (
   updated_at  INTEGER NOT NULL
 );
 CREATE INDEX uploads_hash ON uploads(hash);
-"];
+",
+    "
+-- Блобы, которые `verify` нашёл битыми или отсутствующими: их просят у устройств.
+CREATE TABLE wanted_blobs (hash BLOB PRIMARY KEY, since INTEGER NOT NULL) WITHOUT ROWID;
+",
+];
 
 pub fn migrate_vault(c: &mut Connection) -> rusqlite::Result<()> {
     migrate(c, MIGRATIONS)
@@ -158,7 +164,51 @@ pub fn vault_state(c: &Connection) -> rusqlite::Result<pb::VaultState> {
             _ => {}
         }
     }
+    let wanted: i64 = c
+        .prepare_cached("SELECT COUNT(*) FROM wanted_blobs")?
+        .query_row([], |r| r.get(0))?;
+    s.blobs_wanted = u32::try_from(wanted).unwrap_or(u32::MAX);
     Ok(s)
+}
+
+// ---------------------------------------------------------------------------
+// запрошенные блобы
+// ---------------------------------------------------------------------------
+
+/// Попросить блобы у устройств (уже запрошенные сохраняют время запроса).
+pub fn want_blobs(c: &Connection, hashes: &[Hash], now: i64) -> rusqlite::Result<()> {
+    let mut st =
+        c.prepare_cached("INSERT OR IGNORE INTO wanted_blobs (hash, since) VALUES (?1, ?2)")?;
+    for h in hashes {
+        st.execute(params![h.to_vec(), now])?;
+    }
+    Ok(())
+}
+
+/// Блоб сохранён или больше не нужен.
+pub fn unwant_blob(c: &Connection, h: &Hash) -> rusqlite::Result<bool> {
+    Ok(
+        c.prepare_cached("DELETE FROM wanted_blobs WHERE hash = ?1")?
+            .execute(params![h.to_vec()])?
+            > 0,
+    )
+}
+
+/// Запрошенные блобы и с какого времени (мс), старые первыми.
+pub fn wanted_blobs(c: &Connection, limit: usize) -> rusqlite::Result<Vec<(Hash, i64)>> {
+    let mut st =
+        c.prepare_cached("SELECT hash, since FROM wanted_blobs ORDER BY since, hash LIMIT ?1")?;
+    let rows = st.query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |r| {
+        Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, i64>(1)?))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (h, since) = row?;
+        if let Some(h) = Hash::from_slice(&h) {
+            out.push((h, since));
+        }
+    }
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------

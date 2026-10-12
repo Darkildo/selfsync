@@ -500,6 +500,23 @@ pub fn verify(
         for (h, why) in &r.unrepaired {
             println!("vault {name}: не восстановлен {}: {why}", h.to_hex());
         }
+        if !r.wanted.is_empty() {
+            let now = db::now_ms();
+            println!(
+                "vault {name}: запрошено у устройств {} (битые убраны в quarantine/): \
+                 устройство с целым файлом зальёт его при следующем синке",
+                r.wanted.len()
+            );
+            for (h, since) in &r.wanted {
+                if now - since > crate::db::vault::DAY_MS {
+                    println!(
+                        "vault {name}: ждёт устройств дольше суток {} (с {})",
+                        h.to_hex(),
+                        fmt_time(*since)
+                    );
+                }
+            }
+        }
         if !quiet {
             for h in &r.repaired {
                 println!("vault {name}: восстановлен из бэкапа {}", h.to_hex());

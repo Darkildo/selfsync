@@ -420,13 +420,51 @@ async fn verify_detects_corrupt_blob() {
     let r = verify::verify_vault(s.config(), "notes", VerifyOptions::default()).unwrap();
     assert_eq!(r.corrupt, vec![h]);
     assert!(!r.clean());
+    // битый — в карантине и запрошен у устройств
+    assert!(!v.blobs.exists(&h));
+    assert!(v.dir.join("quarantine").join(h.to_hex()).is_file());
+    assert_eq!(r.wanted.iter().map(|w| w.0).collect::<Vec<_>>(), vec![h]);
+    // повторная проверка видит его отсутствующим, запрос остаётся
     let (code, out) = run_verify(&s.config().data_dir, &["--quiet"]);
     assert_eq!(code, 1, "{out}");
-    assert!(out.contains(&format!("битый блоб {}", h.to_hex())), "{out}");
+    assert!(out.contains(&format!("нет блоба {}", h.to_hex())), "{out}");
+    assert!(out.contains("запрошено у устройств 1"), "{out}");
     assert!(
         !out.contains("server.db"),
         "--quiet печатает только проблемы: {out}"
     );
+}
+
+#[tokio::test]
+async fn wanted_blob_is_settled_by_upload() {
+    let s = TestServer::new();
+    two_files(&s).await;
+    let t = s.token("notes", "b");
+    let v = open_vault(s.config(), "notes", 1).unwrap();
+    let h = blob_hash(b"first file");
+    flip_byte(&v.blobs.path_of(&h));
+    verify::verify_vault(s.config(), "notes", VerifyOptions::default()).unwrap();
+    assert_eq!(s.changes(&t, 0).await.vault.unwrap().blobs_wanted, 1);
+    let wanted: pb::HashList = s.get("/v1/blobs/wanted", &t).await.proto();
+    assert_eq!(wanted.hashes, vec![h.to_vec()]);
+    // чужие байты под этим именем не принимаются, запрос остаётся
+    let r = s
+        .call(
+            http::Method::PUT,
+            &format!("/v1/blobs/{}", h.to_hex()),
+            Some(&t),
+            b"not it".to_vec(),
+            &[],
+        )
+        .await;
+    assert_eq!(r.status, http::StatusCode::BAD_REQUEST);
+    assert_eq!(s.changes(&t, 0).await.vault.unwrap().blobs_wanted, 1);
+    // целый блоб снимает запрос
+    s.put_blob(&t, &blob::encode(b"first file", None)).await;
+    assert!(v.blobs.exists(&h));
+    assert_eq!(s.changes(&t, 0).await.vault.unwrap().blobs_wanted, 0);
+    let r = verify::verify_vault(s.config(), "notes", VerifyOptions::default()).unwrap();
+    assert!(r.clean() && r.wanted.is_empty(), "{r:?}");
 }
 
 #[tokio::test]
@@ -526,9 +564,13 @@ async fn verify_rejects_bad_backup_blob() {
     assert_eq!(r.corrupt, vec![a]);
     assert_eq!(r.unrepaired, vec![(a, "в бэкапе тоже повреждён")]);
     assert!(r.repaired.is_empty());
-    // оригинал не тронут, карантина нет
-    assert_eq!(std::fs::read(v.blobs.path_of(&a)).unwrap(), b"garbage");
-    assert!(!v.dir.join("quarantine").exists());
+    // оригинал — в карантине, блоб запрошен у устройств
+    assert!(!v.blobs.exists(&a));
+    assert_eq!(
+        std::fs::read(v.dir.join("quarantine").join(&hex)).unwrap(),
+        b"garbage"
+    );
+    assert_eq!(r.wanted.len(), 1);
     let (code, out) = run_verify(
         &s.config().data_dir,
         &["--quiet", "--repair-from", bk.to_str().unwrap()],

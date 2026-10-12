@@ -50,6 +50,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/wait", get(core::wait))
         .route("/v1/ops", post(core::ops))
         .route("/v1/blobs/missing", post(blobs::missing))
+        .route("/v1/blobs/wanted", get(blobs::wanted))
         .route(
             "/v1/blobs/{hash}",
             put(blobs::put_blob).get(blobs::get_blob),

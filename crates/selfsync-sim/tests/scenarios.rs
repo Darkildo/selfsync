@@ -2017,3 +2017,108 @@ fn sync_regression_seeds() {
         selfsync_sim::run_seed(SimConfig::random(seed)).unwrap();
     }
 }
+
+// F12. Восстановление блобов с устройств.
+
+/// Блоб, под которым сервер хранит это содержимое (открытый или любым ключом vault'а).
+fn blob_of(w: &World, plain: &[u8]) -> selfsync_core::hash::Hash {
+    use selfsync_core::{blob, hash::Hash};
+    let v = w.state.vault("sim").unwrap();
+    let ph = Hash::of(plain);
+    let mut cands = vec![Hash::of(&blob::encode(plain, None))];
+    for k in w.vault_key_sets() {
+        cands.push(Hash::of(&blob::encode_with_hash(plain, ph, Some(&k))));
+    }
+    cands
+        .into_iter()
+        .find(|h| v.blobs.exists(h))
+        .expect("блоб содержимого на сервере")
+}
+
+fn verify(w: &World) -> selfsync_server::verify::VerifyReport {
+    selfsync_server::verify::verify_vault(&w.state.config, "sim", Default::default()).unwrap()
+}
+
+fn read(w: &World, c: usize, path: &str) -> Vec<u8> {
+    w.clients[c].fs.read_file(path).cloned().unwrap()
+}
+
+fn blobs_restored_from_devices(encrypted: bool) {
+    let mut w = World::new(quiet(2));
+    if encrypted {
+        encrypt_all(&mut w);
+    }
+    shared_note(&mut w, "a.md");
+    sized_file(&mut w, 0, "big.bin", 9 * 1024 * 1024);
+    let old = base_note(&mut w, 0, "h.md");
+    w.sync(0);
+    let h_old = blob_of(&w, &read(&w, 0, "h.md"));
+    edit_line(&mut w, 0, "h.md", 0);
+    w.sync(0);
+    w.sync(1);
+    // Порча на сервере: битый, удалённый большой, удалённый из истории.
+    let v = w.state.vault("sim").unwrap();
+    let a = blob_of(&w, &read(&w, 1, "a.md"));
+    let big = blob_of(&w, &read(&w, 1, "big.bin"));
+    std::fs::write(v.blobs.path_of(&a), b"rot").unwrap();
+    std::fs::remove_file(v.blobs.path_of(&big)).unwrap();
+    std::fs::remove_file(v.blobs.path_of(&h_old)).unwrap();
+    let r = verify(&w);
+    assert_eq!(r.corrupt, vec![a]);
+    assert_eq!(r.missing.len(), 2);
+    assert_eq!(r.wanted.len(), 3);
+    // Любое устройство с целым файлом заливает его заново.
+    w.sync(1);
+    let r = verify(&w);
+    assert!(r.corrupt.is_empty());
+    let left: Vec<_> = r.missing.iter().map(|m| m.hash).collect();
+    assert_eq!(left, vec![h_old], "из истории взять неоткуда: {r:?}");
+    assert_eq!(
+        r.wanted.iter().map(|x| x.0).collect::<Vec<_>>(),
+        vec![h_old]
+    );
+    assert!(v.blobs.exists(&a) && v.blobs.exists(&big));
+    // Запрос, на который ответить нечем, не разбирается каждый цикл.
+    w.sync(0);
+    w.trace.clear();
+    w.sync(0);
+    assert!(
+        !w.trace.iter().any(|l| l.contains("/v1/blobs/wanted")),
+        "повторный разбор того же запроса"
+    );
+    finish(&mut w);
+    let _ = old;
+}
+
+#[test]
+fn blobs_restored_from_devices_plain() {
+    blobs_restored_from_devices(false);
+}
+
+#[test]
+fn blobs_restored_from_devices_encrypted() {
+    blobs_restored_from_devices(true);
+}
+
+#[test]
+fn read_only_device_does_not_upload_wanted_blobs() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    w.set_read_only(1);
+    let v = w.state.vault("sim").unwrap();
+    let a = blob_of(&w, &read(&w, 1, "a.md"));
+    std::fs::remove_file(v.blobs.path_of(&a)).unwrap();
+    assert_eq!(verify(&w).wanted.len(), 1);
+    w.trace.clear();
+    w.sync(1);
+    assert!(
+        !w.trace.iter().any(|l| l.contains("/v1/blobs")),
+        "read-only устройство в запросе не участвует: {:?}",
+        w.trace
+    );
+    assert!(!v.blobs.exists(&a));
+    assert_eq!(verify(&w).wanted.len(), 1);
+    w.sync(0);
+    assert!(v.blobs.exists(&a));
+    assert!(verify(&w).clean());
+}

@@ -11,6 +11,7 @@ mod crypto_flow;
 mod ctx;
 mod pull;
 mod push;
+mod repair;
 mod resolve;
 mod runtime;
 mod scan;

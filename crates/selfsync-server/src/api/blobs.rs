@@ -47,6 +47,29 @@ pub async fn missing(
     Ok(Proto(pb::HashList { hashes }))
 }
 
+/// Блобы, которые сервер просит залить заново (`verify` нашёл их битыми или
+/// отсутствующими), старые первыми.
+pub async fn wanted(Extension(a): Extension<AuthCtx>) -> ApiResult<Proto<pb::HashList>> {
+    let list = a
+        .vault
+        .db(|c, _| Ok(crate::db::vault::wanted_blobs(c, 10_000)?))
+        .await?;
+    Ok(Proto(pb::HashList {
+        hashes: list.into_iter().map(|(h, _)| h.to_vec()).collect(),
+    }))
+}
+
+/// Блоб на месте: если его просили у устройств, запрос снят.
+async fn settle_wanted(a: &AuthCtx, h: Hash) -> ApiResult<()> {
+    if a.vault
+        .db(move |c, _| Ok(crate::db::vault::unwant_blob(c, &h)?))
+        .await?
+    {
+        tracing::info!(blob = %h.to_hex(), device = a.device_id, "запрошенный блоб залит устройством");
+    }
+    Ok(())
+}
+
 fn stream_error(e: StreamError) -> ApiError {
     match e {
         StreamError::Io(e) => ApiError::internal(e),
@@ -64,6 +87,7 @@ pub async fn put_blob(
     let h = parse_hash(&hash)?;
     let limit = SINGLE_PUT_LIMIT.min(st.config.max_blob_size);
     if a.vault.blobs.exists(&h) {
+        settle_wanted(&a, h).await?;
         return Ok(StatusCode::OK.into_response());
     }
     if content_length(req.headers()).is_some_and(|n| n > limit) {
@@ -79,8 +103,15 @@ pub async fn put_blob(
         .await
         .map_err(stream_error)?
     {
-        WriteOutcome::Stored { created: true } => Ok(StatusCode::CREATED.into_response()),
-        WriteOutcome::Stored { created: false } => Ok(StatusCode::OK.into_response()),
+        WriteOutcome::Stored { created } => {
+            settle_wanted(&a, h).await?;
+            Ok(if created {
+                StatusCode::CREATED
+            } else {
+                StatusCode::OK
+            }
+            .into_response())
+        }
         WriteOutcome::HashMismatch => Err(ApiError::bad_request(
             "hash_mismatch",
             "содержимое не совпадает с хэшем",
@@ -232,6 +263,7 @@ pub async fn upload_start(
         return Err(ApiError::too_large("файл больше лимита сервера"));
     }
     if a.vault.blobs.exists(&h) {
+        settle_wanted(&a, h).await?;
         return Ok(Proto(pb::UploadState {
             upload_id: String::new(),
             offset: req.size,
@@ -404,6 +436,7 @@ pub async fn upload_commit(
     if a.vault.blobs.exists(&h) {
         let _ = tokio::fs::remove_file(&path).await;
         remove_row(&a, id).await?;
+        settle_wanted(&a, h).await?;
         return Ok(Proto(pb::UploadState {
             upload_id: String::new(),
             offset: size,
@@ -429,6 +462,7 @@ pub async fn upload_commit(
     let store = a.vault.blobs.clone();
     tokio::task::spawn_blocking(move || store.finalize(&path, &h)).await??;
     remove_row(&a, id).await?;
+    settle_wanted(&a, h).await?;
     Ok(Proto(pb::UploadState {
         upload_id: String::new(),
         offset: size,

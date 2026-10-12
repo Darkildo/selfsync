@@ -147,6 +147,8 @@ pub(crate) struct State {
     pub rules_changed: bool,
     /// Пропущенные файлы, которые попросили скачать (в начале ближайшего цикла).
     pub download_queue: BTreeSet<String>,
+    /// Запрос сервера на блобы разобран: сколько их было и когда (см. `repair`).
+    pub wanted_checked: Option<(u32, i64)>,
 }
 
 impl State {
@@ -200,6 +202,7 @@ impl State {
             stale_temps: Vec::new(),
             rules_changed: false,
             download_queue: BTreeSet::new(),
+            wanted_checked: None,
         };
         // Правила могли смениться между запусками (CLI правят конфиг при
         // остановленной службе): событие Configure тогда не придёт.

@@ -1,10 +1,13 @@
 //! Проверка целостности хранилища (`selfsync verify`): базы, хэши блобов, блобы, на
 //! которые ссылаются записи, запись ключа шифрования. С `--repair-from` битые и
-//! отсутствующие блобы берутся из бэкапа.
+//! отсутствующие блобы берутся из бэкапа; что не восстановлено, просится у устройств
+//! (`wanted_blobs`): битый блоб уходит в `quarantine/`, и устройство с целым файлом
+//! заливает его заново при следующем синке.
 //!
 //! Имя блоба — хэш хранимых байтов (для зашифрованных тоже), поэтому ключ не нужен.
-//! Работает на живом сервере: блобы и базы только читаются, `uploads/` не трогается;
-//! блоб, появившийся во время обхода, проверится в следующий раз.
+//! Работает на живом сервере: из блобов меняются только битые (уходят в карантин),
+//! `uploads/` не трогается; блоб, появившийся во время обхода, проверится в следующий
+//! раз.
 
 use std::collections::HashSet;
 use std::io::{self, Read};
@@ -17,7 +20,7 @@ use selfsync_core::path::canonical_decode;
 
 use crate::blobs::BlobStore;
 use crate::config::Config;
-use crate::db::vault::meta_blob;
+use crate::db::vault::{meta_blob, unwant_blob, want_blobs, wanted_blobs};
 use crate::gc::{self, GcOptions};
 use crate::state::open_vault;
 
@@ -60,6 +63,8 @@ pub struct VerifyReport {
     pub uploads: u64,
     /// Запись ключа шифрования отсутствует или не разбирается.
     pub key_problem: Option<String>,
+    /// Просятся у устройств после проверки: хэш и с какого времени (мс).
+    pub wanted: Vec<(Hash, i64)>,
     pub elapsed: Duration,
 }
 
@@ -213,9 +218,11 @@ pub fn verify_vault(
     }
 
     // Отсутствующие: ссылки без файла. Блоб мог появиться после листинга — проверить ещё раз.
-    let mut missing: Vec<Hash> = referenced(&c)?
-        .into_iter()
-        .filter(|h| !present.contains(h))
+    let refs = referenced(&c)?;
+    let mut missing: Vec<Hash> = refs
+        .iter()
+        .filter(|&h| !present.contains(h))
+        .cloned()
         .filter_map(|h| Hash::from_slice(&h))
         .filter(|h| !v.blobs.exists(h))
         .collect();
@@ -263,12 +270,45 @@ pub fn verify_vault(
         }
         missing = still;
     }
+
+    // Что не восстановлено — просить у устройств. Битый блоб — в карантин: его байты
+    // бесполезны, а на месте он не дал бы залить целый (блоб с таким именем «есть»).
+    let mut want = missing.clone();
+    for h in &r.corrupt {
+        match quarantine(&v.blobs, h) {
+            Ok(()) => want.push(*h),
+            Err(e) => {
+                tracing::warn!(blob = %h.to_hex(), error = %e, "битый блоб не убран в карантин")
+            }
+        }
+    }
+    let now = crate::db::now_ms();
+    want_blobs(&c, &want, now)?;
+    // Запрос больше не нужен: блоб на месте (залит или восстановлен) или ссылок нет.
+    for (h, _) in wanted_blobs(&c, usize::MAX)? {
+        if !refs.contains(&h.to_vec()) || (v.blobs.exists(&h) && !r.corrupt.contains(&h)) {
+            unwant_blob(&c, &h)?;
+        }
+    }
+    r.wanted = wanted_blobs(&c, usize::MAX)?;
+
     for h in missing {
         let paths = paths_of(&c, &h)?;
         r.missing.push(Missing { hash: h, paths });
     }
     r.elapsed = start.elapsed();
     Ok(r)
+}
+
+/// Битый блоб — в `quarantine/` (`gc` его не трогает).
+fn quarantine(store: &BlobStore, h: &Hash) -> io::Result<()> {
+    let src = store.path_of(h);
+    if !src.is_file() {
+        return Ok(());
+    }
+    let q = store.quarantine_dir();
+    std::fs::create_dir_all(&q)?;
+    std::fs::rename(&src, q.join(h.to_hex()))
 }
 
 /// Взять блоб из бэкапа: скопировать во временный файл, проверить хэш, битый
