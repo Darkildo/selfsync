@@ -1987,7 +1987,7 @@ dependencies = [
 
 [[package]]
 name = "selfsync-cli"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -2010,7 +2010,7 @@ dependencies = [
 
 [[package]]
 name = "selfsync-core"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "aes-gcm-siv",
  "aes-siv",
@@ -2036,7 +2036,7 @@ dependencies = [
 
 [[package]]
 name = "selfsync-proto"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "prost",
  "prost-build",
@@ -2045,7 +2045,7 @@ dependencies = [
 
 [[package]]
 name = "selfsync-server"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -2086,7 +2086,7 @@ dependencies = [
 
 [[package]]
 name = "selfsync-sim"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "axum",
  "http",
@@ -2103,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "selfsync-wasm"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.4.3",
