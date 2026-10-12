@@ -57,6 +57,8 @@ export interface SyncStatus {
   readOnly: boolean;
   /** У записи ключа есть фраза восстановления. */
   recovery: boolean;
+  /** Минорная версия протокола сервера (0 — сервер 0.1.x); `null` — ещё не отвечал. */
+  serverMinor?: number | null;
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";

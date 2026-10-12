@@ -254,6 +254,8 @@ pub struct World {
     pub planned_faults: VecDeque<(String, bool)>,
     /// Изображать старый сервер, который не сообщает `VaultState.read_only`.
     pub hide_read_only: bool,
+    /// Изображать сервер 0.1.x: ответы без заголовка версии протокола.
+    pub hide_proto_header: bool,
 }
 
 fn data_root() -> std::path::PathBuf {
@@ -296,6 +298,7 @@ impl World {
             faults_enabled: true,
             planned_faults: VecDeque::new(),
             hide_read_only: false,
+            hide_proto_header: false,
         };
         for i in 0..cfg.clients {
             w.add_client(i);
@@ -459,12 +462,14 @@ impl World {
             };
         };
         let app = self.app.clone();
+        let hide_proto = self.hide_proto_header;
         let (status, headers, body) = self.rt.block_on(async move {
             let resp = app.oneshot(request).await.expect("infallible");
             let status = resp.status().as_u16();
             let headers: Vec<(String, String)> = resp
                 .headers()
                 .iter()
+                .filter(|(k, _)| !(hide_proto && k.as_str() == selfsync_proto::HEADER_PROTO))
                 .map(|(k, v)| (k.as_str().to_owned(), v.to_str().unwrap_or("").to_owned()))
                 .collect();
             let body = axum::body::to_bytes(resp.into_body(), usize::MAX)

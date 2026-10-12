@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use selfsync_proto::v1 as pb;
+use selfsync_proto::{HEADER_PROTO, PROTO_VERSION, parse_proto};
 
 use super::runtime::Hub;
 use super::types::*;
@@ -37,6 +38,9 @@ pub enum SyncError {
     RateLimited { retry_after_s: u64 },
     #[error("протокол не поддерживается сервером")]
     ProtoUnsupported(u32),
+    /// Сервер старее клиента и не умеет нужного (текст — что именно и что делать).
+    #[error("{0}")]
+    ServerOutdated(String),
     #[error("ответ сервера не разбирается: {0}")]
     Protocol(String),
     #[error("ввод-вывод: {0}")]
@@ -391,6 +395,26 @@ impl Ctx {
         true
     }
 
+    /// Запомнить минорную версию протокола сервера из ответа. Заголовок есть — его
+    /// минорная; нет в успешном ответе — сервер 0.1.x (`1.0`). Ошибка без заголовка
+    /// могла прийти от прокси, а не от сервера: по ней не судим.
+    fn note_server_proto(&self, status: u16, headers: &[(String, String)]) {
+        let minor = match headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(HEADER_PROTO))
+        {
+            Some((_, v)) => match parse_proto(v) {
+                Some((PROTO_VERSION, m)) => m,
+                _ => return,
+            },
+            None if (200..300).contains(&status) => 0,
+            None => return,
+        };
+        if self.with(|s| s.status.server_minor) != Some(minor) {
+            self.set_status(|st| st.server_minor = Some(minor));
+        }
+    }
+
     pub async fn http(
         &self,
         req: HttpRequest,
@@ -400,7 +424,10 @@ impl Ctx {
                 status,
                 headers,
                 body,
-            } => Ok((status, headers, body)),
+            } => {
+                self.note_server_proto(status, &headers);
+                Ok((status, headers, body))
+            }
             IoResult::Failed { message } => Err(SyncError::Network(message)),
             other => Err(SyncError::Io(format!(
                 "неожиданный ответ на HTTP: {other:?}"

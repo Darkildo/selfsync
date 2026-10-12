@@ -1,6 +1,7 @@
 //! Команды интерфейса (окно восстановления, история, устройства, подключение по QR,
 //! настройки vault'а) и решения пользователя по конфликтам.
 
+use selfsync_proto::MINOR_READ_ONLY;
 use selfsync_proto::v1 as pb;
 
 use super::api;
@@ -25,6 +26,7 @@ fn error_result(e: &SyncError) -> UiResult {
         SyncError::Network(_) => "offline",
         SyncError::Unauthorized => "unauthorized",
         SyncError::RateLimited { .. } => "rate_limited",
+        SyncError::ServerOutdated(_) => "server_outdated",
         SyncError::ReadOnly => "read_only",
         SyncError::Paused(r) | SyncError::Blocked(r) => r.as_str(),
         SyncError::Http { code, .. } | SyncError::Server { code, .. } => code.as_str(),
@@ -38,6 +40,15 @@ fn error_result(e: &SyncError) -> UiResult {
             _ => 0,
         },
     }
+}
+
+/// Минорная версия протокола сервера; ещё ни одного ответа — спросить health.
+async fn server_minor(cx: &Ctx) -> SyncResult<u32> {
+    if let Some(m) = cx.with(|s| s.status.server_minor) {
+        return Ok(m);
+    }
+    api::health(cx).await?;
+    Ok(cx.with(|s| s.status.server_minor).unwrap_or(0))
 }
 
 /// Команда меняет что-то на сервере (устройству только для чтения нельзя).
@@ -193,6 +204,12 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             Ok(UiResult::Ok)
         }
         UiCommand::CreateJoin { name, read_only } => {
+            // Сервер 0.1.x поле `read_only` молча отбросил бы и выдал полный доступ.
+            if read_only && server_minor(cx).await? < MINOR_READ_ONLY {
+                return Err(SyncError::ServerOutdated(
+                    "сервер не поддерживает устройства только для чтения: обновите его до 0.2.1 или новее".into(),
+                ));
+            }
             let j = api::join_create(cx, name, read_only).await?;
             Ok(UiResult::Join {
                 code: j.code,

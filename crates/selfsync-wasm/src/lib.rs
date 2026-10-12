@@ -90,6 +90,13 @@ pub fn protocol_version() -> u32 {
     selfsync_core::proto::PROTO_VERSION
 }
 
+/// Минорная версия протокола, с которой сервер умеет устройства только для чтения
+/// (сравнивается с `SyncStatus.serverMinor`).
+#[wasm_bindgen(js_name = readOnlyMinor)]
+pub fn read_only_minor() -> u32 {
+    selfsync_core::proto::MINOR_READ_ONLY
+}
+
 /// QR-код строки (ссылки подключения): `[ширина, модули…]`, модуль 1 — тёмный.
 /// Рисует интерфейс: так в WASM не попадает рендерер SVG/картинок.
 #[wasm_bindgen(js_name = qrModules)]

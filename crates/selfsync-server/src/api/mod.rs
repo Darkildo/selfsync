@@ -19,7 +19,9 @@ use axum::routing::{delete, get, post, put};
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use prost::Message;
-use selfsync_proto::{CONTENT_TYPE_PROTOBUF, HEADER_PROTO, PROTO_VERSION};
+use selfsync_proto::{
+    CONTENT_TYPE_PROTOBUF, HEADER_PROTO, MINOR_READ_ONLY, PROTO_VERSION, parse_proto, proto_header,
+};
 
 use crate::error::{ApiError, ApiResult};
 use crate::state::{AppState, Vault};
@@ -92,26 +94,35 @@ pub fn router(state: AppState) -> Router {
 }
 
 /// Проверка `X-Selfsync-Proto`: нет заголовка — 400, другой мажор — 426.
-pub fn check_proto(headers: &HeaderMap) -> ApiResult<()> {
+/// Возвращает минорную версию клиента (0.1.x шлёт `1` — это `1.0`).
+pub fn check_proto(headers: &HeaderMap) -> ApiResult<u32> {
     let Some(v) = headers.get(HEADER_PROTO) else {
         return Err(ApiError::bad_request(
             "proto_header_missing",
             "нужен заголовок X-Selfsync-Proto",
         ));
     };
-    let major = v
-        .to_str()
-        .ok()
-        .and_then(|s| s.split('.').next())
-        .and_then(|s| s.trim().parse::<u32>().ok());
-    if major != Some(PROTO_VERSION) {
-        return Err(ApiError::new(
+    match v.to_str().ok().and_then(parse_proto) {
+        Some((major, minor)) if major == PROTO_VERSION => Ok(minor),
+        _ => Err(ApiError::new(
             StatusCode::UPGRADE_REQUIRED,
             "proto_unsupported",
             format!("сервер поддерживает протокол версии {PROTO_VERSION}"),
-        ));
+        )),
     }
-    Ok(())
+}
+
+/// Клиент старее 1.1 не знает устройств только для чтения: с таким токеном он
+/// пытался бы отправлять правки и получал бы непонятные ему 403. Отказ 426 — его
+/// клиент показывает как «обновите плагин или сервер» и больше не повторяет.
+pub fn client_outdated_for_read_only(minor: u32) -> Option<ApiError> {
+    (minor < MINOR_READ_ONLY).then(|| {
+        ApiError::new(
+            StatusCode::UPGRADE_REQUIRED,
+            "client_outdated",
+            "устройство подключено только для чтения: нужен плагин или selfsync-cli 0.2.1 или новее",
+        )
+    })
 }
 
 fn bearer(headers: &HeaderMap) -> Option<String> {
@@ -123,9 +134,10 @@ fn bearer(headers: &HeaderMap) -> Option<String> {
 }
 
 async fn auth(State(st): State<AppState>, mut req: Request, next: Next) -> Response {
-    if let Err(e) = check_proto(req.headers()) {
-        return e.into_response();
-    }
+    let minor = match check_proto(req.headers()) {
+        Ok(m) => m,
+        Err(e) => return e.into_response(),
+    };
     // Запрос без токена ничего не перебирает и в БД не ходит: не считается.
     let Some(token) = bearer(req.headers()) else {
         return ApiError::unauthorized().into_response();
@@ -149,6 +161,13 @@ async fn auth(State(st): State<AppState>, mut req: Request, next: Next) -> Respo
         Ok(None) => return ApiError::unauthorized().into_response(),
         Err(e) => return e.into_response(),
     };
+    if dev.read_only
+        && let Some(e) = client_outdated_for_read_only(minor)
+    {
+        let mut resp = e.into_response();
+        resp.extensions_mut().insert(DeviceTag(dev.id));
+        return resp;
+    }
     // Правило одно и проверяемое: устройству только для чтения — только GET и HEAD.
     // Отсюда же: ни записи, ни ключа, ни отзыва, ни новых кодов подключения.
     if dev.read_only && !matches!(*req.method(), http::Method::GET | http::Method::HEAD) {
@@ -202,8 +221,13 @@ async fn access(State(st): State<AppState>, req: Request, next: Next) -> Respons
         st.activity.in_flight.fetch_add(1, Ordering::SeqCst);
         Some(InFlight(&st))
     };
-    let resp = next.run(req).await;
+    let mut resp = next.run(req).await;
     drop(guard);
+    // Версия протокола в каждом ответе, включая ошибки и health: по ней клиент
+    // узнаёт, что умеет сервер (ответ без заголовка — сервер 0.1.x, протокол 1.0).
+    if let Ok(v) = HeaderValue::from_str(&proto_header()) {
+        resp.headers_mut().insert(HEADER_PROTO, v);
+    }
     st.activity.touch();
     let ms = start.elapsed().as_secs_f64() * 1000.0;
     let device = resp.extensions().get::<DeviceTag>().map(|d| d.0);

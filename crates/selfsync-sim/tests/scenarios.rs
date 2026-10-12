@@ -1401,3 +1401,46 @@ fn recovery_phrase_restores_access_with_new_password() {
     assert!(!w.clients[0].status.as_ref().unwrap().recovery);
     finish(&mut w);
 }
+
+/// Сервер 0.1.x не знает устройств только для чтения: ссылку «только чтение» на
+/// нём клиент не создаёт (сервер молча выдал бы полный доступ), обычную — создаёт.
+#[test]
+fn read_only_join_needs_new_server() {
+    use selfsync_core::engine::{UiCommand, UiResult};
+    use selfsync_proto::{MINOR_READ_ONLY, PROTO_MINOR};
+    let join = |w: &mut World, req: u64, read_only: bool| {
+        ui_result(
+            w,
+            0,
+            req,
+            UiCommand::CreateJoin {
+                name: "tablet".into(),
+                read_only,
+            },
+        )
+    };
+    let mut w = World::new(quiet(1));
+    w.hide_proto_header = true;
+    // версия ещё не известна (ни одного ответа) — клиент спросит health
+    let r = join(&mut w, 1, true);
+    assert!(
+        matches!(&r, UiResult::Error { code, .. } if code == "server_outdated"),
+        "{r:?}"
+    );
+    w.sync(0);
+    assert_eq!(w.clients[0].status.as_ref().unwrap().server_minor, Some(0));
+    let r = join(&mut w, 2, true);
+    assert!(
+        matches!(&r, UiResult::Error { code, .. } if code == "server_outdated"),
+        "{r:?}"
+    );
+    assert!(matches!(join(&mut w, 3, false), UiResult::Join { .. }));
+    // сервер обновили: версия приходит в первом же ответе
+    w.hide_proto_header = false;
+    w.now += 20_000;
+    w.sync(0);
+    let minor = w.clients[0].status.as_ref().unwrap().server_minor;
+    assert_eq!(minor, Some(PROTO_MINOR));
+    assert!(minor.unwrap() >= MINOR_READ_ONLY);
+    assert!(matches!(join(&mut w, 4, true), UiResult::Join { .. }));
+}

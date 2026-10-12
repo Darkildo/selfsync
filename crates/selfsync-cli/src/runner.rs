@@ -126,6 +126,17 @@ impl Loop {
                         let _ = std::fs::remove_file(&marker);
                     }
                 }
+                if status.server_minor != self.status.server_minor
+                    && let Some(m) = status.server_minor
+                    && m < selfsync_core::proto::PROTO_MINOR
+                {
+                    tracing::warn!(
+                        "сервер старее клиента (протокол {}.{m}, у клиента {}): обновите \
+                         сервер до 0.2.1 или новее",
+                        selfsync_core::proto::PROTO_VERSION,
+                        selfsync_core::proto::proto_header()
+                    );
+                }
                 if status.state != self.status.state || status.retry_at != self.status.retry_at {
                     tracing::info!("состояние: {:?} ({})", status.state, reason_text(&status));
                 }

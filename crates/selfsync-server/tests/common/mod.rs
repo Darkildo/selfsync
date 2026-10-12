@@ -71,6 +71,15 @@ impl TestServer {
             .1
     }
 
+    /// Новый токен устройства только для чтения.
+    pub fn token_read_only(&self, vault: &str, name: &str) -> String {
+        let pool = self.state.server_pool().unwrap();
+        let c = pool.get().unwrap();
+        selfsync_server::db::server::add_device(&c, vault, name, true)
+            .unwrap()
+            .1
+    }
+
     pub async fn send(&self, req: Request<Body>) -> Resp {
         let resp = self.app.clone().oneshot(req).await.unwrap();
         let status = resp.status();
@@ -96,7 +105,7 @@ impl TestServer {
         let mut b = Request::builder()
             .method(method)
             .uri(uri)
-            .header("x-selfsync-proto", "1");
+            .header("x-selfsync-proto", selfsync_proto::proto_header());
         if let Some(t) = token {
             b = b.header("authorization", format!("Bearer {t}"));
         }

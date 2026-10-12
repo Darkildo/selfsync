@@ -32,6 +32,9 @@ export const Platform = {
 
 export const moment = { locale: () => "ru" };
 
+/** Заголовки, которые «сервер» не прислал (изобразить сервер 0.1.x). */
+export const hiddenResponseHeaders = new Set<string>();
+
 export async function requestUrl(p: {
   url: string;
   method: string;
@@ -40,7 +43,9 @@ export async function requestUrl(p: {
 }): Promise<{ status: number; headers: Record<string, string>; arrayBuffer: ArrayBuffer }> {
   const r = await fetch(p.url, { method: p.method, headers: p.headers, body: p.body });
   const headers: Record<string, string> = {};
-  r.headers.forEach((v, k) => (headers[k] = v));
+  r.headers.forEach((v, k) => {
+    if (!hiddenResponseHeaders.has(k)) headers[k] = v;
+  });
   return { status: r.status, headers, arrayBuffer: await r.arrayBuffer() };
 }
 

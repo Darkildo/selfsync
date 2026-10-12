@@ -2,6 +2,7 @@
 
 import { type App, Notice, PluginSettingTab, requireApiVersion, Setting, type SettingDefinitionItem } from "obsidian";
 
+import { readOnlyMinor } from "../pkg/selfsync_wasm.js";
 import { buildRules, type ConfigSync, DEFAULT_CONFIG_SYNC, type Preset, PRESETS } from "./configsync.ts";
 import { t } from "./i18n.ts";
 import type SelfsyncPlugin from "./main.ts";
@@ -46,6 +47,7 @@ export const DEFAULT_SETTINGS: Settings = {
 function errorText(r: { code: string; message: string }): string {
   if (r.code === "read_only") return t("readOnly.error");
   if (r.code === "wrong_password") return t("recovery.wrongPassword");
+  if (r.code === "server_outdated") return t("error.serverOutdated");
   return r.message;
 }
 
@@ -450,6 +452,16 @@ export class SelfsyncSettingTab extends PluginSettingTab {
       build: (row) => {
         if (!this.plugin.runner || this.readOnly()) {
           row.settingEl.hide();
+          return;
+        }
+        // Сервер 0.1.x молча выдал бы по такой ссылке полный доступ.
+        const minor = this.plugin.runner.status().serverMinor;
+        if (minor != null && minor < readOnlyMinor()) {
+          this.joinReadOnly = false;
+          row
+            .setName(t("join.readOnly"))
+            .setDesc(t("join.readOnlyServerOutdated"))
+            .addToggle((x) => x.setValue(false).setDisabled(true));
           return;
         }
         row

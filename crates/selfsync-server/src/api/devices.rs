@@ -6,7 +6,7 @@ use http::StatusCode;
 use prost::Message;
 use selfsync_proto::v1 as pb;
 
-use super::{AuthCtx, Proto, check_proto, public_base};
+use super::{AuthCtx, Proto, check_proto, client_outdated_for_read_only, public_base};
 use crate::db::server;
 use crate::error::{ApiError, ApiResult};
 use crate::state::AppState;
@@ -95,7 +95,7 @@ pub async fn join_redeem(
     State(st): State<AppState>,
     req: Request,
 ) -> ApiResult<Proto<pb::JoinToken>> {
-    check_proto(req.headers())?;
+    let minor = check_proto(req.headers())?;
     let ip = throttle::client_ip(&st.config, req.headers(), req.extensions());
     let keys = throttle::redeem_keys(&st.config.rate, ip);
     let body = axum::body::to_bytes(req.into_body(), 64 * 1024)
@@ -109,6 +109,14 @@ pub async fn join_redeem(
         .server_db(move |c| {
             if let Some(secs) = throttle::check_now(c, &keys)? {
                 return Err(ApiError::too_many(secs));
+            }
+            // Клиенту, который не знает режима, код «только для чтения» не отдаётся
+            // и не гасится: обновив плагин, по нему же можно подключиться.
+            if code.len() == 16
+                && server::join_code_read_only(c, &code)? == Some(true)
+                && let Some(e) = client_outdated_for_read_only(minor)
+            {
+                return Err(e);
             }
             let res = if code.len() == 16 {
                 server::redeem_join_code(c, &code, &name)?

@@ -1268,20 +1268,23 @@ async fn read_only_join_code_yields_read_only_device() {
         )
         .await;
     assert!(String::from_utf8_lossy(&page.body).contains("только для чтения"));
-    let r = s
-        .send(
-            http::Request::post("/v1/join/redeem")
-                .header("x-selfsync-proto", "1")
-                .body(axum::body::Body::from(
-                    pb::JoinRedeem {
-                        code: code.code,
-                        name: String::new(),
-                    }
-                    .encode_to_vec(),
-                ))
-                .unwrap(),
-        )
-        .await;
+    let redeem = |proto: &'static str| {
+        http::Request::post("/v1/join/redeem")
+            .header("x-selfsync-proto", proto)
+            .body(axum::body::Body::from(
+                pb::JoinRedeem {
+                    code: code.code.clone(),
+                    name: String::new(),
+                }
+                .encode_to_vec(),
+            ))
+            .unwrap()
+    };
+    // клиент 0.1.x режима не знает: отказ, а код не сгорает
+    let r = s.send(redeem("1")).await;
+    assert_eq!(r.status, StatusCode::UPGRADE_REQUIRED);
+    assert_eq!(r.error().code, "client_outdated");
+    let r = s.send(redeem("1.1")).await;
     let tok: pb::JoinToken = r.proto();
     assert!(s.changes(&tok.token, 0).await.vault.unwrap().read_only);
     // ro-устройство не выписывает новых кодов — ни обычных, ни ro
@@ -1296,4 +1299,56 @@ async fn read_only_join_code_yields_read_only_device() {
         )
         .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
+}
+
+/// Минорная версия протокола: сервер называет свою в каждом ответе, клиента
+/// старее 1.1 с устройством только для чтения не пускает, остальных — пускает.
+#[tokio::test]
+async fn proto_minor_both_directions() {
+    let s = TestServer::new();
+    let rw = s.token("notes", "laptop");
+    let ro = s.token_read_only("notes", "mirror");
+    let want = selfsync_proto::proto_header();
+    let header = |r: &Resp| {
+        r.headers
+            .get("x-selfsync-proto")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
+    // в любом ответе: успех, 401, 404, health
+    let ok = s.get("/v1/changes", &rw).await;
+    assert_eq!(header(&ok).as_deref(), Some(want.as_str()));
+    let unauth = s.get("/v1/changes", "nope").await;
+    assert_eq!(unauth.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(header(&unauth).as_deref(), Some(want.as_str()));
+    let missing = s.get("/v1/nowhere", &rw).await;
+    assert_eq!(header(&missing).as_deref(), Some(want.as_str()));
+    let health = s
+        .send(
+            http::Request::get("/v1/health")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(header(&health).as_deref(), Some(want.as_str()));
+    let j: serde_json::Value = serde_json::from_slice(&health.body).unwrap();
+    assert_eq!(j["proto"], 1);
+    assert_eq!(j["proto_minor"], selfsync_proto::PROTO_MINOR);
+
+    let old = |token: &str| {
+        http::Request::get("/v1/changes")
+            .header("x-selfsync-proto", "1")
+            .header("authorization", format!("Bearer {token}"))
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    // клиент 0.1.x с обычным токеном работает как прежде
+    assert_eq!(s.send(old(&rw)).await.status, StatusCode::OK);
+    // с токеном только для чтения — 426: его клиент покажет «обновите плагин»
+    let r = s.send(old(&ro)).await;
+    assert_eq!(r.status, StatusCode::UPGRADE_REQUIRED);
+    assert_eq!(r.error().code, "client_outdated");
+    assert_eq!(r.error().supported_proto, 1);
+    // новый клиент с тем же токеном читает
+    assert_eq!(s.get("/v1/changes", &ro).await.status, StatusCode::OK);
 }

@@ -37,7 +37,12 @@ after(async () => {
 interface LoadedPlugin {
   onload(): Promise<void>;
   onunload(): void;
-  runner?: { idle(): Promise<void>; send(e: unknown): void };
+  runner?: {
+    idle(): Promise<void>;
+    send(e: unknown): void;
+    status(): { serverMinor?: number | null };
+    command(c: unknown): Promise<{ type: string; code?: string }>;
+  };
   statusBar: { text: string };
   settingTab: { getSettingDefinitions(): { items: { render(s: unknown): unknown }[] }[] };
 }
@@ -132,6 +137,27 @@ test("main.js: устройство только для чтения — ста�
   ro.onunload();
   await fsp.rm(rwVault, { recursive: true, force: true });
   await fsp.rm(roVault, { recursive: true, force: true });
+});
+
+test("main.js: сервер старее 0.2.1 — ссылки «только для чтения» нет", async () => {
+  const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-oldsrv-"));
+  obsidian.hiddenResponseHeaders.add("x-selfsync-proto");
+  try {
+    const plugin = await loadPlugin(vault, server.token("oldsrv", "laptop"));
+    plugin.runner?.send({ type: "syncNow" });
+    await plugin.runner?.idle();
+    assert.equal(plugin.runner?.status().serverMinor, 0);
+    const row = (await renderSettings(plugin)).find((r) => r.name === "Только чтение" && r.toggles === 1);
+    assert.match(row?.desc ?? "", /Сервер не поддерживает/);
+    const r = await plugin.runner?.command({ type: "createJoin", name: "tablet", readOnly: true });
+    assert.equal(r?.code, "server_outdated");
+    const ok = await plugin.runner?.command({ type: "createJoin", name: "tablet" });
+    assert.equal(ok?.type, "join");
+    plugin.onunload();
+  } finally {
+    obsidian.hiddenResponseHeaders.clear();
+    await fsp.rm(vault, { recursive: true, force: true });
+  }
 });
 
 test("main.js: пришли настройки Obsidian — одно уведомление о перезапуске", async () => {

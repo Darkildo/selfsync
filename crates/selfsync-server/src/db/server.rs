@@ -320,6 +320,18 @@ pub fn peek_join_code(c: &Connection, code: &str) -> rusqlite::Result<Option<Joi
 }
 
 /// Обменивает код на новое устройство. Код одноразовый: повтор и истёкший — `None`.
+/// Действующий код подключения выдаёт устройство только для чтения: `None` —
+/// кода нет (неизвестен, истёк или использован).
+pub fn join_code_read_only(c: &Connection, code: &str) -> anyhow::Result<Option<bool>> {
+    Ok(c.query_row(
+        "SELECT read_only FROM join_codes
+         WHERE code_hash = ?1 AND used_at IS NULL AND expires_at > ?2",
+        params![hash_secret(code), now_ms()],
+        |r| r.get(0),
+    )
+    .optional()?)
+}
+
 pub fn redeem_join_code(
     c: &mut Connection,
     code: &str,

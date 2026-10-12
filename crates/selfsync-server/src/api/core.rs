@@ -6,8 +6,8 @@ use axum::Extension;
 use axum::extract::{Query, State};
 use axum::response::{IntoResponse, Response};
 use selfsync_core::hash::Hash;
-use selfsync_proto::PROTO_VERSION;
 use selfsync_proto::v1 as pb;
+use selfsync_proto::{PROTO_MINOR, PROTO_VERSION};
 use serde::Deserialize;
 
 use super::{AuthCtx, Proto};
@@ -22,6 +22,7 @@ pub async fn health() -> Response {
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "proto": PROTO_VERSION,
+        "proto_minor": PROTO_MINOR,
     }))
     .into_response()
 }

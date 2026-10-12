@@ -433,6 +433,10 @@ pub struct SyncStatus {
     pub read_only: bool,
     /// У записи ключа есть фраза восстановления.
     pub recovery: bool,
+    /// Минорная версия протокола сервера (`0` — сервер 0.1.x); `None` — ещё ни
+    /// одного ответа. Меньше [`selfsync_proto::PROTO_MINOR`] — сервер старее клиента
+    /// и часть возможностей недоступна.
+    pub server_minor: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -3,14 +3,14 @@
 
 use prost::Message;
 use selfsync_proto::v1 as pb;
-use selfsync_proto::{CONTENT_TYPE_OCTETS, CONTENT_TYPE_PROTOBUF, HEADER_PROTO, PROTO_VERSION};
+use selfsync_proto::{CONTENT_TYPE_OCTETS, CONTENT_TYPE_PROTOBUF, HEADER_PROTO, proto_header};
 
 use super::ctx::{Ctx, HTTP_TIMEOUT_MS, SyncError, SyncResult, TRANSFER_TIMEOUT_MS};
 use super::types::HttpRequest;
 use crate::hash::Hash;
 
 fn base_headers() -> Vec<(String, String)> {
-    vec![(HEADER_PROTO.to_owned(), PROTO_VERSION.to_string())]
+    vec![(HEADER_PROTO.to_owned(), proto_header())]
 }
 
 fn req(method: &str, path: String, body: Vec<u8>, content_type: Option<&str>) -> HttpRequest {
@@ -319,6 +319,14 @@ pub async fn revoke_device(cx: &Ctx, id: u32) -> SyncResult<()> {
     call_empty(cx, req("DELETE", format!("/v1/devices/{id}"), vec![], None))
         .await
         .map(|_| ())
+}
+
+/// `/v1/health` — только ради заголовка версии протокола (`Ctx::http` его
+/// запоминает); тело не разбирается.
+pub async fn health(cx: &Ctx) -> SyncResult<()> {
+    let mut r = req("GET", "/v1/health".into(), vec![], None);
+    r.auth = false;
+    call_empty(cx, r).await.map(|_| ())
 }
 
 pub async fn join_create(cx: &Ctx, name: String, read_only: bool) -> SyncResult<pb::JoinCode> {
