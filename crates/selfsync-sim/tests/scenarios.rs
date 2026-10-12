@@ -1596,3 +1596,223 @@ fn remove_local_frees_only_synced_copies() {
     finish(&mut w);
     w.check_no_loss().unwrap();
 }
+
+/// Сколько живых записей на сервере не в этом поколении ключа.
+fn stale_epoch_live(w: &World, epoch: u32) -> i64 {
+    let v = w.state.vault("sim").unwrap();
+    let c = v.pool.get().unwrap();
+    let prefix = selfsync_core::path::mode_prefix(true, epoch);
+    c.query_row(
+        "SELECT COUNT(*) FROM files WHERE substr(path, 1, length(?1)) != ?1 AND deleted = 0",
+        rusqlite::params![prefix],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+fn record_of(w: &World) -> Vec<u8> {
+    let v = w.state.vault("sim").unwrap();
+    let c = v.pool.get().unwrap();
+    selfsync_server::db::vault::meta_blob(&c, "vault_key")
+        .unwrap()
+        .unwrap()
+}
+
+fn encrypt_all(w: &mut World) {
+    w.encrypted_password = Some(PASSWORD.to_owned());
+    w.deliver(
+        0,
+        Event::EnableEncryption {
+            password: PASSWORD.into(),
+            remember: true,
+            recovery: false,
+        },
+    );
+    finish(w);
+}
+
+fn rekey(w: &mut World, c: usize, req: u64) {
+    use selfsync_core::engine::{UiCommand, UiResult};
+    let r = ui_result(
+        w,
+        c,
+        req,
+        UiCommand::Rekey {
+            password: PASSWORD.into(),
+            remember: true,
+        },
+    );
+    assert_eq!(r, UiResult::Ok);
+}
+
+/// Смена ключа посреди правок на другом устройстве: после неё на сервере только
+/// новое поколение, прежнего ключа в записи нет, ничего не потеряно; вторая смена —
+/// поколение 3.
+#[test]
+fn rekey_during_active_sync() {
+    use selfsync_core::crypto;
+    let mut w = World::new(quiet(3));
+    for p in ["a.md", "b.md", "notes/c.md"] {
+        base_note(&mut w, 0, p);
+    }
+    sized_file(&mut w, 0, "img/big.png", 9 * 1024 * 1024);
+    w.sync(0);
+    encrypt_all(&mut w);
+    let old_record = record_of(&w);
+    let old_master = crypto::open_master_key(&old_record, PASSWORD).unwrap();
+    rekey(&mut w, 0, 1);
+    let mut tokens = Vec::new();
+    for i in 0..60 {
+        w.pump_one(0);
+        if i % 10 == 0 {
+            tokens.push(edit_line(&mut w, 1, "b.md", (i / 10) % 5));
+            let t = w.ledger.fresh(1);
+            w.user_write(1, &format!("new{i}.md"), format!("n {t}\n").into_bytes());
+            tokens.push(t);
+            w.sync(1);
+        }
+    }
+    finish(&mut w);
+    let rec = record_of(&w);
+    assert_eq!(crypto::record_epoch(&rec).unwrap(), 2);
+    assert!(!crypto::has_prev(&rec), "прежний ключ убран из записи");
+    assert!(!crypto::verify_master(&rec, &old_master).unwrap());
+    assert_eq!(
+        stale_epoch_live(&w, 2),
+        0,
+        "на сервере только новое поколение"
+    );
+    let on_server = server_tokens(&w);
+    for t in tokens.iter().filter(|t| !w.ledger.removed.contains(*t)) {
+        assert!(
+            on_server.contains(t),
+            "правка {t} на сервере после смены ключа"
+        );
+    }
+    // ни одного блоба, который открывает прежний ключ
+    let old_keys = old_master.derive();
+    let v = w.state.vault("sim").unwrap();
+    for (h, _, _) in v.blobs.list().unwrap() {
+        let data = std::fs::read(v.blobs.path_of(&h)).unwrap();
+        assert!(
+            selfsync_core::blob::decode(&data, Some(&old_keys)).is_err(),
+            "блоб {} открывается прежним ключом",
+            h.to_hex()
+        );
+    }
+    let done = w.clients[0]
+        .notices
+        .iter()
+        .filter(|n| matches!(n, Notice::RekeyDone))
+        .count();
+    assert_eq!(done, 1);
+    w.check_no_loss().unwrap();
+    // ещё раз — поколение 3
+    rekey(&mut w, 1, 2);
+    finish(&mut w);
+    assert_eq!(crypto::record_epoch(&record_of(&w)).unwrap(), 3);
+    assert_eq!(stale_epoch_live(&w, 3), 0);
+    w.check_no_loss().unwrap();
+}
+
+/// Устройство, начавшее смену ключа, убито в любой момент перешифровки — после
+/// перезапуска оно её доводит.
+#[test]
+fn rekey_survives_kills() {
+    for kill_at in [1usize, 3, 7, 15, 30] {
+        let mut w = World::new(quiet(2));
+        for p in ["a.md", "b.md", "c.md", "d.md"] {
+            base_note(&mut w, 0, p);
+        }
+        w.sync(0);
+        encrypt_all(&mut w);
+        rekey(&mut w, 0, 1);
+        for _ in 0..kill_at {
+            w.pump_one(0);
+        }
+        w.kill(0);
+        finish(&mut w);
+        assert_eq!(
+            selfsync_core::crypto::record_epoch(&record_of(&w)).unwrap(),
+            2,
+            "kill_at {kill_at}"
+        );
+        assert!(!selfsync_core::crypto::has_prev(&record_of(&w)));
+        assert_eq!(stale_epoch_live(&w, 2), 0, "kill_at {kill_at}");
+        w.check_no_loss().unwrap();
+    }
+}
+
+/// Смену ключа бросили сразу после записи ключа (маркер не дошёл), а устройство
+/// пропало: другое устройство с паролем подхватывает и доводит её. Вернувшееся —
+/// просто переходит на новое поколение.
+#[test]
+fn abandoned_rekey_is_taken_over() {
+    let mut w = World::new(quiet(2));
+    for p in ["a.md", "notes/b.md"] {
+        base_note(&mut w, 0, p);
+    }
+    w.sync(0);
+    encrypt_all(&mut w);
+    let mine = edit_line(&mut w, 1, "a.md", 2);
+    w.planned_faults
+        .push_back(("PUT /v1/vaultkey/migration".into(), false));
+    rekey(&mut w, 0, 1);
+    assert!(w.planned_faults.is_empty(), "сбой сработал");
+    assert!(selfsync_core::crypto::has_prev(&record_of(&w)));
+    // c0 «пропал»; c1 спрашивает пароль, подхватывает, доводит
+    for _ in 0..4 {
+        w.now += 20_000;
+        w.sync(1);
+    }
+    assert!(!selfsync_core::crypto::has_prev(&record_of(&w)));
+    assert_eq!(stale_epoch_live(&w, 2), 0);
+    assert!(server_tokens(&w).contains(&mine));
+    assert!(
+        w.clients[1]
+            .notices
+            .iter()
+            .any(|n| matches!(n, Notice::RekeyDone)),
+        "довело второе устройство"
+    );
+    finish(&mut w);
+    assert!(
+        !w.clients[0]
+            .notices
+            .iter()
+            .any(|n| matches!(n, Notice::RekeyDone)),
+        "вернувшееся не перешифровывает заново"
+    );
+    w.check_no_loss().unwrap();
+}
+
+/// Случайные прогоны действительно меняют ключ (а не только отправляют команду).
+#[test]
+fn random_runs_exercise_rekey() {
+    let mut rekeyed = 0;
+    for seed in 0..400 {
+        let cfg = SimConfig::random(seed);
+        if cfg.rekey_at.is_none() {
+            continue;
+        }
+        let mut w = World::new(cfg);
+        w.run();
+        w.settle().unwrap();
+        w.check_no_loss().unwrap();
+        w.check_converged().unwrap();
+        if w.server_key_epoch() >= 2 {
+            rekeyed += 1;
+        }
+    }
+    assert!(rekeyed >= 5, "смен ключа в прогонах: {rekeyed}");
+}
+
+/// Прогоны, на которых ломалась смена ключа: устройство с новым ключом посреди
+/// брошенной смены (19748) и устройство с проверенным когда-то ключом, пока ключ
+/// дважды сменили (453).
+#[test]
+fn rekey_regression_seeds() {
+    for seed in [453, 19748] {
+        selfsync_sim::run_seed(SimConfig::random(seed)).unwrap();
+    }
+}

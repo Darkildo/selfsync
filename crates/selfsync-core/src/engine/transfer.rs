@@ -271,11 +271,19 @@ pub(crate) async fn upload_big(
 
 /// Скачивает маленький блоб и возвращает открытый текст (с проверкой хэша).
 pub(crate) async fn fetch_small(cx: &Ctx, h: &Hash) -> SyncResult<Vec<u8>> {
+    fetch_small_with(cx, h, cx.with(|s| s.keys.clone())).await
+}
+
+/// То же с явными ключами (смена ключа: блобы прежнего поколения).
+pub(crate) async fn fetch_small_with(
+    cx: &Ctx,
+    h: &Hash,
+    keys: Option<VaultKeys>,
+) -> SyncResult<Vec<u8>> {
     let data = api::get_blob(cx, h, None).await?;
     if Hash::of(&data) != *h {
         return Err(SyncError::Corrupt("хэш скачанного блоба не совпал".into()));
     }
-    let keys = cx.with(|s| s.keys.clone());
     let header = BlobHeader::parse(&data).map_err(|e| SyncError::Corrupt(e.to_string()))?;
     if header.encrypted() && keys.is_none() {
         return Err(SyncError::Paused("need_password".into()));
@@ -321,19 +329,28 @@ pub(crate) async fn download_to(
             keep,
         )));
     }
-    download_big(cx, key, h, blob_size, Some(expect))
-        .await
-        .map(|o| o.map(|obs| (obs, None)))
+    download_big(
+        cx,
+        key,
+        h,
+        blob_size,
+        Some(expect),
+        cx.with(|s| s.keys.clone()),
+    )
+    .await
+    .map(|o| o.map(|obs| (obs, None)))
 }
 
 /// Скачивает большой блоб во временный файл (без переноса в vault). Возвращает имя
 /// временного файла и наблюдение открытого текста.
-pub(crate) async fn download_temp(
+/// Ключи явные: при смене ключа блоб — прежнего поколения.
+pub(crate) async fn download_temp_with(
     cx: &Ctx,
     h: &Hash,
     blob_size: u64,
+    keys: Option<VaultKeys>,
 ) -> SyncResult<(String, LocalObs)> {
-    let obs = download_big(cx, "", h, blob_size, None)
+    let obs = download_big(cx, "", h, blob_size, None, keys)
         .await?
         .ok_or_else(|| SyncError::Io("временный файл не записан".into()))?;
     Ok((temp_name(h), obs))
@@ -349,8 +366,8 @@ async fn download_big(
     h: &Hash,
     blob_size: u64,
     expect: Option<Expect>,
+    keys: Option<VaultKeys>,
 ) -> SyncResult<Option<LocalObs>> {
-    let keys = cx.with(|s| s.keys.clone());
     // Заголовок и content_id.
     let head = api::get_blob(
         cx,

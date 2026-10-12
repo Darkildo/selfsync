@@ -42,6 +42,8 @@ const en = {
   "notice.encryptionStarted": "Encryption is being enabled on another device — sync paused",
   "notice.migrationProgress": "Encrypting the vault: {done} / {total}",
   "notice.encryptionEnabled": "Encryption enabled",
+  "notice.rekeyStarted": "The encryption key is being changed on another device — sync paused until it finishes",
+  "notice.rekeyDone": "Encryption key changed: the vault is re-encrypted with the new key",
   "notice.passwordChanged": "Encryption password changed",
   "notice.unauthorized": "The server rejected this device's token — connect again",
   "notice.protocolUnsupported": "The server speaks a different protocol version (v{supported}) — update the plugin or the server",
@@ -140,6 +142,12 @@ const en = {
   "encryption.enable": "Enable encryption",
   "encryption.enableDesc": "All devices will need this password. A recovery phrase is shown next: it restores access if the password is forgotten. Update the plugin to 0.2.1 or newer on every device first — older versions cannot open such a vault.",
   "encryption.change": "Change password",
+  "rekey.button": "Change the key",
+  "rekey.title": "Change the encryption key",
+  "rekey.desc": "The vault is re-encrypted with a new key under the same password. Do this after revoking a device: it knows the current key, and a new password alone does not change the key.",
+  "rekey.confirm": "Change the encryption key? Every device will ask for the password again. Version history and the server trash from before the change are erased. Devices older than 0.3.0 stop syncing until updated. A recovery phrase, if any, is replaced with a new one.",
+  "rekey.started": "Re-encryption started — progress is shown in notices",
+  "rekey.afterRevoke": "«{name}» is revoked. It still knows the encryption key: change the key so that it cannot read what is added from now on?",
   "encryption.changeTitle": "Change encryption password",
   "encryption.oldPassword": "Current password",
   "encryption.newPassword": "New password",
@@ -260,6 +268,8 @@ const ru: Record<Key, string> = {
   "notice.encryptionStarted": "На другом устройстве включают шифрование — синхронизация на паузе",
   "notice.migrationProgress": "Шифрование vault'а: {done} / {total}",
   "notice.encryptionEnabled": "Шифрование включено",
+  "notice.rekeyStarted": "На другом устройстве меняют ключ шифрования — синхронизация на паузе до конца",
+  "notice.rekeyDone": "Ключ шифрования сменён: vault перешифрован новым ключом",
   "notice.passwordChanged": "Пароль шифрования изменён",
   "notice.unauthorized": "Сервер не принял токен этого устройства — подключитесь заново",
   "notice.protocolUnsupported": "Сервер говорит на другой версии протокола (v{supported}) — обновите плагин или сервер",
@@ -358,6 +368,12 @@ const ru: Record<Key, string> = {
   "encryption.enable": "Включить шифрование",
   "encryption.enableDesc": "Этот пароль понадобится на всех устройствах. Следом покажется фраза восстановления: она вернёт доступ, если пароль забудется. Сначала обновите плагин до 0.2.1 или новее на всех устройствах — старые версии такой vault не откроют.",
   "encryption.change": "Сменить пароль",
+  "rekey.button": "Сменить ключ",
+  "rekey.title": "Смена ключа шифрования",
+  "rekey.desc": "Vault перешифровывается новым ключом под тем же паролем. Это нужно после отзыва устройства: оно знает текущий ключ, а новый пароль ключ не меняет.",
+  "rekey.confirm": "Сменить ключ шифрования? Каждое устройство снова попросит пароль. История версий и корзина сервера до смены стираются. Устройства старее 0.3.0 перестанут синхронизироваться до обновления. Фраза восстановления, если была, заменится новой.",
+  "rekey.started": "Перешифровка началась — ход виден в уведомлениях",
+  "rekey.afterRevoke": "Доступ «{name}» отозван. Ключ шифрования это устройство всё ещё знает: сменить ключ, чтобы оно не прочитало то, что добавится дальше?",
   "encryption.changeTitle": "Смена пароля шифрования",
   "encryption.oldPassword": "Текущий пароль",
   "encryption.newPassword": "Новый пароль",
@@ -498,6 +514,10 @@ export function noticeText(n: Notice): string | null {
       return t("notice.needPassword");
     case "encryptionStarted":
       return t("notice.encryptionStarted");
+    case "rekeyStarted":
+      return t("notice.rekeyStarted");
+    case "rekeyDone":
+      return t("notice.rekeyDone");
     case "migrationProgress":
       return t("notice.migrationProgress", { done: n.done, total: n.total });
     case "encryptionEnabled":

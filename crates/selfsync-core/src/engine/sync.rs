@@ -108,6 +108,13 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
             crypto_flow::enable(cx, password, remember, recovery).await?;
         }
     }
+    if let Some((password, remember)) = cx.with_mut(|s| s.rekey.take()) {
+        if read_only {
+            cx.notify(read_only_error());
+        } else {
+            crypto_flow::rekey(cx, password, remember).await?;
+        }
+    }
     if read_only && pending > 0 && !cx.with(|s| s.read_only_notified) {
         cx.with_mut(|s| s.read_only_notified = true);
         cx.notify(Notice::ReadOnly {

@@ -549,6 +549,10 @@ pub enum Notice {
     NeedPassword,
     /// На другом устройстве включают шифрование.
     EncryptionStarted,
+    /// Ключ шифрования меняет другое устройство: запись приостановлена.
+    RekeyStarted,
+    /// Смена ключа завершена (на этом устройстве).
+    RekeyDone,
     /// Миграция на шифрование: прогресс и завершение.
     MigrationProgress {
         done: u32,
@@ -636,6 +640,14 @@ pub enum UiCommand {
     Recover {
         phrase: String,
         new_password: String,
+        remember: bool,
+    },
+    /// Сменить ключ шифрования (после отзыва устройства): новый мастер-ключ под тем
+    /// же паролем, перешифровка vault'а в ближайшем цикле. Нужны сервер 1.2+ и
+    /// право записи.
+    Rekey {
+        password: String,
+        #[serde(default)]
         remember: bool,
     },
     /// Файлы, не скачанные из-за лимита размера.

@@ -297,6 +297,43 @@ describe("настройки", () => {
     await c.stop();
   });
 
+  test("смена ключа: перешифровка, пароль на другом устройстве, новая фраза", async () => {
+    const PW = "correct horse battery staple";
+    const [a, b] = await pair("ui-rekey");
+    await a.write("secret.md", "top secret\n");
+    await a.sync();
+    a.runner.send({ type: "enableEncryption", password: PW, remember: true, recovery: true });
+    await a.sync();
+    b.runner.send({ type: "password", password: PW, remember: true });
+    await b.runner.idle();
+    await b.sync();
+    const phrases = (): string[][] => a.notices.flatMap((n) => (n.kind === "recoveryPhrase" ? [n.words] : []));
+    const oldWords = phrases()[0] ?? [];
+    // неверный пароль — ответ сразу
+    const bad = await a.runner.command({ type: "rekey", password: "wrong", remember: true });
+    assert.ok(bad.type === "error" && bad.code === "wrong_password", JSON.stringify(bad));
+    const ok = await a.runner.command({ type: "rekey", password: PW, remember: true });
+    assert.equal(ok.type, "ok", JSON.stringify(ok));
+    await a.sync();
+    assert.ok(a.notices.some((n) => n.kind === "rekeyDone"), JSON.stringify(a.notices));
+    assert.equal(phrases().length, 2, "новая фраза показана");
+    // запомненный на b ключ — прежний: просит пароль, дальше как обычно
+    await b.write("from-b.md", "b\n");
+    await b.sync();
+    assert.equal(b.status?.state, "needPassword");
+    b.runner.send({ type: "password", password: PW, remember: true });
+    await b.runner.idle();
+    await b.sync();
+    await a.sync();
+    assert.equal(await a.read("from-b.md"), "b\n");
+    assert.equal(await b.read("secret.md"), "top secret\n");
+    // прежняя фраза больше не открывает vault
+    const old = await b.runner.command({ type: "recover", phrase: oldWords.join(" "), newPassword: "x y z", remember: true });
+    assert.ok(old.type === "error" && old.code === "wrong_phrase", JSON.stringify(old));
+    await a.stop();
+    await b.stop();
+  });
+
   test("фраза восстановления: при включении, вход по фразе, удаление", async () => {
     const PW = "correct horse battery staple";
     const [a, b] = await pair("ui-recovery");

@@ -241,7 +241,7 @@ pub async fn put_vault_key(
     }
 }
 
-pub async fn put_migration(cx: &Ctx, key_version: u64) -> SyncResult<()> {
+pub async fn put_migration(cx: &Ctx, key_version: u64, to_epoch: u32) -> SyncResult<()> {
     let _: pb::MigrationMarker = call(
         cx,
         proto_req(
@@ -249,6 +249,7 @@ pub async fn put_migration(cx: &Ctx, key_version: u64) -> SyncResult<()> {
             "/v1/vaultkey/migration".into(),
             &pb::MigrationMarker {
                 key_version,
+                to_epoch,
                 ..Default::default()
             },
         ),

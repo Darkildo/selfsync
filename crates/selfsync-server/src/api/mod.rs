@@ -20,8 +20,8 @@ use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use prost::Message;
 use selfsync_proto::{
-    CONTENT_TYPE_PROTOBUF, HEADER_CLIENT, HEADER_PROTO, MINOR_READ_ONLY, PROTO_VERSION,
-    parse_proto, proto_header,
+    CONTENT_TYPE_PROTOBUF, HEADER_CLIENT, HEADER_PROTO, MINOR_READ_ONLY, MINOR_REKEY,
+    PROTO_VERSION, parse_proto, proto_header,
 };
 
 use crate::error::{ApiError, ApiResult};
@@ -198,6 +198,23 @@ async fn auth(State(st): State<AppState>, mut req: Request, next: Next) -> Respo
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
+    // Ключ vault'а сменили: клиент старее 1.2 поколений не знает и не откроет его.
+    if minor < MINOR_REKEY {
+        match vault.db(|c, _| Ok(crate::db::vault::key_epoch(c)?)).await {
+            Ok(e) if e >= 2 => {
+                let mut resp = ApiError::new(
+                    StatusCode::UPGRADE_REQUIRED,
+                    "client_outdated",
+                    "ключ шифрования vault'а сменён: нужен плагин или selfsync-cli 0.3.0 или новее",
+                )
+                .into_response();
+                resp.extensions_mut().insert(DeviceTag(dev.id));
+                return resp;
+            }
+            Ok(_) => {}
+            Err(e) => return e.into_response(),
+        }
+    }
     let id = dev.id;
     req.extensions_mut().insert(AuthCtx {
         device_id: dev.id,

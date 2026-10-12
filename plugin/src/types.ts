@@ -85,6 +85,8 @@ export type Notice =
   | { kind: "wrongPassword" }
   | { kind: "needPassword" }
   | { kind: "encryptionStarted" }
+  | { kind: "rekeyStarted" }
+  | { kind: "rekeyDone" }
   | { kind: "migrationProgress"; done: number; total: number }
   | { kind: "encryptionEnabled" }
   | { kind: "passwordChanged" }
@@ -176,6 +178,7 @@ export type UiCommand =
   | { type: "createRecovery"; password: string }
   | { type: "removeRecovery"; password: string }
   | { type: "recover"; phrase: string; newPassword: string; remember: boolean }
+  | { type: "rekey"; password: string; remember?: boolean }
   | { type: "skipped" }
   | { type: "download"; path: string }
   | { type: "removeLocal"; path: string };

@@ -8,12 +8,14 @@ use selfsync_proto::v1 as pb;
 
 use super::api;
 use super::ctx::{Ctx, SMALL_BLOB, SyncError, SyncResult};
-use super::transfer::{Src, download_temp, fetch_small, prepare_big, prepare_small, upload_big};
+use super::transfer::{
+    Src, download_temp_with, fetch_small_with, prepare_big, prepare_small, upload_big,
+};
 use super::types::{Action, LogLevel, Notice, Phrase, SyncState, UiResult};
-use crate::crypto::{self, CryptoError, MasterKey, RecoveryEntropy};
+use crate::crypto::{self, CryptoError, MasterKey, RecoveryEntropy, VaultKeys};
 use crate::hash::Hash;
 use crate::index::{MigrationState, VaultMode};
-use crate::path::VaultPath;
+use crate::path::{VaultPath, path_epoch};
 
 /// Сбрасывает базы индекса: следующая синхронизация сверит каждый файл с сервером
 /// заново (совпадающие — no-op на сервере, различающиеся — через разрешение
@@ -49,6 +51,19 @@ pub(crate) fn switch_to_encrypted(cx: &Ctx, key_version: u64) {
     });
 }
 
+/// Переход на новое поколение ключа (смена ключа завершена): базы сбрасываются —
+/// записи на сервере теперь другие (новые пути и блобы), содержимое то же.
+pub(crate) fn switch_epoch(cx: &Ctx, epoch: u32) {
+    rebaseline(cx, false);
+    cx.with_mut(|s| {
+        s.index.key_epoch = epoch;
+        if let Some(k) = s.keys.take() {
+            s.keys = Some(k.with_epoch(epoch));
+        }
+        s.prev_keys = None;
+    });
+}
+
 fn pause(cx: &Ctx, reason: &str, notice: Option<Notice>) -> SyncError {
     let first = cx.with_mut(|s| {
         let first = s.paused.as_deref() != Some(reason);
@@ -66,6 +81,10 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
     cx.with_mut(|s| {
         s.server_state = Some(*vs);
         s.set_read_only(Some(vs.read_only));
+        // Запись ключа сменилась после проверки: ключ в памяти мог устареть.
+        if s.keys_verified && vs.key_version != 0 && s.verified_version != vs.key_version {
+            s.keys_verified = false;
+        }
     });
     let read_only = cx.with(|s| s.read_only);
     let (mode, has_keys, migrating_here) =
@@ -125,11 +144,19 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
                 cx.notify(Notice::EncryptionMismatch);
                 return Err(SyncError::Blocked("encryption_mismatch".into()));
             }
+            if vs.migration && !migrating_here {
+                // Ключ меняет другое устройство: записи двух поколений вперемешку,
+                // ждём конца (запись ключа уже новая — пароль спросим тогда же).
+                cx.with_mut(|s| s.rekey_seen = true);
+                return Err(pause(cx, "rekey_started", Some(Notice::RekeyStarted)));
+            }
             if !has_keys {
                 return Err(pause(cx, "need_password", Some(Notice::NeedPassword)));
             }
-            if vs.key_version != key_version {
-                // Пароль сменили на другом устройстве: мастер-ключ тот же — проверить.
+            let seen = cx.with_mut(|s| std::mem::take(&mut s.rekey_seen));
+            if vs.key_version != key_version || seen {
+                // Запись ключа сменилась: пароль (мастер тот же) или смена ключа
+                // (мастер новый — запомненный не подойдёт, спросим пароль).
                 cx.with_mut(|s| s.keys_verified = false);
                 verify_keys(cx).await?;
                 cx.with_mut(|s| {
@@ -137,6 +164,60 @@ pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()>
                         key_version: vs.key_version,
                     }
                 });
+            }
+            if migrating_here {
+                return Ok(());
+            }
+            if !cx.with(|s| s.keys_verified) {
+                verify_keys(cx).await?;
+            }
+            let server_epoch = vs.key_epoch.max(1);
+            let (ours, record_epoch, record_prev) = cx.with(|s| {
+                (
+                    s.index.key_epoch.max(1),
+                    s.record_epoch.max(1),
+                    s.record_prev,
+                )
+            });
+            if record_epoch > server_epoch {
+                // Запись уже нового поколения, данные — ещё прежнего, а маркера нет
+                // (иначе ждали бы выше): смену ключа начали и бросили. Ключ у нас —
+                // новый, им прежние данные не прочитать; переходить на поколение
+                // сервера с ним нельзя — только довести перешифровку (прежний ключ —
+                // из записи).
+                if read_only {
+                    return Err(pause(cx, "rekey_started", Some(Notice::RekeyStarted)));
+                }
+                cx.log(
+                    LogLevel::Warn,
+                    "смена ключа не доведена: продолжаем перешифровку",
+                );
+                cx.with_mut(|s| {
+                    s.index.migration = Some(MigrationState {
+                        key_version: vs.key_version,
+                        to_epoch: record_epoch,
+                        takeover: true,
+                        ..Default::default()
+                    });
+                });
+                cx.save().await?;
+                return Err(SyncError::Restart);
+            }
+            if server_epoch != ours {
+                // Смена ключа завершена на другом устройстве: ключ у нас того же
+                // поколения, что данные (проверен по записи) — перейти на него.
+                cx.log(
+                    LogLevel::Info,
+                    format!("ключ шифрования сменён: поколение {server_epoch}, полная сверка"),
+                );
+                switch_epoch(cx, server_epoch);
+                cx.save().await?;
+                return Err(SyncError::Restart);
+            }
+            if record_prev && !read_only {
+                // Перешифровка закончена (поколение записи = поколению данных),
+                // осталось убрать прежний ключ из записи.
+                finish_record(cx).await?;
             }
             Ok(())
         }
@@ -154,6 +235,13 @@ pub(crate) async fn verify_keys(cx: &Ctx) -> SyncResult<()> {
     }
     let recovery = crypto::has_recovery(&vk.record);
     cx.set_status(|st| st.recovery = recovery);
+    let epoch = crypto::record_epoch(&vk.record).unwrap_or(1);
+    let prev = crypto::has_prev(&vk.record);
+    cx.with_mut(|s| {
+        s.record_epoch = epoch;
+        s.record_prev = prev;
+        s.verified_version = vk.version;
+    });
     let ok = cx.with(|s| {
         s.master
             .as_ref()
@@ -161,7 +249,13 @@ pub(crate) async fn verify_keys(cx: &Ctx) -> SyncResult<()> {
     });
     match ok {
         Some(Ok(true)) => {
-            cx.with_mut(|s| s.keys_verified = true);
+            cx.with_mut(|s| {
+                s.keys_verified = true;
+                // Ключ этой записи — её поколения (пути шифруются с ним).
+                if let Some(k) = s.keys.take() {
+                    s.keys = Some(k.with_epoch(epoch));
+                }
+            });
             Ok(())
         }
         _ => {
@@ -176,14 +270,14 @@ pub(crate) async fn verify_keys(cx: &Ctx) -> SyncResult<()> {
     }
 }
 
-fn set_master(cx: &Ctx, master: MasterKey, remember: bool, verified: bool) {
+fn set_master(cx: &Ctx, master: MasterKey, remember: bool, verified: bool, epoch: u32) {
     if remember {
         cx.hub.emit(Action::RememberKey {
             key: master.as_bytes().to_vec(),
         });
     }
     cx.with_mut(|s| {
-        s.keys = Some(master.derive());
+        s.keys = Some(master.derive().with_epoch(epoch));
         s.master = Some(master);
         s.keys_verified = verified;
         if s.paused.as_deref() == Some("need_password") {
@@ -198,7 +292,9 @@ fn set_master(cx: &Ctx, master: MasterKey, remember: bool, verified: bool) {
 /// Ключ, запомненный на устройстве (проверяется по записи на сервере в цикле).
 pub(crate) fn set_remembered(cx: &Ctx, key: &[u8]) {
     if let Ok(b) = <[u8; 32]>::try_from(key) {
-        set_master(cx, MasterKey::from_bytes(b), false, false);
+        // Поколение уточнит проверка по записи (verify_keys) до первого запроса.
+        let epoch = cx.with(|s| s.index.key_epoch.max(1));
+        set_master(cx, MasterKey::from_bytes(b), false, false, epoch);
     }
 }
 
@@ -214,7 +310,13 @@ pub(crate) async fn unlock(cx: &Ctx, password: String, remember: bool) -> SyncRe
     }
     match crypto::open_master_key(&vk.record, &password) {
         Ok(master) => {
-            set_master(cx, master, remember, true);
+            let epoch = crypto::record_epoch(&vk.record).unwrap_or(1);
+            cx.with_mut(|s| {
+                s.record_epoch = epoch;
+                s.record_prev = crypto::has_prev(&vk.record);
+                s.verified_version = vk.version;
+            });
+            set_master(cx, master, remember, true, epoch);
             cx.log(LogLevel::Info, "ключ шифрования раскрыт");
             cx.with_mut(|s| s.sync_due = Some(s.now));
             Ok(())
@@ -375,7 +477,9 @@ pub(crate) async fn recover(
         crypto::recover(rec, &entropy, &new_password, kdf, now)
     })
     .await?;
-    set_master(cx, master, remember, true);
+    // Поколение уточнит проверка по записи в начале цикла.
+    let epoch = cx.with(|s| s.index.key_epoch.max(1));
+    set_master(cx, master, remember, false, epoch);
     cx.log(
         LogLevel::Info,
         "доступ восстановлен фразой: задан новый пароль",
@@ -415,7 +519,8 @@ pub(crate) async fn enable(
     let Some(resp) = api::put_vault_key(cx, record, 0).await? else {
         return unlock(cx, password, remember).await;
     };
-    set_master(cx, master, remember, true);
+    set_master(cx, master, remember, true, 1);
+    cx.with_mut(|s| s.verified_version = resp.version);
     if let Some(e) = entropy {
         // Ровно один раз: ни в индекс, ни в журнал фраза не попадает.
         cx.set_status(|st| st.recovery = true);
@@ -430,9 +535,139 @@ pub(crate) async fn enable(
         });
     });
     cx.save().await?;
-    api::put_migration(cx, resp.version).await?;
+    api::put_migration(cx, resp.version, 0).await?;
     cx.log(LogLevel::Info, "шифрование включено: перезаливка vault'а");
     migrate(cx).await
+}
+
+/// Смена ключа (вызывается из цикла после полной синхронизации): новый мастер-ключ
+/// под тем же паролем, прежний — в записи под новым, пока идёт перешифровка.
+pub(crate) async fn rekey(cx: &Ctx, password: String, remember: bool) -> SyncResult<()> {
+    if !cx.with(|s| s.encrypted()) || cx.with(|s| s.index.migration.is_some()) {
+        return Ok(());
+    }
+    let vk = api::get_vault_key(cx).await?;
+    let kdf = cx.with(|s| s.cfg.kdf);
+    let rk = match crypto::rekey(&vk.record, &password, kdf, cx.now()) {
+        Ok(r) => r,
+        Err(CryptoError::WrongPassword) => {
+            cx.notify(Notice::WrongPassword);
+            return Ok(());
+        }
+        Err(e) => {
+            cx.notify(Notice::Error {
+                code: crypto_code(&e).into(),
+                message: e.to_string(),
+            });
+            return Ok(());
+        }
+    };
+    // Ключ в памяти — тот, что в записи (иначе перешифровывать нечем).
+    let same = cx.with(|s| {
+        s.master
+            .as_ref()
+            .is_some_and(|m| m.check_value() == rk.old.check_value())
+    });
+    if !same {
+        cx.notify(Notice::Error {
+            code: "bad_vault_key".into(),
+            message: "ключ на устройстве не совпадает с записью на сервере".into(),
+        });
+        return Ok(());
+    }
+    let Some(resp) = api::put_vault_key(cx, rk.record, vk.version).await? else {
+        cx.notify(Notice::Error {
+            code: "key_changed".into(),
+            message: "запись ключа изменилась на другом устройстве — повторите".into(),
+        });
+        return Ok(());
+    };
+    let epoch = rk.epoch;
+    let old_keys = rk.old.derive().with_epoch(epoch - 1);
+    set_master(cx, rk.new, remember, true, epoch);
+    cx.with_mut(|s| {
+        s.verified_version = resp.version;
+        s.prev_keys = Some(old_keys);
+        s.record_epoch = epoch;
+        s.record_prev = true;
+        s.index.migration = Some(MigrationState {
+            key_version: resp.version,
+            to_epoch: epoch,
+            ..Default::default()
+        });
+    });
+    if let Some(e) = rk.phrase {
+        // Прежняя фраза больше не открывает vault: новую — один раз.
+        cx.set_status(|st| st.recovery = true);
+        cx.notify(Notice::RecoveryPhrase {
+            words: Phrase(e.words()),
+        });
+    }
+    cx.save().await?;
+    api::put_migration(cx, resp.version, epoch).await?;
+    cx.log(
+        LogLevel::Info,
+        format!("ключ шифрования сменён: перешифровка vault'а (поколение {epoch})"),
+    );
+    migrate(cx).await
+}
+
+fn crypto_code(e: &CryptoError) -> &'static str {
+    match e {
+        CryptoError::WrongPassword => "wrong_password",
+        CryptoError::RekeyUnfinished => "rekey_unfinished",
+        _ => "bad_vault_key",
+    }
+}
+
+/// Ключи прежнего поколения для перешифровки: из записи (под новым ключом).
+async fn prev_keys(cx: &Ctx, to_epoch: u32) -> SyncResult<VaultKeys> {
+    if let Some(k) = cx.with(|s| s.prev_keys.clone()) {
+        return Ok(k);
+    }
+    let vk = api::get_vault_key(cx).await?;
+    let master = cx
+        .with(|s| s.master.clone())
+        .ok_or_else(|| SyncError::Paused("need_password".into()))?;
+    match crypto::open_prev(&vk.record, &master) {
+        Ok(Some(old)) => {
+            let k = old.derive().with_epoch(to_epoch.saturating_sub(1));
+            cx.with_mut(|s| s.prev_keys = Some(k.clone()));
+            Ok(k)
+        }
+        Ok(None) => Err(SyncError::Blocked("rekey_no_prev".into())),
+        Err(_) => {
+            // Ключ в памяти не тот (запомненный старый): спросить пароль.
+            Err(pause(cx, "need_password", Some(Notice::NeedPassword)))
+        }
+    }
+}
+
+/// Убрать прежний ключ из записи: перешифровка закончена (purge прошёл).
+async fn finish_record(cx: &Ctx) -> SyncResult<()> {
+    for _ in 0..3 {
+        let vk = api::get_vault_key(cx).await?;
+        if !crypto::has_prev(&vk.record) {
+            cx.with_mut(|s| s.record_prev = false);
+            return Ok(());
+        }
+        let record = crypto::without_prev(&vk.record).map_err(crypto_err)?;
+        if let Some(resp) = api::put_vault_key(cx, record, vk.version).await? {
+            cx.with_mut(|s| {
+                s.record_prev = false;
+                s.verified_version = resp.version;
+                if let VaultMode::Encrypted { .. } = s.index.mode {
+                    s.index.mode = VaultMode::Encrypted {
+                        key_version: resp.version,
+                    };
+                }
+            });
+            return Ok(());
+        }
+    }
+    Err(SyncError::Protocol(
+        "запись ключа постоянно меняется".into(),
+    ))
 }
 
 /// Перезаливка открытых записей зашифрованными; продолжается после перезапуска.
@@ -443,13 +678,42 @@ pub(crate) async fn migrate(cx: &Ctx) -> SyncResult<()> {
     if cx.with(|s| s.keys.is_none()) {
         return Err(pause(cx, "need_password", Some(Notice::NeedPassword)));
     }
+    if state.to_epoch > 0 {
+        // Перешифровку довело другое устройство, пока нас не было: перейти.
+        let vs = api::changes(cx, cx.with(|s| s.index.last_seq), 1)
+            .await?
+            .vault
+            .unwrap_or_default();
+        if vs.key_epoch >= state.to_epoch {
+            cx.log(LogLevel::Info, "смену ключа довело другое устройство");
+            cx.with_mut(|s| s.index.migration = None);
+            switch_epoch(cx, vs.key_epoch);
+            cx.save().await?;
+            return Err(SyncError::Restart);
+        }
+    }
+    // Смена ключа: источник — прежнее поколение (ключ из записи), не открытый текст.
+    let src = if state.to_epoch > 0 {
+        Some(prev_keys(cx, state.to_epoch).await?)
+    } else {
+        None
+    };
     // Маркер мог не дойти до сервера перед перезапуском — повтор идемпотентен.
-    api::put_migration(cx, state.key_version).await?;
+    match api::put_migration(cx, state.key_version, state.to_epoch).await {
+        Ok(()) => {}
+        // Брошенную нами смену ключа подхватило другое устройство — ждём его.
+        Err(SyncError::Http { code, .. })
+            if state.to_epoch > 0 && code == "migration_in_progress" =>
+        {
+            return Err(pause(cx, "rekey_started", Some(Notice::RekeyStarted)));
+        }
+        Err(e) => return Err(e),
+    }
     loop {
         if !cx.with(|s| s.index.migration.as_ref().is_some_and(|m| m.uploaded)) {
             let mut complete = false;
             for _ in 0..5 {
-                if upload_all(cx).await? {
+                if upload_all(cx, src.as_ref()).await? {
                     complete = true;
                     break;
                 }
@@ -474,6 +738,15 @@ pub(crate) async fn migrate(cx: &Ctx) -> SyncResult<()> {
         });
     }
     api::delete_migration(cx).await?;
+    if state.to_epoch > 0 {
+        finish_record(cx).await?;
+        switch_epoch(cx, state.to_epoch);
+        cx.with_mut(|s| s.index.migration = None);
+        cx.save().await?;
+        cx.notify(Notice::RekeyDone);
+        cx.log(LogLevel::Info, "смена ключа завершена");
+        return Err(SyncError::Restart);
+    }
     let kv = state.key_version;
     switch_to_encrypted(cx, kv);
     cx.save().await?;
@@ -503,10 +776,11 @@ async fn plaintext_left(cx: &Ctx) -> SyncResult<bool> {
 
 /// Один проход перезаливки. Возвращает `true`, если перезалито всё: только тогда
 /// можно стирать открытые записи (purge снимает всё, что не новее `max_seq`).
-async fn upload_all(cx: &Ctx) -> SyncResult<bool> {
+async fn upload_all(cx: &Ctx, src: Option<&VaultKeys>) -> SyncResult<bool> {
     let keys = cx
         .with(|s| s.keys.clone())
         .ok_or_else(|| SyncError::Paused("need_password".into()))?;
+    let to_epoch = cx.with(|s| s.index.migration.as_ref().map_or(0, |m| m.to_epoch));
     // Все открытые живые записи сервера (не только локальные файлы: у других устройств
     // могут быть свои исключения) и последние зашифрованные записи тех же путей.
     let mut cursor = 0;
@@ -516,13 +790,25 @@ async fn upload_all(cx: &Ctx) -> SyncResult<bool> {
         let resp = api::changes(cx, cursor, 1000).await?;
         for e in resp.entries {
             let Some(p) = e.path.as_ref() else { continue };
-            if p.encrypted {
+            // Целевые записи — зашифрованные новым ключом; исходные — открытые (при
+            // включении шифрования) или прежнего поколения (при смене ключа).
+            let target = if to_epoch == 0 {
+                p.encrypted
+            } else {
+                path_epoch(p) == to_epoch
+            };
+            if target {
                 if let Ok(vp) = keys.decrypt_path(p) {
                     encrypted.insert(vp.as_str().to_owned(), e);
                 }
                 continue;
             }
-            let Ok(vp) = VaultPath::from_segments(&p.segments) else {
+            let vp = match src {
+                None if !p.encrypted => VaultPath::from_segments(&p.segments).ok(),
+                Some(k) if p.encrypted => k.decrypt_path(p).ok(),
+                _ => None,
+            };
+            let Some(vp) = vp else {
                 continue;
             };
             if e.deleted {
@@ -582,7 +868,7 @@ async fn upload_all(cx: &Ctx) -> SyncResult<bool> {
                 continue;
             };
             let b = if e.size > SMALL_BLOB {
-                match reencrypt_big(cx, k, &h, e.size, &keys).await? {
+                match reencrypt_big(cx, k, &h, e.size, &keys, src).await? {
                     Some(b) => b,
                     None => {
                         cx.log(
@@ -594,7 +880,7 @@ async fn upload_all(cx: &Ctx) -> SyncResult<bool> {
                     }
                 }
             } else {
-                let Some(plain) = plaintext_of(cx, k, &h).await? else {
+                let Some(plain) = plaintext_of(cx, k, &h, src).await? else {
                     // Блоба нет на сервере: спасать нечего, purge не блокируем.
                     cx.log(
                         LogLevel::Error,
@@ -720,6 +1006,7 @@ async fn reencrypt_big(
     h: &Hash,
     size: u64,
     keys: &crate::crypto::VaultKeys,
+    src: Option<&VaultKeys>,
 ) -> SyncResult<Option<super::transfer::PreparedBlob>> {
     let local = cx.with(|s| {
         s.index
@@ -731,7 +1018,7 @@ async fn reencrypt_big(
     let (temp, obs) = match local {
         Some(obs) => (None, obs),
         None => {
-            let (t, obs) = download_temp(cx, h, size).await?;
+            let (t, obs) = download_temp_with(cx, h, size, src.cloned()).await?;
             (Some(t), obs)
         }
     };
@@ -754,7 +1041,12 @@ async fn reencrypt_big(
 }
 
 /// Открытый текст записи: из локального файла, если он совпадает, иначе с сервера.
-async fn plaintext_of(cx: &Ctx, key: &str, h: &Hash) -> SyncResult<Option<Vec<u8>>> {
+async fn plaintext_of(
+    cx: &Ctx,
+    key: &str,
+    h: &Hash,
+    src: Option<&VaultKeys>,
+) -> SyncResult<Option<Vec<u8>>> {
     let local = cx.with(|s| {
         s.index
             .files
@@ -768,7 +1060,7 @@ async fn plaintext_of(cx: &Ctx, key: &str, h: &Hash) -> SyncResult<Option<Vec<u8
     {
         return Ok(Some(d));
     }
-    match fetch_small(cx, h).await {
+    match fetch_small_with(cx, h, src.cloned()).await {
         Ok(d) => Ok(Some(d)),
         Err(SyncError::BlobGone) => Ok(None),
         Err(e) => Err(e),

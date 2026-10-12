@@ -22,7 +22,10 @@ pub const MAX_SEGMENTS: usize = 64;
 
 /// Байт режима в начале канонического кодирования.
 const MODE_PLAIN: u8 = 0;
+/// Зашифрованный путь первого поколения ключа (так было до смены ключей).
 const MODE_ENCRYPTED: u8 = 1;
+/// Зашифрованный путь поколения ≥ 2: за байтом режима — поколение, u32 BE.
+const MODE_ENCRYPTED_EPOCH: u8 = 2;
 
 /// Причина отказа в пути. Коды стабильны: они уходят клиенту в `Rejected.code`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -284,6 +287,7 @@ impl VaultPath {
         pb::Path {
             segments: self.segments().map(|s| s.as_bytes().to_vec()).collect(),
             encrypted: false,
+            key_epoch: 0,
         }
     }
 }
@@ -391,6 +395,9 @@ fn sanitize_label(label: &str) -> String {
 /// Проверка пути из протокола с учётом режима. Возвращает открытый путь,
 /// если путь не зашифрован.
 pub fn validate_proto_path(p: &pb::Path) -> Result<Option<VaultPath>, PathError> {
+    if !p.encrypted && p.key_epoch != 0 {
+        return Err(PathError::BadEncoding);
+    }
     if p.encrypted {
         if p.segments.is_empty() {
             return Err(PathError::Empty);
@@ -411,12 +418,8 @@ pub fn validate_proto_path(p: &pb::Path) -> Result<Option<VaultPath>, PathError>
 /// u16 BE длины и байты. Префикс каталога — байтовый префикс кодирования пути
 /// внутри него, одинаково для открытых и зашифрованных путей.
 pub fn canonical_encode(p: &pb::Path) -> Vec<u8> {
-    let mut out = Vec::with_capacity(1 + p.segments.iter().map(|s| s.len() + 2).sum::<usize>());
-    out.push(if p.encrypted {
-        MODE_ENCRYPTED
-    } else {
-        MODE_PLAIN
-    });
+    let mut out = Vec::with_capacity(5 + p.segments.iter().map(|s| s.len() + 2).sum::<usize>());
+    out.extend_from_slice(&mode_prefix(p.encrypted, p.key_epoch));
     for s in &p.segments {
         // Длина ограничена валидацией (≤ 512), u16 хватает.
         let len = u16::try_from(s.len()).unwrap_or(u16::MAX);
@@ -429,9 +432,17 @@ pub fn canonical_encode(p: &pb::Path) -> Vec<u8> {
 /// Обратное к [`canonical_encode`].
 pub fn canonical_decode(bytes: &[u8]) -> Result<pb::Path, PathError> {
     let (&mode, mut rest) = bytes.split_first().ok_or(PathError::BadEncoding)?;
-    let encrypted = match mode {
-        MODE_PLAIN => false,
-        MODE_ENCRYPTED => true,
+    let (encrypted, key_epoch) = match mode {
+        MODE_PLAIN => (false, 0),
+        MODE_ENCRYPTED => (true, 0),
+        MODE_ENCRYPTED_EPOCH => {
+            if rest.len() < 4 {
+                return Err(PathError::BadEncoding);
+            }
+            let e = u32::from_be_bytes([rest[0], rest[1], rest[2], rest[3]]);
+            rest = &rest[4..];
+            (true, e)
+        }
         _ => return Err(PathError::BadEncoding),
     };
     let mut segments = Vec::new();
@@ -450,7 +461,27 @@ pub fn canonical_decode(bytes: &[u8]) -> Result<pb::Path, PathError> {
     Ok(pb::Path {
         segments,
         encrypted,
+        key_epoch,
     })
+}
+
+/// Поколение ключа пути: открытый — 0, зашифрованный — не меньше 1.
+pub fn path_epoch(p: &pb::Path) -> u32 {
+    if p.encrypted { p.key_epoch.max(1) } else { 0 }
+}
+
+/// Байты режима в начале канонического кодирования: по ним сервер отличает
+/// открытые пути и поколения ключа (purge при миграции).
+pub fn mode_prefix(encrypted: bool, key_epoch: u32) -> Vec<u8> {
+    match (encrypted, key_epoch) {
+        (false, _) => vec![MODE_PLAIN],
+        (true, 0 | 1) => vec![MODE_ENCRYPTED],
+        (true, e) => {
+            let mut v = vec![MODE_ENCRYPTED_EPOCH];
+            v.extend_from_slice(&e.to_be_bytes());
+            v
+        }
+    }
 }
 
 /// Канонический префикс «всё внутри каталога».
@@ -584,6 +615,7 @@ mod tests {
         let enc = pb::Path {
             segments: vec![vec![0u8, 1, 2], vec![255; 32]],
             encrypted: true,
+            key_epoch: 0,
         };
         let e = canonical_encode(&enc);
         assert_eq!(e[0], MODE_ENCRYPTED);
@@ -597,11 +629,13 @@ mod tests {
         let ok = pb::Path {
             segments: vec![b"a".to_vec(), "é".as_bytes().to_vec()],
             encrypted: false,
+            key_epoch: 0,
         };
         assert_eq!(validate_proto_path(&ok).unwrap().unwrap().as_str(), "a/é");
         let bad_utf8 = pb::Path {
             segments: vec![vec![0xff]],
             encrypted: false,
+            key_epoch: 0,
         };
         assert_eq!(
             validate_proto_path(&bad_utf8).unwrap_err(),
@@ -610,6 +644,7 @@ mod tests {
         let with_slash = pb::Path {
             segments: vec![b"a/b".to_vec()],
             encrypted: false,
+            key_epoch: 0,
         };
         assert_eq!(
             validate_proto_path(&with_slash).unwrap_err(),
@@ -618,11 +653,13 @@ mod tests {
         let enc = pb::Path {
             segments: vec![vec![0u8; 48]],
             encrypted: true,
+            key_epoch: 0,
         };
         assert!(validate_proto_path(&enc).unwrap().is_none());
         let enc_bad = pb::Path {
             segments: vec![vec![]],
             encrypted: true,
+            key_epoch: 0,
         };
         assert!(validate_proto_path(&enc_bad).is_err());
     }

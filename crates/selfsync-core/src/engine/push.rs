@@ -481,6 +481,11 @@ async fn handle_result(cx: &Ctx, p: Prepared, r: pb::OpResult) -> SyncResult<()>
             if rj.code == "plaintext_in_encrypted_vault" {
                 return Err(SyncError::Restart);
             }
+            if rj.code == "stale_key_epoch" {
+                // Ключ сменили, пока мы отправляли: перечитать запись и состояние.
+                cx.with_mut(|s| s.keys_verified = false);
+                return Err(SyncError::Restart);
+            }
             let key = match &item {
                 Item::Mkdir { key }
                 | Item::Rename { key, .. }

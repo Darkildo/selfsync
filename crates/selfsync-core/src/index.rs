@@ -155,6 +155,31 @@ pub struct MigrationState {
     /// Доводим чужую брошенную миграцию: зашифрованные записи могут быть правками
     /// пользователей, сделанными уже после перехода на шифрование.
     pub takeover: bool,
+    /// Смена ключа: поколение, в которое перешифровываем (0 — включение шифрования).
+    pub to_epoch: u32,
+}
+
+/// `MigrationState` форматов 1 и 2 (без `to_epoch`).
+#[derive(Deserialize)]
+struct MigrationStateV2 {
+    key_version: u64,
+    done: BTreeMap<String, u64>,
+    max_seq: u64,
+    uploaded: bool,
+    takeover: bool,
+}
+
+impl From<MigrationStateV2> for MigrationState {
+    fn from(m: MigrationStateV2) -> MigrationState {
+        MigrationState {
+            key_version: m.key_version,
+            done: m.done,
+            max_seq: m.max_seq,
+            uploaded: m.uploaded,
+            takeover: m.takeover,
+            to_epoch: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -205,7 +230,7 @@ struct IndexV2 {
     files: BTreeMap<String, FileState>,
     conflicts: Vec<ConflictRecord>,
     next_conflict_id: u64,
-    migration: Option<MigrationState>,
+    migration: Option<MigrationStateV2>,
     cache: Vec<(Hash, u64)>,
     rebaselined: bool,
     rebaseline_seen: std::collections::BTreeSet<String>,
@@ -223,7 +248,7 @@ impl From<IndexV2> for Index {
             files: v.files,
             conflicts: v.conflicts,
             next_conflict_id: v.next_conflict_id,
-            migration: v.migration,
+            migration: v.migration.map(MigrationState::from),
             cache: v.cache,
             rebaselined: v.rebaselined,
             rebaseline_seen: v.rebaseline_seen,
@@ -244,7 +269,7 @@ struct IndexV1 {
     files: BTreeMap<String, FileState>,
     conflicts: Vec<ConflictRecord>,
     next_conflict_id: u64,
-    migration: Option<MigrationState>,
+    migration: Option<MigrationStateV2>,
     cache: Vec<(Hash, u64)>,
     rebaselined: bool,
     rebaseline_seen: std::collections::BTreeSet<String>,
@@ -261,7 +286,7 @@ impl From<IndexV1> for Index {
             files: v.files,
             conflicts: v.conflicts,
             next_conflict_id: v.next_conflict_id,
-            migration: v.migration,
+            migration: v.migration.map(MigrationState::from),
             cache: v.cache,
             rebaselined: v.rebaselined,
             rebaseline_seen: v.rebaseline_seen,
@@ -408,6 +433,7 @@ mod tests {
             max_seq: 5,
             uploaded: true,
             takeover: true,
+            to_epoch: 2,
         });
         i.cache = vec![(Hash::of(b"plain"), 5)];
         i.rebaselined = true;
@@ -437,13 +463,17 @@ mod tests {
 
     /// `sample()` без полей формата 3.
     fn sample_v2() -> Index {
-        Index {
+        let mut i = Index {
             skipped: BTreeMap::new(),
             max_download: 0,
             offloadable: BTreeMap::new(),
             key_epoch: 0,
             ..sample()
+        };
+        if let Some(m) = i.migration.as_mut() {
+            m.to_epoch = 0;
         }
+        i
     }
 
     const FIXTURE_V1: &[u8] = include_bytes!("../tests/fixtures/index-v1.bin");

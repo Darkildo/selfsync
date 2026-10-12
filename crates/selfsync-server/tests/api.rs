@@ -837,6 +837,7 @@ async fn vault_key_versioning_and_migration_purge() {
     let enc_path = pb::Path {
         segments: vec![vec![0xAB; 32]],
         encrypted: true,
+        key_epoch: 0,
     };
     let (h, _) = s.put_blob(&t, b"ciphertext").await;
     let resp = s
@@ -1396,4 +1397,137 @@ async fn device_remembers_client() {
     // новая версия того же устройства заменяет прежнюю
     s.send(with_client(&laptop, "plugin/0.3.1")).await;
     assert_eq!(list(&s, phone).await[0].1, "plugin/0.3.1");
+}
+
+/// Смена ключа на сервере: записи нового поколения — только во время смены,
+/// purge стирает прежнее поколение и записывает новое, после — прежнее
+/// поколение отклоняется, а клиент старее 1.2 получает 426.
+#[tokio::test]
+async fn rekey_epochs_and_purge() {
+    let s = TestServer::new();
+    let t = s.token("notes", "laptop");
+    let path = |seg: u8, epoch: u32| pb::Path {
+        segments: vec![vec![seg; 32]],
+        encrypted: true,
+        key_epoch: epoch,
+    };
+    let put = |p: pb::Path, h: &Hash, base_rev: u64| pb::Op {
+        kind: Some(pb::op::Kind::Put(pb::Put {
+            path: Some(p),
+            base_rev,
+            hash: h.to_vec(),
+            size: 4,
+            mtime: 0,
+        })),
+    };
+    let code = |r: &pb::OpResult| match &r.result {
+        Some(pb::op_result::Result::Rejected(rj)) => rj.code.clone(),
+        Some(pb::op_result::Result::Applied(_)) => "applied".into(),
+        o => format!("{o:?}"),
+    };
+    // зашифрованный vault первого поколения
+    let r = s
+        .call(
+            Method::PUT,
+            "/v1/vaultkey",
+            Some(&t),
+            pb::VaultKeyPut {
+                record: b"record-1".to_vec(),
+            }
+            .encode_to_vec(),
+            &[],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    let (h, _) = s.put_blob(&t, b"old1").await;
+    let res = s.ops(&t, vec![put(path(1, 0), &h, 0)]).await;
+    assert_eq!(code(&res.results[0]), "applied");
+    assert_eq!(s.changes(&t, 0).await.vault.unwrap().key_epoch, 0);
+    // поколение 2 без смены ключа — отказ; маркер не на следующее поколение — тоже
+    let (h2, _) = s.put_blob(&t, b"new2").await;
+    let res = s.ops(&t, vec![put(path(2, 2), &h2, 0)]).await;
+    assert_eq!(code(&res.results[0]), "stale_key_epoch");
+    let marker = |to_epoch| pb::MigrationMarker {
+        key_version: 1,
+        to_epoch,
+        ..Default::default()
+    };
+    let r = s
+        .call(
+            Method::PUT,
+            "/v1/vaultkey/migration",
+            Some(&t),
+            marker(3).encode_to_vec(),
+            &[],
+        )
+        .await;
+    assert_eq!(r.error().code, "bad_epoch");
+    let r = s
+        .call(
+            Method::PUT,
+            "/v1/vaultkey/migration",
+            Some(&t),
+            marker(2).encode_to_vec(),
+            &[],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    // во время смены принимаются оба поколения
+    let res = s.ops(&t, vec![put(path(2, 2), &h2, 0)]).await;
+    assert_eq!(code(&res.results[0]), "applied");
+    let res = s.ops(&t, vec![put(path(3, 0), &h, 0)]).await;
+    assert_eq!(code(&res.results[0]), "applied");
+    let ch = s.changes(&t, 0).await;
+    assert_eq!(ch.entries.len(), 3);
+    assert!(
+        ch.entries
+            .iter()
+            .any(|e| e.path.as_ref().unwrap().key_epoch == 2)
+    );
+    // прежнее поколение изменилось после снимка — перезалить ещё
+    let r = s
+        .post(
+            "/v1/vaultkey/migration/purge",
+            &t,
+            &pb::MigrationPurge { max_seq: 1 },
+        )
+        .await;
+    assert_eq!(r.error().code, "plaintext_changed");
+    let r: pb::PurgeResult = s
+        .post(
+            "/v1/vaultkey/migration/purge",
+            &t,
+            &pb::MigrationPurge { max_seq: 3 },
+        )
+        .await
+        .proto();
+    assert_eq!(r.purged, 2);
+    let ch = s.changes(&t, 0).await;
+    let vs = ch.vault.unwrap();
+    assert_eq!((vs.key_epoch, vs.migration), (2, false));
+    assert_eq!(ch.entries.len(), 1);
+    assert_eq!(ch.entries[0].path.as_ref().unwrap().key_epoch, 2);
+    let gone = s.get(&format!("/v1/blobs/{}", h.to_hex()), &t).await;
+    assert_eq!(
+        gone.status,
+        StatusCode::NOT_FOUND,
+        "блоб прежнего поколения стёрт"
+    );
+    // после смены прежнее поколение не принимается, текущее — да
+    let res = s.ops(&t, vec![put(path(4, 0), &h2, 0)]).await;
+    assert_eq!(code(&res.results[0]), "stale_key_epoch");
+    let res = s.ops(&t, vec![put(path(4, 2), &h2, 0)]).await;
+    assert_eq!(code(&res.results[0]), "applied");
+    // клиенту 1.1 vault со сменённым ключом не открыть
+    let r = s
+        .send(
+            http::Request::get("/v1/changes")
+                .header("x-selfsync-proto", "1.1")
+                .header("authorization", format!("Bearer {t}"))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::UPGRADE_REQUIRED);
+    assert_eq!(r.error().code, "client_outdated");
 }

@@ -108,6 +108,22 @@ pub fn delete_meta(c: &Connection, key: &str) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Текущее поколение ключа: 0 — vault не зашифрован, иначе не меньше 1.
+pub fn key_epoch(c: &Connection) -> rusqlite::Result<u32> {
+    if meta_blob(c, "vault_key")?.is_none() {
+        return Ok(0);
+    }
+    Ok(meta_int(c, "key_epoch")?
+        .and_then(|v| u32::try_from(v).ok())
+        .unwrap_or(1)
+        .max(1))
+}
+
+/// Маркер миграции, если есть.
+pub fn migration_marker(c: &Connection) -> rusqlite::Result<Option<pb::MigrationMarker>> {
+    Ok(meta_blob(c, "migration")?.map(|b| pb::MigrationMarker::decode(&b[..]).unwrap_or_default()))
+}
+
 pub fn current_seq(c: &Connection) -> rusqlite::Result<u64> {
     Ok(u(meta_int(c, "seq")?.unwrap_or(0)))
 }
@@ -120,7 +136,7 @@ pub fn retention_days(c: &Connection) -> rusqlite::Result<u32> {
 
 pub fn vault_state(c: &Connection) -> rusqlite::Result<pb::VaultState> {
     let mut st = c.prepare_cached(
-        "SELECT key, value FROM meta WHERE key IN ('seq','vault_key_version','migration','retention_days','purged_seq')",
+        "SELECT key, value FROM meta WHERE key IN ('seq','vault_key_version','migration','retention_days','purged_seq','key_epoch')",
     )?;
     let mut s = pb::VaultState {
         retention_days: DEFAULT_RETENTION_DAYS,
@@ -138,6 +154,7 @@ pub fn vault_state(c: &Connection) -> rusqlite::Result<pb::VaultState> {
                     u32::try_from(r.get::<_, i64>(1)?).unwrap_or(DEFAULT_RETENTION_DAYS)
             }
             "purged_seq" => s.purged_seq = u(r.get(1)?),
+            "key_epoch" => s.key_epoch = u32::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
             _ => {}
         }
     }
@@ -343,12 +360,24 @@ fn missing_blob() -> pb::OpResult {
 struct KeyState {
     has_key: bool,
     migration: bool,
+    /// Текущее поколение ключа (0 — не зашифрован).
+    epoch: u32,
+    /// Смена ключа идёт: поколение, в которое перешифровывают.
+    rekey_to: u32,
+    /// Поколение не проверять (удаление).
+    any_epoch: bool,
 }
 
 impl KeyState {
     /// Открытые записи запрещены в зашифрованном vault'е вне миграции.
     fn forbids_plaintext(&self) -> bool {
         self.has_key && !self.migration
+    }
+
+    /// Зашифрованная запись этого поколения принимается: текущее, а во время смены
+    /// ключа — и целевое. Без записи ключа — только первое (включение шифрования).
+    fn accepts_epoch(&self, e: u32) -> bool {
+        self.any_epoch || e == self.epoch.max(1) || (self.rekey_to > 0 && e == self.rekey_to)
     }
 }
 
@@ -364,6 +393,12 @@ fn check_path(p: Option<&pb::Path>, ks: &KeyState) -> Result<Vec<u8>, pb::OpResu
         return Err(rejected(
             "plaintext_in_encrypted_vault",
             "vault зашифрован: открытые записи запрещены",
+        ));
+    }
+    if p.encrypted && !ks.accepts_epoch(selfsync_core::path::path_epoch(p)) {
+        return Err(rejected(
+            "stale_key_epoch",
+            "ключ шифрования сменился: перечитайте запись ключа",
         ));
     }
     Ok(canonical_encode(p))
@@ -386,9 +421,13 @@ pub fn apply_ops(
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let start_seq = current_seq(&tx)?;
     let mut seq = start_seq;
+    let marker = migration_marker(&tx)?;
     let ks = KeyState {
         has_key: meta_blob(&tx, "vault_key")?.is_some(),
-        migration: meta_blob(&tx, "migration")?.is_some(),
+        migration: marker.is_some(),
+        epoch: key_epoch(&tx)?,
+        rekey_to: marker.map_or(0, |m| m.to_epoch),
+        any_epoch: false,
     };
     let mut results = Vec::with_capacity(ops.len());
     for op in ops {
@@ -481,10 +520,13 @@ fn op_delete(
     d: &pb::Delete,
 ) -> rusqlite::Result<pb::OpResult> {
     // Удаление открытой записи в зашифрованном vault'е разрешено: оно только убирает
-    // открытый текст.
+    // открытый текст. Так же и записи прежнего поколения ключа.
     let ks = KeyState {
         has_key: false,
         migration: false,
+        epoch: 0,
+        rekey_to: 0,
+        any_epoch: true,
     };
     let key = match check_path(d.path.as_ref(), &ks) {
         Ok(k) => k,
@@ -880,37 +922,62 @@ pub enum PurgeOutcome {
     PlaintextChanged,
 }
 
-/// Стирает открытые записи и их историю после перезаливки.
+/// Стирает записи, оставшиеся от прежнего режима, и их историю после перезаливки:
+/// при включении шифрования — открытые, при смене ключа — всё, что не в целевом
+/// поколении. Смена ключа заодно записывает новое поколение.
 pub fn purge_plaintext(c: &mut Connection, max_seq: u64) -> rusqlite::Result<PurgeOutcome> {
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    if meta_blob(&tx, "migration")?.is_none() {
+    let Some(marker) = migration_marker(&tx)? else {
         return Ok(PurgeOutcome::NoMigration);
-    }
-    // Открытые пути начинаются с байта режима 0x00.
+    };
+    // Устаревшее — по байтам режима в начале пути: открытые начинаются с 0x00,
+    // поколения ключа — со своего префикса (`mode_prefix`).
+    let (pred, prefix) = if marker.to_epoch == 0 {
+        ("substr(path, 1, 1) = ?2", vec![0u8])
+    } else {
+        (
+            "substr(path, 1, length(?2)) != ?2",
+            selfsync_core::path::mode_prefix(true, marker.to_epoch),
+        )
+    };
     let newer: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM files WHERE substr(path, 1, 1) = x'00' AND seq > ?1 AND deleted = 0",
-        params![i(max_seq)],
+        &format!("SELECT COUNT(*) FROM files WHERE {pred} AND seq > ?1 AND deleted = 0"),
+        params![i(max_seq), prefix],
         |r| r.get(0),
     )?;
     if newer > 0 {
         return Ok(PurgeOutcome::PlaintextChanged);
     }
     let hashes: Vec<Vec<u8>> = {
-        let mut st = tx.prepare(
-            "SELECT DISTINCT hash FROM revisions WHERE substr(path, 1, 1) = x'00' AND hash IS NOT NULL",
-        )?;
-        st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+        let mut st = tx.prepare(&format!(
+            "SELECT DISTINCT hash FROM revisions WHERE {} AND hash IS NOT NULL",
+            pred.replace("?2", "?1")
+        ))?;
+        st.query_map(params![prefix], |r| r.get(0))?
+            .collect::<Result<_, _>>()?
     };
     let max_purged: i64 = tx.query_row(
-        "SELECT COALESCE(MAX(seq), 0) FROM files WHERE substr(path, 1, 1) = x'00'",
-        [],
+        &format!(
+            "SELECT COALESCE(MAX(seq), 0) FROM files WHERE {}",
+            pred.replace("?2", "?1")
+        ),
+        params![prefix],
         |r| r.get(0),
     )?;
-    let purged = tx.execute("DELETE FROM files WHERE substr(path, 1, 1) = x'00'", [])?;
-    tx.execute("DELETE FROM revisions WHERE substr(path, 1, 1) = x'00'", [])?;
+    let purged = tx.execute(
+        &format!("DELETE FROM files WHERE {}", pred.replace("?2", "?1")),
+        params![prefix],
+    )?;
+    tx.execute(
+        &format!("DELETE FROM revisions WHERE {}", pred.replace("?2", "?1")),
+        params![prefix],
+    )?;
     bump_purged_seq(&tx, u(max_purged))?;
+    if marker.to_epoch > 0 {
+        set_meta_int(&tx, "key_epoch", i64::from(marker.to_epoch))?;
+    }
     // Маркер снимается в той же транзакции: иначе между purge и снятием маркера
-    // сервер ещё принимал бы открытые записи, и они остались бы навсегда.
+    // сервер ещё принимал бы записи прежнего режима, и они остались бы навсегда.
     clear_migration(&tx)?;
     tx.commit()?;
     Ok(PurgeOutcome::Done {
@@ -1155,6 +1222,7 @@ mod tests {
                 path: Some(pb::Path {
                     segments: vec!["e\u{301}.md".as_bytes().to_vec()],
                     encrypted: false,
+                    key_epoch: 0,
                 }),
                 base_rev: 0,
                 hash: vec![1; 32],
@@ -1171,6 +1239,7 @@ mod tests {
                 path: Some(pb::Path {
                     segments: vec![b"..".to_vec()],
                     encrypted: false,
+                    key_epoch: 0,
                 }),
             })),
         };
@@ -1247,6 +1316,7 @@ mod tests {
                 path: Some(pb::Path {
                     segments: vec![vec![9; 32]],
                     encrypted: true,
+                    key_epoch: 0,
                 }),
                 base_rev: 0,
                 hash: vec![7; 32],

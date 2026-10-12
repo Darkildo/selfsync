@@ -92,6 +92,13 @@ enum Cmd {
         #[arg(long)]
         no_remember: bool,
     },
+    /// Сменить ключ шифрования (после отзыва устройства): vault перешифровывается
+    /// новым ключом под тем же паролем, другие устройства попросят пароль заново.
+    Rekey {
+        /// Файл с паролем (или переменная SELFSYNC_PASSWORD).
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+    },
     /// Состояние: подключение, очередь, конфликты.
     Status,
     /// История файла: ревизии на сервере (номер, дата, размер, устройство).
@@ -162,6 +169,8 @@ enum Cmd {
 
 /// Первая выпущенная версия, которая открывает запись ключа формата 2 (с фразой).
 const RECOVERY_MIN: &str = "0.2.1";
+/// Первая версия, которая понимает смену ключа (поколения, запись формата 3).
+const REKEY_MIN: &str = "0.3.0";
 
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
@@ -598,6 +607,33 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 println!("шифрование включено; на других устройствах понадобится этот пароль");
             }
             return Ok(code);
+        }
+        Cmd::Rekey { password_file } => {
+            let password = read_password(password_file)?
+                .context("нужен пароль: --password-file или SELFSYNC_PASSWORD")?;
+            let cfg = Config::load(&dir)?;
+            warn_old_devices(&dir, &cfg, REKEY_MIN, "смену ключа").await;
+            let cmd = UiCommand::Rekey {
+                password: password.clone(),
+                remember: true,
+            };
+            let (o, r) =
+                runner::with_vault(&dir, &cfg, Some(password), true, VaultCommand::Ui(cmd)).await?;
+            return match r {
+                Some(UiResult::Ok) if o == Outcome::Synced => {
+                    println!("ключ шифрования сменён; на других устройствах понадобится пароль");
+                    Ok(outcome(o))
+                }
+                Some(UiResult::Ok) => {
+                    eprintln!("перешифровка не закончена — она продолжится при следующем `run`");
+                    Ok(outcome(o))
+                }
+                Some(UiResult::Error { message, .. }) => {
+                    eprintln!("ошибка: {message}");
+                    Ok(ExitCode::from(1))
+                }
+                _ => Ok(outcome(o)),
+            };
         }
         Cmd::Status => {
             let cfg = Config::load(&dir)?;

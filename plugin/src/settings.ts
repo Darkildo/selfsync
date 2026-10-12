@@ -49,6 +49,8 @@ export const DEFAULT_SETTINGS: Settings = {
 
 /** Первая выпущенная версия, которая открывает запись ключа с фразой (формат 2). */
 const RECOVERY_MIN = "0.2.1";
+/** Первая версия, которая понимает смену ключа (поколения ключа, запись формата 3). */
+const REKEY_MIN = "0.3.0";
 
 /** Текст ошибки команды: известные коды — локализованно. */
 function errorText(r: { code: string; message: string }): string {
@@ -346,6 +348,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
               new ChangePasswordModal(this.app, (old, next) => runner.send({ type: "changePassword", old, new: next })).open(),
             ),
           );
+          row.addButton((b) => b.setButtonText(t("rekey.button")).setWarning().onClick(() => void this.rekey()));
         }
       },
     };
@@ -503,6 +506,19 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     };
   }
 
+  /** Смена ключа шифрования: последствия, старые устройства, пароль. */
+  private async rekey(): Promise<void> {
+    const runner = this.plugin.runner;
+    if (!runner) return;
+    if (!(await confirm(this.app, t("rekey.confirm"), t("rekey.button")))) return;
+    if (!(await this.confirmOldDevices(REKEY_MIN))) return;
+    new PasswordModal(this.app, { title: t("rekey.title"), desc: t("rekey.desc"), submit: t("rekey.button"), showStrength: false }, (r) => {
+      void runner.command({ type: "rekey", password: r.password, remember: r.remember }).then((res) => {
+        new Notice(res.type === "error" ? errorText(res) : t("rekey.started"));
+      });
+    }).open();
+  }
+
   /** Устройства старее `min` (или с неизвестной версией) — для предупреждения. Без
    *  сети список пуст: не мешать действию из-за того, что проверить не удалось. */
   private async oldDevices(min: string): Promise<string[]> {
@@ -546,6 +562,10 @@ export class SelfsyncSettingTab extends PluginSettingTab {
           const res = await runner.command({ type: "revokeDevice", id: d.id });
           if (res.type === "error") new Notice(errorText(res));
           this.refresh();
+          // Отозванное устройство знает ключ шифрования: предложить его сменить.
+          if (res.type !== "error" && runner.status().encrypted) {
+            if (await confirm(this.app, t("rekey.afterRevoke", { name: d.name }), t("rekey.button"))) await this.rekey();
+          }
         }),
     );
   }

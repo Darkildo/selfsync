@@ -818,3 +818,62 @@ async fn download_limit_skipped_and_download() {
     let text = std::fs::read_to_string(selfsync_cli::config::Config::path(a.path())).unwrap();
     assert!(!text.contains("max_download_size"), "{text}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rekey_then_other_folder_needs_password() {
+    const PW: &str = "correct horse battery staple";
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "rekey", "a");
+    let (b, cb) = folder(&srv, "rekey", "b");
+    std::fs::write(a.path().join("s.md"), "secret\n").unwrap();
+    let enable = Options {
+        enable_encryption: true,
+        ..once(Some(PW))
+    };
+    assert_eq!(
+        runner::run(a.path(), &ca, enable).await.unwrap(),
+        Outcome::Synced
+    );
+    assert_eq!(
+        runner::run(b.path(), &cb, once(Some(PW))).await.unwrap(),
+        Outcome::Synced
+    );
+    // неверный пароль — отказ сразу
+    let (_, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::Rekey {
+            password: "wrong".into(),
+            remember: true,
+        }),
+    )
+    .await;
+    assert!(
+        matches!(&r, Some(UiResult::Error { code, .. }) if code == "wrong_password"),
+        "{r:?}"
+    );
+    let (o, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::Rekey {
+            password: PW.into(),
+            remember: true,
+        }),
+    )
+    .await;
+    assert_eq!((o, r), (Outcome::Synced, Some(UiResult::Ok)));
+    // запомненный на b ключ больше не подходит; с паролем — дальше как обычно
+    assert_eq!(sync(b.path(), &cb).await, Outcome::NeedPassword);
+    std::fs::write(b.path().join("s.md"), "secret from b\n").unwrap();
+    assert_eq!(
+        runner::run(b.path(), &cb, once(Some(PW))).await.unwrap(),
+        Outcome::Synced
+    );
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert_eq!(
+        std::fs::read_to_string(a.path().join("s.md")).unwrap(),
+        "secret from b\n"
+    );
+}

@@ -117,6 +117,19 @@ pub(crate) struct State {
     // Запросы пользователя к задаче синка.
     /// Включить шифрование: пароль, запомнить ключ, создать фразу восстановления.
     pub enable: Option<(String, bool, bool)>,
+    /// Сменить ключ шифрования: пароль, запомнить новый ключ.
+    pub rekey: Option<(String, bool)>,
+    /// Ключи прежнего поколения, пока идёт смена ключа (из записи, под новым).
+    pub prev_keys: Option<VaultKeys>,
+    /// Поколение мастер-ключа в записи на сервере и есть ли в ней прежний ключ
+    /// (смена ключа не завершена) — по последней проверке ключа.
+    pub record_epoch: u32,
+    pub record_prev: bool,
+    /// Видели чужую смену ключа: после неё — перечитать запись.
+    pub rekey_seen: bool,
+    /// Версия записи ключа, по которой ключ проверен: другая на сервере —
+    /// проверить заново (пароль сменили или ключ сменили).
+    pub verified_version: u64,
 
     /// Id устройства (из /v1/devices; для отличения своего эха не обязателен).
     pub device_id: u32,
@@ -175,6 +188,12 @@ impl State {
             paused: None,
             server_state: None,
             enable: None,
+            rekey: None,
+            prev_keys: None,
+            record_epoch: 1,
+            record_prev: false,
+            rekey_seen: false,
+            verified_version: 0,
             device_id: 0,
             notified: BTreeSet::new(),
             hold_seq: None,

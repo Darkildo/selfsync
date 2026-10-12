@@ -1,8 +1,8 @@
 //! Команды интерфейса (окно восстановления, история, устройства, подключение по QR,
 //! настройки vault'а) и решения пользователя по конфликтам.
 
-use selfsync_proto::MINOR_READ_ONLY;
 use selfsync_proto::v1 as pb;
+use selfsync_proto::{MINOR_READ_ONLY, MINOR_REKEY};
 
 use super::api;
 use super::ctx::{Ctx, SMALL_BLOB, SyncError, SyncResult};
@@ -40,6 +40,49 @@ fn error_result(e: &SyncError) -> UiResult {
             _ => 0,
         },
     }
+}
+
+/// Проверить, что смена ключа возможна, и поставить её в ближайший цикл синка:
+/// перешифровка долгая и должна переживать перезапуск, поэтому её ведёт цикл.
+async fn start_rekey(cx: &Ctx, password: String, remember: bool) -> SyncResult<UiResult> {
+    let fail = |code: &str, message: &str| {
+        Err(SyncError::Http {
+            status: 409,
+            code: code.into(),
+            message: message.into(),
+        })
+    };
+    if !cx.with(|s| s.encrypted()) {
+        return fail("no_vault_key", "vault не зашифрован");
+    }
+    if cx.with(|s| s.index.migration.is_some() || s.rekey.is_some()) {
+        return fail("rekey_in_progress", "перешифровка уже идёт");
+    }
+    if server_minor(cx).await? < MINOR_REKEY {
+        return Err(SyncError::ServerOutdated(
+            "сервер не умеет смену ключа: обновите его до 0.3.0 или новее".into(),
+        ));
+    }
+    // Пароль проверяется сразу, а не в цикле: окну нужен ответ «неверный пароль».
+    let vk = api::get_vault_key(cx).await?;
+    if crate::crypto::has_prev(&vk.record) {
+        return fail(
+            "rekey_unfinished",
+            "предыдущая смена ключа ещё не завершена",
+        );
+    }
+    match crate::crypto::open_master_key(&vk.record, &password) {
+        Ok(_) => {}
+        Err(crate::crypto::CryptoError::WrongPassword) => {
+            return fail("wrong_password", "неверный пароль");
+        }
+        Err(e) => return fail("bad_vault_key", &e.to_string()),
+    }
+    cx.with_mut(|s| {
+        s.rekey = Some((password, remember));
+        s.sync_due = Some(s.now);
+    });
+    Ok(UiResult::Ok)
 }
 
 /// Удалить локальные копии под исключённым путём, которые при забывании совпадали
@@ -137,6 +180,7 @@ fn writes(cmd: &UiCommand) -> bool {
             | UiCommand::CreateRecovery { .. }
             | UiCommand::RemoveRecovery { .. }
             | UiCommand::Recover { .. }
+            | UiCommand::Rekey { .. }
     )
 }
 
@@ -318,6 +362,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                 devices: s.devices,
             })
         }
+        UiCommand::Rekey { password, remember } => start_rekey(cx, password, remember).await,
         UiCommand::Skipped => Ok(UiResult::Skipped {
             files: cx.with(|s| {
                 s.index

@@ -169,6 +169,7 @@ pub async fn put_migration(
         device: a.device_id,
         started_at: now_ms(),
         key_version: req.key_version,
+        to_epoch: req.to_epoch,
     };
     let m = marker;
     a.vault
@@ -177,6 +178,13 @@ pub async fn put_migration(
                 return Err(ApiError::conflict(
                     "no_vault_key",
                     "сначала нужна запись ключа",
+                ));
+            }
+            // Смена ключа — только на следующее поколение.
+            if m.to_epoch != 0 && m.to_epoch != vault::key_epoch(c)? + 1 {
+                return Err(ApiError::conflict(
+                    "bad_epoch",
+                    "смена ключа — только на следующее поколение",
                 ));
             }
             // Повтор от того же устройства — no-op: маркер не перезаписывается чужим.

@@ -23,6 +23,10 @@ pub const KEY_RECORD_FORMAT: u32 = 1;
 /// Пароль и фраза восстановления. Клиенты 0.1.x такую запись не откроют, поэтому
 /// она появляется только по явному действию пользователя.
 pub const KEY_RECORD_FORMAT_RECOVERY: u32 = 2;
+/// Смена ключа: поколение мастер-ключа (в AAD) и, пока перешифровка не завершена,
+/// прежний мастер-ключ под ключом из нового. Фраза восстановления — по желанию.
+/// Клиенты до 0.3.0 такую запись не откроют.
+pub const KEY_RECORD_FORMAT_EPOCH: u32 = 3;
 /// Argon2id v0x13.
 pub const KDF_ARGON2ID: u32 = 1;
 
@@ -34,6 +38,8 @@ const INFO_NONCE: &[u8] = b"selfsync/v1/nonce";
 const INFO_NAMES: &[u8] = b"selfsync/v1/names";
 const INFO_ID: &[u8] = b"selfsync/v1/content-id";
 const INFO_CHECK: &[u8] = b"selfsync/v1/key-check";
+const PREV_AAD: &[u8] = b"selfsync/v1/prev-key";
+const INFO_PREV: &[u8] = b"selfsync/v1/prev-kek";
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CryptoError {
@@ -53,6 +59,8 @@ pub enum CryptoError {
     WrongPhrase,
     #[error("у записи ключа нет фразы восстановления")]
     NoRecovery,
+    #[error("предыдущая смена ключа ещё не завершена")]
+    RekeyUnfinished,
 }
 
 /// Параметры Argon2id.
@@ -137,6 +145,7 @@ impl MasterKey {
             nonce: [0; 32],
             names: [0; 64],
             id: [0; 32],
+            epoch: 1,
         };
         // expand не падает для длин ≤ 255·32 байт.
         let _ = hk.expand(INFO_CONTENT, &mut keys.content);
@@ -164,6 +173,8 @@ pub struct VaultKeys {
     pub(crate) names: [u8; 64],
     /// HMAC-SHA256 для идентификатора содержимого в заголовке блоба.
     pub(crate) id: [u8; 32],
+    /// Поколение мастер-ключа (не секрет): попадает в зашифрованные пути.
+    pub(crate) epoch: u32,
 }
 
 impl std::fmt::Debug for VaultKeys {
@@ -173,6 +184,16 @@ impl std::fmt::Debug for VaultKeys {
 }
 
 impl VaultKeys {
+    /// Те же ключи с поколением (`0` считается первым).
+    pub fn with_epoch(mut self, epoch: u32) -> VaultKeys {
+        self.epoch = epoch.max(1);
+        self
+    }
+
+    pub fn epoch(&self) -> u32 {
+        self.epoch
+    }
+
     /// nonce чанка = первые 12 байт HMAC(ключ nonce, sha256(открытый текст) ‖ индекс).
     pub fn chunk_nonce(&self, plaintext_hash: &Hash, index: u64) -> [u8; 12] {
         let mut mac = hmac_sha256(&self.nonce);
@@ -239,11 +260,17 @@ impl VaultKeys {
         pb::Path {
             segments: path.segments().map(|s| self.encrypt_segment(s)).collect(),
             encrypted: true,
+            // Первое поколение — как до смены ключей: 0 (байт режима 0x01 на сервере).
+            key_epoch: if self.epoch > 1 { self.epoch } else { 0 },
         }
     }
 
     /// Расшифровывает путь и проверяет, что внутри валидный открытый путь.
     pub fn decrypt_path(&self, p: &pb::Path) -> Result<crate::path::VaultPath, CryptoError> {
+        // Путь другого поколения этим ключом не открыть (и не пытаться).
+        if crate::path::path_epoch(p) != self.epoch {
+            return Err(CryptoError::Decrypt);
+        }
         let segs = p
             .segments
             .iter()
@@ -279,14 +306,56 @@ fn wrap_aad(r: &pb::VaultKeyRecord) -> Vec<u8> {
     aad.extend_from_slice(&r.salt);
     // Формат 2: обёртка восстановления целиком. Вырезать её (вернуть формат 1) или
     // подменить незаметно для парольной обёртки нельзя.
-    if r.format == KEY_RECORD_FORMAT_RECOVERY {
+    if r.format == KEY_RECORD_FORMAT_RECOVERY || r.format == KEY_RECORD_FORMAT_EPOCH {
         for part in [&r.recovery_nonce, &r.recovery_wrapped_key] {
             aad.extend_from_slice(&u32::try_from(part.len()).unwrap_or(u32::MAX).to_le_bytes());
             aad.extend_from_slice(part);
         }
         aad.extend_from_slice(&r.recovery_created_at.to_le_bytes());
     }
+    // Формат 3: поколение. Обёртка прежнего ключа в AAD не входит: её снимают по
+    // завершении перешифровки без пароля, а подменить её не даёт собственный AEAD.
+    if r.format == KEY_RECORD_FORMAT_EPOCH {
+        aad.extend_from_slice(&r.key_epoch.to_le_bytes());
+    }
     aad
+}
+
+/// Ключ обёртки прежнего мастер-ключа: из нового, HKDF.
+fn prev_kek(new: &MasterKey) -> [u8; 32] {
+    let hk = Hkdf::<Sha256>::new(None, &new.0);
+    let mut out = [0u8; 32];
+    hk.expand(INFO_PREV, &mut out)
+        .unwrap_or_else(|_| unreachable!());
+    out
+}
+
+fn prev_aad(epoch: u32) -> Vec<u8> {
+    let mut aad = PREV_AAD.to_vec();
+    aad.extend_from_slice(&epoch.to_le_bytes());
+    aad
+}
+
+/// Прежний мастер-ключ под ключом из нового: (nonce, шифртекст).
+fn wrap_prev(
+    new: &MasterKey,
+    old: &MasterKey,
+    epoch: u32,
+) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+    let nonce: [u8; 12] = random_bytes()?;
+    let mut kek = prev_kek(new);
+    let cipher = Aes256GcmSiv::new_from_slice(&kek).unwrap_or_else(|_| unreachable!());
+    kek.zeroize();
+    let wrapped = cipher
+        .encrypt(
+            &nonce.into(),
+            Payload {
+                msg: old.as_bytes(),
+                aad: &prev_aad(epoch),
+            },
+        )
+        .map_err(|_| CryptoError::BadRecord)?;
+    Ok((nonce.to_vec(), wrapped))
 }
 
 /// AAD обёртки восстановления. Не зависит от парольной части: смена пароля её
@@ -344,7 +413,9 @@ impl RecoveryWrap {
     }
 
     fn of(r: &pb::VaultKeyRecord) -> Option<RecoveryWrap> {
-        (r.format == KEY_RECORD_FORMAT_RECOVERY).then(|| RecoveryWrap {
+        let has = r.format == KEY_RECORD_FORMAT_RECOVERY
+            || (r.format == KEY_RECORD_FORMAT_EPOCH && !r.recovery_wrapped_key.is_empty());
+        has.then(|| RecoveryWrap {
             nonce: r.recovery_nonce.clone(),
             wrapped: r.recovery_wrapped_key.clone(),
             created_at: r.recovery_created_at,
@@ -389,7 +460,36 @@ pub fn seal_master_key(
     params: KdfParams,
     created_at: i64,
 ) -> Result<Vec<u8>, CryptoError> {
-    seal(master, password, params, created_at, None)
+    seal(master, password, params, created_at, Extras::default())
+}
+
+/// Части записи, которые переживают её перевыпуск (смена пароля, фразы).
+#[derive(Debug, Clone, Default)]
+struct Extras {
+    recovery: Option<RecoveryWrap>,
+    /// Поколение мастер-ключа; 0 и 1 — первое.
+    epoch: u32,
+    /// Прежний мастер-ключ (nonce, шифртекст), пока перешифровка не завершена.
+    prev: Option<(Vec<u8>, Vec<u8>)>,
+}
+
+impl Extras {
+    fn of(r: &pb::VaultKeyRecord) -> Extras {
+        Extras {
+            recovery: RecoveryWrap::of(r),
+            epoch: epoch_of(r),
+            prev: (!r.prev_wrapped_key.is_empty())
+                .then(|| (r.prev_nonce.clone(), r.prev_wrapped_key.clone())),
+        }
+    }
+}
+
+fn epoch_of(r: &pb::VaultKeyRecord) -> u32 {
+    if r.format == KEY_RECORD_FORMAT_EPOCH {
+        r.key_epoch.max(1)
+    } else {
+        1
+    }
 }
 
 /// Запись формата 2: обёртка паролем и обёртка фразой восстановления.
@@ -401,7 +501,11 @@ pub fn seal_master_key_with_recovery(
     entropy: &RecoveryEntropy,
 ) -> Result<Vec<u8>, CryptoError> {
     let rw = RecoveryWrap::new(master, entropy, created_at)?;
-    seal(master, password, params, created_at, Some(rw))
+    let extras = Extras {
+        recovery: Some(rw),
+        ..Extras::default()
+    };
+    seal(master, password, params, created_at, extras)
 }
 
 fn seal(
@@ -409,21 +513,24 @@ fn seal(
     password: &str,
     params: KdfParams,
     created_at: i64,
-    recovery: Option<RecoveryWrap>,
+    extras: Extras,
 ) -> Result<Vec<u8>, CryptoError> {
     let salt: [u8; 16] = random_bytes()?;
     let nonce: [u8; 12] = random_bytes()?;
-    let (format, rw) = match recovery {
-        Some(rw) => (KEY_RECORD_FORMAT_RECOVERY, rw),
-        None => (
-            KEY_RECORD_FORMAT,
-            RecoveryWrap {
-                nonce: Vec::new(),
-                wrapped: Vec::new(),
-                created_at: 0,
-            },
-        ),
+    // Первое поколение без перешифровки — побайтно прежние форматы 1 и 2.
+    let format = if extras.epoch > 1 || extras.prev.is_some() {
+        KEY_RECORD_FORMAT_EPOCH
+    } else if extras.recovery.is_some() {
+        KEY_RECORD_FORMAT_RECOVERY
+    } else {
+        KEY_RECORD_FORMAT
     };
+    let rw = extras.recovery.unwrap_or(RecoveryWrap {
+        nonce: Vec::new(),
+        wrapped: Vec::new(),
+        created_at: 0,
+    });
+    let (prev_nonce, prev_wrapped_key) = extras.prev.unwrap_or_default();
     let mut record = pb::VaultKeyRecord {
         format,
         kdf: KDF_ARGON2ID,
@@ -438,6 +545,13 @@ fn seal(
         recovery_nonce: rw.nonce,
         recovery_wrapped_key: rw.wrapped,
         recovery_created_at: rw.created_at,
+        key_epoch: if format == KEY_RECORD_FORMAT_EPOCH {
+            extras.epoch.max(1)
+        } else {
+            0
+        },
+        prev_nonce,
+        prev_wrapped_key,
     };
     let mut kek = derive_kek(password, &salt, params)?;
     let cipher = Aes256GcmSiv::new_from_slice(&kek).unwrap_or_else(|_| unreachable!());
@@ -458,8 +572,20 @@ fn seal(
 /// Разбирает запись ключа (без пароля): параметры и версия формата.
 pub fn parse_record(bytes: &[u8]) -> Result<pb::VaultKeyRecord, CryptoError> {
     let r = pb::VaultKeyRecord::decode(bytes).map_err(|_| CryptoError::BadRecord)?;
-    if r.format != KEY_RECORD_FORMAT && r.format != KEY_RECORD_FORMAT_RECOVERY {
+    if !matches!(
+        r.format,
+        KEY_RECORD_FORMAT | KEY_RECORD_FORMAT_RECOVERY | KEY_RECORD_FORMAT_EPOCH
+    ) {
         return Err(CryptoError::UnsupportedFormat(r.format));
+    }
+    if r.format == KEY_RECORD_FORMAT_EPOCH {
+        let rec_ok = (r.recovery_nonce.is_empty() && r.recovery_wrapped_key.is_empty())
+            || (r.recovery_nonce.len() == 12 && !r.recovery_wrapped_key.is_empty());
+        let prev_ok = (r.prev_nonce.is_empty() && r.prev_wrapped_key.is_empty())
+            || (r.prev_nonce.len() == 12 && !r.prev_wrapped_key.is_empty());
+        if !rec_ok || !prev_ok || r.key_epoch == 0 {
+            return Err(CryptoError::BadRecord);
+        }
     }
     if r.kdf != KDF_ARGON2ID || r.salt.len() < 16 || r.nonce.len() != 12 {
         return Err(CryptoError::BadRecord);
@@ -474,7 +600,110 @@ pub fn parse_record(bytes: &[u8]) -> Result<pb::VaultKeyRecord, CryptoError> {
 
 /// Есть ли в записи фраза восстановления.
 pub fn has_recovery(bytes: &[u8]) -> bool {
-    parse_record(bytes).is_ok_and(|r| r.format == KEY_RECORD_FORMAT_RECOVERY)
+    parse_record(bytes).is_ok_and(|r| RecoveryWrap::of(&r).is_some())
+}
+
+/// Поколение мастер-ключа записи (форматы 1 и 2 — первое).
+pub fn record_epoch(bytes: &[u8]) -> Result<u32, CryptoError> {
+    Ok(epoch_of(&parse_record(bytes)?))
+}
+
+/// Перешифровка начата и не завершена: в записи есть прежний ключ.
+pub fn has_prev(bytes: &[u8]) -> bool {
+    parse_record(bytes).is_ok_and(|r| !r.prev_wrapped_key.is_empty())
+}
+
+/// Прежний мастер-ключ из записи (нужен текущий); `None` — перешифровка завершена.
+pub fn open_prev(bytes: &[u8], master: &MasterKey) -> Result<Option<MasterKey>, CryptoError> {
+    let r = parse_record(bytes)?;
+    if r.prev_wrapped_key.is_empty() {
+        return Ok(None);
+    }
+    let nonce: [u8; 12] = r
+        .prev_nonce
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::BadRecord)?;
+    let mut kek = prev_kek(master);
+    let cipher = Aes256GcmSiv::new_from_slice(&kek).unwrap_or_else(|_| unreachable!());
+    kek.zeroize();
+    let mut pt = cipher
+        .decrypt(
+            &nonce.into(),
+            Payload {
+                msg: &r.prev_wrapped_key,
+                aad: &prev_aad(epoch_of(&r)),
+            },
+        )
+        .map_err(|_| CryptoError::Decrypt)?;
+    let key: [u8; 32] = pt
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::BadRecord)?;
+    pt.zeroize();
+    Ok(Some(MasterKey(key)))
+}
+
+/// Перешифровка завершена: убрать прежний ключ. Пароль не нужен (обёртка
+/// прежнего ключа не входит в AAD парольной).
+pub fn without_prev(bytes: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    let mut r = parse_record(bytes)?;
+    r.prev_nonce.clear();
+    r.prev_wrapped_key.clear();
+    Ok(r.encode_to_vec())
+}
+
+/// Результат [`rekey`].
+pub struct Rekeyed {
+    /// Новая запись: новый ключ под тем же паролем, поколение +1, прежний ключ внутри.
+    pub record: Vec<u8>,
+    pub new: MasterKey,
+    pub old: MasterKey,
+    pub epoch: u32,
+    /// Новая фраза, если у записи была фраза (прежняя перестаёт работать).
+    pub phrase: Option<RecoveryEntropy>,
+}
+
+/// Смена ключа: новый мастер-ключ под тем же паролем. Пока перешифровка не
+/// завершена, прежний ключ лежит в записи под новым — повторная смена отказывает.
+pub fn rekey(
+    bytes: &[u8],
+    password: &str,
+    params: KdfParams,
+    now: i64,
+) -> Result<Rekeyed, CryptoError> {
+    let r = parse_record(bytes)?;
+    if !r.prev_wrapped_key.is_empty() {
+        return Err(CryptoError::RekeyUnfinished);
+    }
+    let old = open_master_key(bytes, password)?;
+    let new = MasterKey::generate()?;
+    let epoch = epoch_of(&r) + 1;
+    let (recovery, phrase) = if RecoveryWrap::of(&r).is_some() {
+        let e = RecoveryEntropy::generate()?;
+        (Some(RecoveryWrap::new(&new, &e, now)?), Some(e))
+    } else {
+        (None, None)
+    };
+    let prev = Some(wrap_prev(&new, &old, epoch)?);
+    let record = seal(
+        &new,
+        password,
+        params,
+        now,
+        Extras {
+            recovery,
+            epoch,
+            prev,
+        },
+    )?;
+    Ok(Rekeyed {
+        record,
+        new,
+        old,
+        epoch,
+        phrase,
+    })
 }
 
 /// Раскрывает мастер-ключ фразой восстановления.
@@ -526,7 +755,11 @@ pub fn add_recovery(
 ) -> Result<(Vec<u8>, RecoveryEntropy), CryptoError> {
     let master = open_master_key(bytes, password)?;
     let entropy = RecoveryEntropy::generate()?;
-    let record = seal_master_key_with_recovery(&master, password, params, now, &entropy)?;
+    let extras = Extras {
+        recovery: Some(RecoveryWrap::new(&master, &entropy, now)?),
+        ..Extras::of(&parse_record(bytes)?)
+    };
+    let record = seal(&master, password, params, now, extras)?;
     Ok((record, entropy))
 }
 
@@ -538,7 +771,11 @@ pub fn remove_recovery(
     now: i64,
 ) -> Result<Vec<u8>, CryptoError> {
     let master = open_master_key(bytes, password)?;
-    seal(&master, password, params, now, None)
+    let extras = Extras {
+        recovery: None,
+        ..Extras::of(&parse_record(bytes)?)
+    };
+    seal(&master, password, params, now, extras)
 }
 
 /// Вход по фразе: новый пароль, фраза остаётся действительной. Возвращает новую
@@ -552,7 +789,7 @@ pub fn recover(
 ) -> Result<(Vec<u8>, MasterKey), CryptoError> {
     let master = open_master_key_with_phrase(bytes, entropy)?;
     let r = parse_record(bytes)?;
-    let record = seal(&master, new_password, params, now, RecoveryWrap::of(&r))?;
+    let record = seal(&master, new_password, params, now, Extras::of(&r))?;
     Ok((record, master))
 }
 
@@ -613,7 +850,7 @@ pub fn change_password(
     let master = open_master_key(bytes, old_password)?;
     // Фраза восстановления переживает смену пароля: её обёртка от пароля не зависит.
     let r = parse_record(bytes)?;
-    seal(&master, new_password, params, now, RecoveryWrap::of(&r))
+    seal(&master, new_password, params, now, Extras::of(&r))
 }
 
 /// Грубая оценка стойкости пароля в битах — совет пользователю, а не запрет.
@@ -922,5 +1159,121 @@ mod tests {
             open_master_key_with_phrase(&rec6, &e2).unwrap_err(),
             CryptoError::NoRecovery
         );
+    }
+
+    /// Смена ключа: новый ключ под тем же паролем, поколение +1, прежний ключ
+    /// достаётся новым; формат 3 переживает смену пароля и операции с фразой.
+    #[test]
+    fn rekey_record_lifecycle() {
+        let m1 = MasterKey::generate().unwrap();
+        let entropy = RecoveryEntropy::generate().unwrap();
+        let rec = seal_master_key_with_recovery(&m1, "pw", KdfParams::TEST, 1, &entropy).unwrap();
+        assert_eq!(record_epoch(&rec).unwrap(), 1);
+        assert!(!has_prev(&rec));
+
+        let rk = rekey(&rec, "pw", KdfParams::TEST, 2).unwrap();
+        assert_eq!(rk.epoch, 2);
+        assert_eq!(rk.old.as_bytes(), m1.as_bytes());
+        assert_ne!(rk.new.as_bytes(), m1.as_bytes());
+        let rec2 = rk.record;
+        assert_eq!(parse_record(&rec2).unwrap().format, KEY_RECORD_FORMAT_EPOCH);
+        assert_eq!(record_epoch(&rec2).unwrap(), 2);
+        assert_eq!(
+            open_master_key(&rec2, "pw").unwrap().as_bytes(),
+            rk.new.as_bytes()
+        );
+        assert!(verify_master(&rec2, &rk.new).unwrap());
+        assert!(
+            !verify_master(&rec2, &m1).unwrap(),
+            "старый ключ к новой записи не подходит"
+        );
+        assert!(has_prev(&rec2));
+        let prev = open_prev(&rec2, &rk.new).unwrap().unwrap();
+        assert_eq!(prev.as_bytes(), m1.as_bytes());
+        assert!(
+            open_prev(&rec2, &m1).is_err(),
+            "прежний ключ — только новым"
+        );
+        // фраза — новая, прежняя не подходит
+        let phrase = rk.phrase.unwrap();
+        assert!(has_recovery(&rec2));
+        assert_eq!(
+            open_master_key_with_phrase(&rec2, &phrase)
+                .unwrap()
+                .as_bytes(),
+            rk.new.as_bytes()
+        );
+        assert!(open_master_key_with_phrase(&rec2, &entropy).is_err());
+        // повторная смена до завершения — отказ
+        assert_eq!(
+            rekey(&rec2, "pw", KdfParams::TEST, 3).err(),
+            Some(CryptoError::RekeyUnfinished)
+        );
+        // смена пароля и фраза сохраняют поколение и прежний ключ
+        let rec3 = change_password(&rec2, "pw", "pw2", KdfParams::TEST, 3).unwrap();
+        assert_eq!(record_epoch(&rec3).unwrap(), 2);
+        assert_eq!(
+            open_prev(&rec3, &rk.new).unwrap().unwrap().as_bytes(),
+            m1.as_bytes()
+        );
+        let rec4 = remove_recovery(&rec3, "pw2", KdfParams::TEST, 4).unwrap();
+        assert!(!has_recovery(&rec4) && has_prev(&rec4));
+        assert_eq!(record_epoch(&rec4).unwrap(), 2);
+        let (rec5, _) = add_recovery(&rec4, "pw2", KdfParams::TEST, 5).unwrap();
+        assert!(has_recovery(&rec5) && has_prev(&rec5));
+        // завершение: прежний ключ убирается без пароля, пароль по-прежнему открывает
+        let done = without_prev(&rec5).unwrap();
+        assert!(!has_prev(&done));
+        assert!(open_prev(&done, &rk.new).unwrap().is_none());
+        assert_eq!(
+            open_master_key(&done, "pw2").unwrap().as_bytes(),
+            rk.new.as_bytes()
+        );
+        assert_eq!(record_epoch(&done).unwrap(), 2);
+        // следующая смена — поколение 3, фразы нет — новой тоже нет
+        let rk3 = rekey(&rec4.clone(), "pw2", KdfParams::TEST, 6);
+        assert_eq!(rk3.err(), Some(CryptoError::RekeyUnfinished));
+        let plain_done = without_prev(&rec4).unwrap();
+        let rk3 = rekey(&plain_done, "pw2", KdfParams::TEST, 6).unwrap();
+        assert_eq!(rk3.epoch, 3);
+        assert!(rk3.phrase.is_none() && !has_recovery(&rk3.record));
+    }
+
+    /// Поколение — в AAD парольной обёртки: подменить его нельзя.
+    #[test]
+    fn rekey_epoch_is_authenticated() {
+        let m1 = MasterKey::generate().unwrap();
+        let rec = seal_master_key(&m1, "pw", KdfParams::TEST, 1).unwrap();
+        let rk = rekey(&rec, "pw", KdfParams::TEST, 2).unwrap();
+        let mut r = parse_record(&rk.record).unwrap();
+        r.key_epoch = 7;
+        assert_eq!(
+            open_master_key(&r.encode_to_vec(), "pw").err(),
+            Some(CryptoError::WrongPassword)
+        );
+        // обёртка прежнего ключа привязана к поколению
+        let mut r = parse_record(&rk.record).unwrap();
+        r.key_epoch = 7;
+        assert!(open_prev(&r.encode_to_vec(), &rk.new).is_err());
+    }
+
+    /// Пути разных поколений: новый ключ не открывает старые пути и наоборот.
+    #[test]
+    fn path_epochs() {
+        let m1 = MasterKey::generate().unwrap();
+        let m2 = MasterKey::generate().unwrap();
+        let k1 = m1.derive();
+        let k2 = m2.derive().with_epoch(2);
+        let vp = crate::path::VaultPath::parse("a/b.md").unwrap();
+        let p1 = k1.encrypt_path(&vp);
+        let p2 = k2.encrypt_path(&vp);
+        assert_eq!((p1.key_epoch, p2.key_epoch), (0, 2));
+        assert_eq!(k1.decrypt_path(&p1).unwrap(), vp);
+        assert_eq!(k2.decrypt_path(&p2).unwrap(), vp);
+        assert!(k2.decrypt_path(&p1).is_err() && k1.decrypt_path(&p2).is_err());
+        let e = crate::path::canonical_encode(&p2);
+        assert_eq!(&e[..5], &[2, 0, 0, 0, 2]);
+        assert_eq!(crate::path::canonical_decode(&e).unwrap(), p2);
+        assert_eq!(crate::path::canonical_encode(&p1)[0], 1);
     }
 }

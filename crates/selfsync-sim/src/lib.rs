@@ -84,6 +84,9 @@ pub struct SimConfig {
     pub io_fault_rate: f64,
     /// Включить шифрование на этом шаге (клиент 0).
     pub encrypt_at: Option<usize>,
+    /// Начиная с этого шага — попытки сменить ключ (со случайного клиента), пока
+    /// vault не зашифрован до конца и смена не начнётся; затем повтор ещё раз.
+    pub rekey_at: Option<usize>,
     /// Пропускать события Obsidian (правки «снаружи», ловятся полным сканом).
     pub skip_event_rate: f64,
     /// Вероятность на шаге переключить у клиента дополнительные исключения
@@ -113,6 +116,7 @@ impl SimConfig {
             name_rules: Vec::new(),
             io_fault_rate: 0.0,
             encrypt_at: None,
+            rekey_at: None,
             skip_event_rate: 0.05,
             exclude_toggle_rate: 0.0,
             no_merge: Vec::new(),
@@ -149,6 +153,10 @@ impl SimConfig {
             Some(r.idx(c.steps))
         } else {
             None
+        };
+        c.rekey_at = match c.encrypt_at {
+            Some(at) if r.chance(0.5) => Some(at + 1 + r.idx(c.steps - at)),
+            _ => None,
         };
         c.exclude_toggle_rate = [0.0, 0.0, 0.01, 0.03][r.idx(4)];
         c.download_limit_rate = [0.0, 0.0, 0.01, 0.03][r.idx(4)];
@@ -269,6 +277,9 @@ pub struct World {
     /// Изображать сервер 0.1.x: ответы без заголовка версии протокола.
     pub hide_proto_header: bool,
 }
+
+/// Номер запроса команды смены ключа в случайных прогонах.
+const REKEY_REQ: u64 = 0xBEEF;
 
 fn data_root() -> std::path::PathBuf {
     // tmpfs, если есть: fsync блобов на диске сильно замедляет тысячи прогонов.
@@ -932,6 +943,26 @@ impl World {
     pub fn step(&mut self) {
         self.step_no += 1;
         self.now += i64::try_from(self.rng.below(400)).unwrap_or(0);
+        if let Some(at) = self.cfg.rekey_at
+            && self.step_no >= at
+            && self.step_no.is_multiple_of(7)
+            && self.server_key_epoch() < 3
+        {
+            // Пока шифрование не включено до конца, команда отказывает — повтор.
+            let c = self.rng.idx(self.clients.len());
+            let remember = self.rng.chance(0.5);
+            self.log(format!("c{c} REKEY"));
+            self.deliver(
+                c,
+                Event::Command {
+                    req: REKEY_REQ,
+                    command: selfsync_core::engine::UiCommand::Rekey {
+                        password: PASSWORD.into(),
+                        remember,
+                    },
+                },
+            );
+        }
         if let Some(at) = self.cfg.encrypt_at
             && at == self.step_no
             && self.encrypted_password.is_none()
@@ -1134,17 +1165,48 @@ impl World {
     }
 
     /// Ключи vault'а (если он зашифрован) — из записи на сервере и пароля.
+    /// Поколение ключа в записи на сервере (0 — vault не зашифрован). Случайные
+    /// прогоны меняют ключ не больше двух раз.
+    pub fn server_key_epoch(&self) -> u32 {
+        self.state
+            .vault("sim")
+            .ok()
+            .and_then(|v| {
+                let c = v.pool.get().ok()?;
+                selfsync_server::db::vault::meta_blob(&c, "vault_key").ok()?
+            })
+            .map_or(0, |rec| crypto::record_epoch(&rec).unwrap_or(1))
+    }
+
     pub fn vault_keys(&self) -> Option<VaultKeys> {
-        let pw = self.encrypted_password.as_ref()?;
-        let v = self.state.vault("sim").ok()?;
-        let c = v.pool.get().ok()?;
-        let rec = selfsync_server::db::vault::meta_blob(&c, "vault_key").ok()??;
-        crypto::open_master_key(&rec, pw).ok().map(|m| m.derive())
+        self.vault_key_sets().into_iter().next()
+    }
+
+    /// Ключи текущего поколения и, пока смена ключа не завершена, прежнего.
+    pub fn vault_key_sets(&self) -> Vec<VaultKeys> {
+        let Some(pw) = self.encrypted_password.as_ref() else {
+            return Vec::new();
+        };
+        let Some(rec) = self.state.vault("sim").ok().and_then(|v| {
+            let c = v.pool.get().ok()?;
+            selfsync_server::db::vault::meta_blob(&c, "vault_key").ok()?
+        }) else {
+            return Vec::new();
+        };
+        let Ok(m) = crypto::open_master_key(&rec, pw) else {
+            return Vec::new();
+        };
+        let epoch = crypto::record_epoch(&rec).unwrap_or(1);
+        let mut out = vec![m.derive().with_epoch(epoch)];
+        if let Ok(Some(old)) = crypto::open_prev(&rec, &m) {
+            out.push(old.derive().with_epoch(epoch - 1));
+        }
+        out
     }
 
     /// Живое состояние сервера: путь → открытый текст.
     pub fn server_files(&self) -> BTreeMap<String, Vec<u8>> {
-        let keys = self.vault_keys();
+        let sets = self.vault_key_sets();
         let v = self.state.vault("sim").expect("vault");
         let c = v.pool.get().expect("conn");
         let (entries, _) = selfsync_server::db::vault::changes(&c, 0, 1_000_000).expect("changes");
@@ -1154,9 +1216,16 @@ impl World {
                 continue;
             }
             let Some(p) = e.path.as_ref() else { continue };
+            let mut keys = None;
             let path = if p.encrypted {
-                match keys.as_ref().and_then(|k| k.decrypt_path(p).ok()) {
-                    Some(vp) => vp.as_str().to_owned(),
+                match sets
+                    .iter()
+                    .find_map(|k| k.decrypt_path(p).ok().map(|vp| (k, vp)))
+                {
+                    Some((k, vp)) => {
+                        keys = Some(k.clone());
+                        vp.as_str().to_owned()
+                    }
                     None => continue,
                 }
             } else {
@@ -1180,7 +1249,7 @@ impl World {
 
     /// Всё содержимое, которое когда-либо было на сервере (история).
     pub fn server_history_texts(&self) -> Vec<Vec<u8>> {
-        let keys = self.vault_keys();
+        let sets = self.vault_key_sets();
         let v = self.state.vault("sim").expect("vault");
         let c = v.pool.get().expect("conn");
         let mut st = c
@@ -1199,9 +1268,11 @@ impl World {
             let Ok(data) = std::fs::read(v.blobs.path_of(&hh)) else {
                 continue;
             };
-            if let Ok(p) = blob::decode(&data, keys.as_ref()) {
-                out.push(p);
-            } else if let Ok(p) = blob::decode(&data, None) {
+            if let Some(p) = sets
+                .iter()
+                .find_map(|k| blob::decode(&data, Some(k)).ok())
+                .or_else(|| blob::decode(&data, None).ok())
+            {
                 out.push(p);
             }
         }

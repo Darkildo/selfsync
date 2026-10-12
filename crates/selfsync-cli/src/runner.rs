@@ -338,6 +338,7 @@ impl VaultCommand {
                         | UiCommand::PurgeDeleted { .. }
                         | UiCommand::RestoreRevision { .. }
                         | UiCommand::Download { .. }
+                        | UiCommand::Rekey { .. }
                 )
         )
     }
