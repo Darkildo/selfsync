@@ -285,6 +285,13 @@ fn hmac_sha256(key: &[u8]) -> Hmac<Sha256> {
     <Hmac<Sha256> as KeyInit>::new_from_slice(key).unwrap_or_else(|_| unreachable!())
 }
 
+/// Argon2id(пароль, соль) → 32 байта с проверкой параметров, как у ключа vault'а.
+/// Для надстроек над ядром (например, вход в аккаунт сервиса: ключ входа и ключ
+/// обёртки из одного пароля); сам ключ vault'а выводится через [`derive_kek`].
+pub fn argon2id(password: &str, salt: &[u8], p: KdfParams) -> Result<[u8; 32], CryptoError> {
+    derive_kek(password, salt, p)
+}
+
 /// KEK = Argon2id(пароль, соль).
 fn derive_kek(password: &str, salt: &[u8], p: KdfParams) -> Result<[u8; 32], CryptoError> {
     p.check()?;
@@ -966,6 +973,21 @@ mod tests {
         assert_eq!(kek, again);
         let other = derive_kek("passwore", b"somesaltsomesalt", KdfParams::TEST).unwrap();
         assert_ne!(kek, other);
+    }
+
+    #[test]
+    fn public_argon2id_is_kek_with_checked_params() {
+        let a = argon2id("password", b"somesaltsomesalt", KdfParams::TEST).unwrap();
+        assert_eq!(
+            a,
+            derive_kek("password", b"somesaltsomesalt", KdfParams::TEST).unwrap()
+        );
+        let weak = KdfParams {
+            m_cost_kib: 1,
+            t_cost: 1,
+            p_cost: 1,
+        };
+        assert!(argon2id("password", b"somesaltsomesalt", weak).is_err());
     }
 
     #[test]

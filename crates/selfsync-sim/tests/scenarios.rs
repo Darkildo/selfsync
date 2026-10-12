@@ -2458,3 +2458,84 @@ fn undone_rename_after_conflict_keeps_remote_edit() {
         assert!(text.contains(&t0) || copies.contains(&t0), "c{c}: {text}");
     }
 }
+
+/// Все файлы под каталогом (рекурсивно).
+fn files_under(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(files_under(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Строгий режим (`require_encryption`): пока у vault'а нет ключа, на
+/// сервер не уходит ничего; включение шифрования идёт до первой отправки, и
+/// открытый текст не попадает на сервер ни на миг (ни в блобы, ни в историю).
+#[test]
+fn required_encryption_sends_no_plaintext() {
+    let mut w = World::new(quiet(2));
+    for c in 0..2 {
+        w.clients[c].cfg.require_encryption = true;
+        w.kill(c);
+    }
+    let mut tokens = vec![
+        base_note(&mut w, 0, "a.md"),
+        base_note(&mut w, 0, "dir/b.md"),
+    ];
+    w.sync(0);
+    let reason = w.clients[0].status.as_ref().and_then(|s| s.reason.clone());
+    assert_eq!(reason.as_deref(), Some("encryption_required"));
+    assert_eq!(w.server_seq(), 0, "без ключа на сервер ничего не ушло");
+    assert_eq!(w.clients[0].writes, 0, "ни одного запроса на запись");
+
+    w.encrypted_password = Some(PASSWORD.to_owned());
+    w.deliver(
+        0,
+        Event::EnableEncryption {
+            password: PASSWORD.into(),
+            remember: true,
+            recovery: false,
+        },
+    );
+    w.deliver(0, Event::SyncNow);
+    let mut order = Vec::new();
+    while let Some(l) = w.pump_one(0) {
+        order.push(l);
+    }
+    let first = |p: &str| order.iter().position(|l| l.starts_with(p));
+    let key = first("HTTP PUT /v1/vaultkey").expect("ключ записан");
+    for p in [
+        "HTTP PUT /v1/blobs",
+        "HTTP POST /v1/ops",
+        "HTTP POST /v1/uploads",
+    ] {
+        if let Some(i) = first(p) {
+            assert!(i > key, "{p} раньше записи ключа: {order:?}");
+        }
+    }
+    // Второе устройство (тоже строгое) входит паролем и отправляет своё.
+    w.sync(1);
+    tokens.push(base_note(&mut w, 1, "from-c1.md"));
+    finish(&mut w);
+    assert_eq!(plaintext_live(&w), 0);
+    let on_server = server_tokens(&w);
+    for t in &tokens {
+        assert!(on_server.contains(t), "правка {t} на сервере");
+    }
+    let vault = w.dir.path().join("vaults").join("sim");
+    for f in files_under(&vault) {
+        let data = std::fs::read(&f).unwrap();
+        for t in &tokens {
+            assert!(
+                !data.windows(t.len()).any(|x| x == t.as_bytes()),
+                "открытый текст {t} в {}",
+                f.display()
+            );
+        }
+    }
+}

@@ -29,7 +29,7 @@ const LOG_LINES = 500;
 export default class SelfsyncPlugin extends Plugin {
   override settings: Settings = { ...DEFAULT_SETTINGS };
   runner: Runner | undefined;
-  private settingTab: SelfsyncSettingTab | undefined;
+  protected settingTab: SelfsyncSettingTab | undefined;
   private statusEl!: HTMLElement;
   private status: SyncStatus | null = null;
   private log: string[] = [];
@@ -46,11 +46,7 @@ export default class SelfsyncPlugin extends Plugin {
     this.renderStatus();
 
     this.addCommand({ id: "sync-now", name: t("cmd.syncNow"), callback: () => this.syncNow() });
-    this.addCommand({
-      id: "connect",
-      name: t("cmd.connect"),
-      callback: () => new ConnectModal(this.app, this, this.settings.server, "").open(),
-    });
+    this.registerConnect();
     this.addCommand({ id: "password", name: t("cmd.password"), callback: () => this.askPassword() });
     this.addCommand({ id: "conflicts", name: t("cmd.conflicts"), callback: () => this.whenRunning(() => new ConflictsModal(this.app, this).open()) });
     this.addCommand({ id: "deleted", name: t("cmd.deleted"), callback: () => this.whenRunning(() => new DeletedModal(this.app, this).open()) });
@@ -74,13 +70,8 @@ export default class SelfsyncPlugin extends Plugin {
       }),
     );
     this.addCommand({ id: "log", name: t("cmd.log"), callback: () => this.showLog() });
-    this.settingTab = new SelfsyncSettingTab(this.app, this);
+    this.settingTab = this.createSettingTab();
     this.addSettingTab(this.settingTab);
-
-    // Ссылка со страницы /join/{code} сервера.
-    this.registerObsidianProtocolHandler("selfsync-connect", (p) => {
-      new ConnectModal(this.app, this, p.server ?? "", p.code ?? "").open();
-    });
 
     this.app.workspace.onLayoutReady(() => {
       // События vault'а — только после загрузки: до неё create приходит на каждый файл.
@@ -94,6 +85,24 @@ export default class SelfsyncPlugin extends Plugin {
       });
       void this.start();
     });
+  }
+
+  /** Вкладка настроек (надстройка над плагином подставляет свою). */
+  protected createSettingTab(): SelfsyncSettingTab {
+    return new SelfsyncSettingTab(this.app, this);
+  }
+
+  /** Как устройство подключается: команда и ссылка со страницы /join/{code} сервера. */
+  protected registerConnect(): void {
+    this.addCommand({ id: "connect", name: t("cmd.connect"), callback: () => this.openConnect() });
+    this.registerObsidianProtocolHandler("selfsync-connect", (p) => {
+      new ConnectModal(this.app, this, p.server ?? "", p.code ?? "").open();
+    });
+  }
+
+  /** Устройство не подключено, а пользователь хочет синхронизировать. */
+  protected openConnect(): void {
+    new ConnectModal(this.app, this, this.settings.server, "").open();
   }
 
   override onunload(): void {
@@ -239,12 +248,12 @@ export default class SelfsyncPlugin extends Plugin {
 
   private whenRunning(f: () => void): void {
     if (this.runner) f();
-    else new ConnectModal(this.app, this, this.settings.server, "").open();
+    else this.openConnect();
   }
 
   syncNow(): void {
     if (this.runner) this.runner.send({ type: "syncNow" });
-    else new ConnectModal(this.app, this, this.settings.server, "").open();
+    else this.openConnect();
   }
 
   /** Обменять одноразовый код на токен. Ошибка: текст и `offline` — сервер не
@@ -295,7 +304,7 @@ export default class SelfsyncPlugin extends Plugin {
   private onStatusClick(): void {
     const s = this.status;
     if (s?.state === "needPassword") this.askPassword();
-    else if (s?.state === "blocked" && s.reason === "unauthorized") new ConnectModal(this.app, this, this.settings.server, "").open();
+    else if (s?.state === "blocked" && s.reason === "unauthorized") this.openConnect();
     else this.syncNow();
   }
 

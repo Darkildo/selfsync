@@ -8,6 +8,26 @@ use super::push::push;
 use super::scan::scan;
 use super::types::{LogLevel, Notice, SyncState};
 
+/// `require_encryption`: до скана и отправки узнать, есть ли у vault'а ключ. Нет —
+/// включить шифрование, если его ждут (тогда проход начнётся заново уже с ключом),
+/// иначе пауза `encryption_required`: открытый текст не уходит на сервер.
+async fn require_key(cx: &Ctx) -> SyncResult<()> {
+    let peek = api::changes(cx, cx.with(|s| s.index.last_seq), 1).await?;
+    let keyed = peek.vault.as_ref().is_some_and(|vs| vs.key_version != 0);
+    if let Some(vs) = &peek.vault {
+        check_state(cx, vs).await?;
+    }
+    if keyed || cx.with(|s| s.encrypted() || s.index.migration.is_some()) {
+        return Ok(());
+    }
+    let pending = cx.with_mut(|s| if s.read_only { None } else { s.enable.take() });
+    let Some((password, remember, recovery)) = pending else {
+        return Err(SyncError::Paused("encryption_required".into()));
+    };
+    crypto_flow::enable(cx, password, remember, recovery).await?;
+    Err(SyncError::Restart)
+}
+
 /// Возвращает, изменилось ли что-нибудь (для адаптивного опроса).
 pub(crate) async fn run_cycle(cx: &Ctx) -> SyncResult<bool> {
     cx.set_status(|st| {
@@ -43,6 +63,9 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
     // Прерванная миграция на шифрование продолжается первой.
     if cx.with(|s| s.index.migration.is_some()) {
         crypto_flow::migrate(cx).await?;
+    }
+    if cx.with(|s| s.cfg.require_encryption && !s.encrypted()) {
+        require_key(cx).await?;
     }
     if cx.with_mut(|s| std::mem::take(&mut s.rules_changed)) {
         let (forgot, replay) = cx.with_mut(|s| {

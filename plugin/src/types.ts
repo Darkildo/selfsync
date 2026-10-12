@@ -22,6 +22,8 @@ export interface EngineConfig {
   maxDownloadSize?: number;
   baseCacheBytes?: number;
   tzOffsetMin?: number;
+  /** Без ключа vault'а ничего не отправлять; включение шифрования — до первой отправки. */
+  requireEncryption?: boolean;
 }
 
 export type NameRules = "any" | "fat" | "windows";

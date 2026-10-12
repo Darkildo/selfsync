@@ -125,6 +125,43 @@ pub fn qr_modules(text: &str) -> Result<Vec<u8>, JsError> {
     Ok(out)
 }
 
+/// Argon2id(пароль, соль) → 32 байта; параметры — в тех же пределах, что у записи
+/// ключа vault'а. Для надстроек (вход в аккаунт сервиса), ядру синка не нужен.
+#[wasm_bindgen(js_name = argon2id)]
+pub fn argon2id(
+    password: &str,
+    salt: &[u8],
+    m_cost_kib: u32,
+    t_cost: u32,
+    p_cost: u32,
+) -> Result<Vec<u8>, JsError> {
+    let p = selfsync_core::crypto::KdfParams {
+        m_cost_kib,
+        t_cost,
+        p_cost,
+    };
+    selfsync_core::crypto::argon2id(password, salt, p)
+        .map(|k| k.to_vec())
+        .map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// 32 байта энтропии → 24 слова BIP39 (как фраза восстановления vault'а).
+#[wasm_bindgen(js_name = phraseEncode)]
+pub fn phrase_encode(entropy: &[u8]) -> Result<Vec<String>, JsError> {
+    let e: &[u8; 32] = entropy
+        .try_into()
+        .map_err(|_| JsError::new("нужно ровно 32 байта"))?;
+    Ok(selfsync_core::bip39::encode(e))
+}
+
+/// Фраза → 32 байта энтропии; неверная фраза — `undefined` (причину даёт `checkPhrase`).
+#[wasm_bindgen(js_name = phraseDecode)]
+pub fn phrase_decode(phrase: &str) -> Option<Vec<u8>> {
+    selfsync_core::bip39::decode(phrase)
+        .ok()
+        .map(|e| e.to_vec())
+}
+
 /// Проверка фразы восстановления до отправки: `undefined` — в порядке, иначе
 /// `count:N` (слов не 24), `word:I` (слово I, с единицы, не из словаря) или
 /// `checksum`. Текст сообщения формирует интерфейс.

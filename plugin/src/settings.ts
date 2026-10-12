@@ -66,14 +66,14 @@ export function normalizeServer(url: string): string {
 }
 
 /** Строка настроек: имя и описание (для поиска Obsidian 1.13+) и построение. */
-interface Row {
+export interface Row {
   name: string;
   desc?: string;
   /** Заполняет строку целиком: имя, описание и элементы управления. Может вернуть уборку. */
   build: (s: Setting) => unknown;
 }
 
-interface Section {
+export interface Section {
   heading: string;
   rows: Row[];
   /** Команды серверу — только у подключённого устройства. */
@@ -91,7 +91,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
 
   constructor(
     app: App,
-    private plugin: SelfsyncPlugin,
+    protected plugin: SelfsyncPlugin,
   ) {
     super(app, plugin);
   }
@@ -129,7 +129,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     }
   }
 
-  private sections(): Section[] {
+  protected sections(): Section[] {
     return [
       { heading: t("settings.connection"), rows: this.connectionRows() },
       { heading: t("settings.sync"), rows: this.syncRows() },
@@ -143,7 +143,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     ];
   }
 
-  private connectionRows(): Row[] {
+  protected connectionRows(): Row[] {
     const s = this.plugin.settings;
     const status = (): string =>
       s.token ? t("settings.connectedTo", { vault: s.vault || "?", device: s.deviceName }) : t("settings.notConnected");
@@ -232,7 +232,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     ];
   }
 
-  private syncRows(): Row[] {
+  protected syncRows(): Row[] {
     const s = this.plugin.settings;
     return [
       {
@@ -281,7 +281,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
   }
 
   /** Пояснение вместо кнопок на устройстве только для чтения. */
-  private readOnlyRow(): Row {
+  protected readOnlyRow(): Row {
     return {
       name: t("status.readOnly"),
       desc: t("readOnly.desc"),
@@ -296,7 +296,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
   }
 
   /** Место vault'а на сервере: занято, пороги, файлы, ждущие места. */
-  private quotaRow(): Row {
+  protected quotaRow(): Row {
     return {
       name: t("quota.name"),
       desc: t("quota.desc"),
@@ -312,7 +312,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
   }
 
   /** Итог последней проверки хранилища на сервере (`selfsync verify`). */
-  private storageRow(): Row {
+  protected storageRow(): Row {
     return {
       name: t("storage.name"),
       desc: t("storage.desc"),
@@ -328,7 +328,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
   }
 
   /** Пресеты каталога настроек и итоговые правила. */
-  private configSyncRows(): Row[] {
+  protected configSyncRows(): Row[] {
     const s = this.plugin.settings;
     const rows: Row[] = PRESETS.map((p: Preset) => ({
       name: t(`configSync.${p}`),
@@ -361,7 +361,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     return rows;
   }
 
-  private encryptionRow(): Row {
+  protected encryptionRow(): Row {
     return {
       name: t("encryption.enable"),
       desc: t("encryption.off"),
@@ -414,7 +414,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
   }
 
   /** Фраза восстановления: есть/нет, создать (новую) или удалить — через пароль. */
-  private recoveryRow(): Row {
+  protected recoveryRow(): Row {
     return {
       name: t("recovery.title"),
       build: (row) => {
@@ -460,7 +460,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     };
   }
 
-  private retentionRow(): Row {
+  protected retentionRow(): Row {
     return {
       name: t("retention.name"),
       desc: t("retention.desc"),
@@ -487,7 +487,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     };
   }
 
-  private joinRow(): Row {
+  protected joinRow(): Row {
     return {
       name: t("join.title"),
       desc: t("join.nameDesc"),
@@ -519,7 +519,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
   }
 
   /** «Только чтение» для следующей ссылки подключения. */
-  private joinReadOnlyRow(): Row {
+  protected joinReadOnlyRow(): Row {
     return {
       name: t("join.readOnly"),
       desc: t("join.readOnlyDesc"),
@@ -548,7 +548,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
 
   /** Устройства vault'а — внутри одной строки: так она не зависит от того, вставлена
    *  ли уже в документ (декларативные настройки строят строки до вставки). */
-  private devicesRow(): Row {
+  protected devicesRow(): Row {
     return {
       name: t("devices.heading"),
       build: (row) => {
@@ -630,7 +630,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
   }
 
   /** Файлы, не скачанные из-за лимита: окно со списком и «Скачать». */
-  private skippedRow(): Row {
+  protected skippedRow(): Row {
     return {
       name: t("skipped.title"),
       desc: t("skipped.desc"),
@@ -647,7 +647,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     };
   }
 
-  private numberRow(name: string, get: () => number, min: number, max: number, set: (v: number) => void, desc?: string): Row {
+  protected numberRow(name: string, get: () => number, min: number, max: number, set: (v: number) => void, desc?: string): Row {
     return {
       name,
       desc,

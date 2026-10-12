@@ -51,6 +51,10 @@ pub struct EngineConfig {
     pub base_cache_bytes: u64,
     /// Смещение часового пояса, минуты (для имён конфликтных копий).
     pub tz_offset_min: i32,
+    /// Шифрование обязательно: пока у vault'а нет ключа, ничего не отправлять и не
+    /// принимать; ожидающее включение шифрования — до первой отправки, а не после
+    /// неё: сервер не видит ни одного открытого байта.
+    pub require_encryption: bool,
 }
 
 fn default_kdf() -> KdfParams {
@@ -77,6 +81,7 @@ impl Default for EngineConfig {
             kdf: KdfParams::DEFAULT,
             base_cache_bytes: 32 * 1024 * 1024,
             tz_offset_min: 0,
+            require_encryption: false,
         }
     }
 }
