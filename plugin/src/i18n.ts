@@ -1,7 +1,7 @@
 // Строки интерфейса ru/en. Язык — как у Obsidian (moment.locale()). Ядро присылает
 // только коды и данные, весь текст формируется здесь.
 
-import type { Notice, SyncStatus } from "./types.ts";
+import type { Notice, StorageHealth, SyncStatus } from "./types.ts";
 
 const en = {
   "status.idle": "Synced",
@@ -154,6 +154,13 @@ const en = {
 
   "retention.name": "Keep deleted files, days",
   "retention.desc": "How long the server keeps deleted files for restoring (for the whole vault)",
+  "storage.name": "Server storage",
+  "storage.desc": "Result of the last integrity check on the server (selfsync verify)",
+  "storage.ok": "No problems",
+  "storage.damaged": "{n} damaged files on the server; devices with intact copies restore them on sync",
+  "storage.serverProblem": "The check found damage that only the server admin can fix",
+  "storage.checked": "checked {when}",
+  "storage.notChecked": "not checked yet",
 
   "devices.heading": "Devices",
   "devices.current": "this device",
@@ -225,6 +232,8 @@ const en = {
   "readOnly.desc": "This device is connected read-only: it receives changes from other devices, but its own edits stay here. Encryption, the retention period, revoking devices and new connect links are managed from a device with write access.",
   "readOnly.error": "This device is connected read-only",
   "notice.readOnly": "selfsync: this device is read-only — {n} local changes will not reach the server. If the same file changes elsewhere, your version is kept as a copy next to it.",
+  "notice.storageDamaged": "selfsync: {n} files are damaged in the server storage. Devices with intact copies will restore them on sync; nothing to do here.",
+  "notice.storageServerProblem": "selfsync: the integrity check on the server found damage that only the server admin can fix (selfsync verify).",
 };
 
 type Key = keyof typeof en;
@@ -380,6 +389,13 @@ const ru: Record<Key, string> = {
 
   "retention.name": "Хранить удалённое, дней",
   "retention.desc": "Сколько сервер хранит удалённые файлы для восстановления (для всего vault'а)",
+  "storage.name": "Хранилище на сервере",
+  "storage.desc": "Итог последней проверки целостности на сервере (selfsync verify)",
+  "storage.ok": "Проблем нет",
+  "storage.damaged": "На сервере повреждено файлов: {n}; устройства с целыми копиями восстановят их при синке",
+  "storage.serverProblem": "Проверка нашла повреждение, которое исправит только админ сервера",
+  "storage.checked": "проверено {when}",
+  "storage.notChecked": "ещё не проверялось",
 
   "devices.heading": "Устройства",
   "devices.current": "это устройство",
@@ -451,6 +467,8 @@ const ru: Record<Key, string> = {
   "readOnly.desc": "Это устройство подключено только для чтения: оно получает изменения с других устройств, а его собственные правки остаются здесь. Шифрование, срок хранения удалённого, отзыв устройств и новые ссылки подключения — с устройства с правом записи.",
   "readOnly.error": "Устройство подключено только для чтения",
   "notice.readOnly": "selfsync: устройство только для чтения — локальных правок, которые не уйдут на сервер: {n}. Если тот же файл изменится на другом устройстве, ваша версия сохранится копией рядом.",
+  "notice.storageDamaged": "selfsync: в хранилище на сервере повреждено файлов: {n}. Устройства с целыми копиями восстановят их при синке; здесь ничего делать не нужно.",
+  "notice.storageServerProblem": "selfsync: проверка целостности на сервере нашла повреждение, которое исправит только админ сервера (selfsync verify).",
 };
 
 let lang: "ru" | "en" = "en";
@@ -473,6 +491,17 @@ export function formatBytes(n: number): string {
     i++;
   }
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+/** Строка о хранилище на сервере; `null` — сервер о нём ничего не сообщил (старее 0.4.0). */
+export function storageText(s: StorageHealth | undefined): string | null {
+  if (!s || (s.verifiedAt <= 0 && s.damaged === 0 && !s.serverProblem)) return null;
+  const parts: string[] = [];
+  if (s.serverProblem) parts.push(t("storage.serverProblem"));
+  if (s.damaged > 0) parts.push(t("storage.damaged", { n: s.damaged }));
+  if (parts.length === 0) parts.push(t("storage.ok"));
+  parts.push(s.verifiedAt > 0 ? t("storage.checked", { when: new Date(s.verifiedAt).toLocaleString() }) : t("storage.notChecked"));
+  return parts.join("; ");
 }
 
 /** Текст уведомления; `null` — показывать не нужно. */
@@ -504,6 +533,8 @@ export function noticeText(n: Notice): string | null {
       return null;
     case "readOnly":
       return t("notice.readOnly", { n: n.pending });
+    case "storageDamaged":
+      return n.serverProblem ? t("notice.storageServerProblem") : t("notice.storageDamaged", { n: n.damaged });
     case "unsupportedName":
       return t("notice.unsupportedName", { path: n.path });
     case "nonPortableName":

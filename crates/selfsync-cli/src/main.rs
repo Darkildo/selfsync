@@ -5,7 +5,7 @@ use anyhow::Context;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use selfsync_cli::config::{Config, STATE_DIR};
 use selfsync_cli::runner::{self, Options, Outcome, VaultCommand};
-use selfsync_core::engine::{ConflictChoice, UiCommand, UiResult};
+use selfsync_core::engine::{ConflictChoice, StorageHealth, UiCommand, UiResult};
 use selfsync_core::index::Index;
 
 #[derive(Parser)]
@@ -680,6 +680,12 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     if dir.join(STATE_DIR).join(runner::READ_ONLY_MARKER).exists() {
                         println!("режим:      только чтение (локальные правки не отправляются)");
                     }
+                    if let Some(s) = std::fs::read(dir.join(STATE_DIR).join(runner::STORAGE_MARKER))
+                        .ok()
+                        .and_then(|b| serde_json::from_slice::<StorageHealth>(&b).ok())
+                    {
+                        println!("хранилище:  {}", storage_line(&s));
+                    }
                     for c in &idx.conflicts {
                         println!("конфликт:   {} → копия {}", c.path, c.copy);
                     }
@@ -802,6 +808,27 @@ fn vault_path(dir: &std::path::Path, p: &str) -> String {
     };
     let rel = rel.replace('\\', "/");
     rel.trim_start_matches("./").trim_matches('/').to_owned()
+}
+
+/// Строка `status` о хранилище на сервере (по последнему синку).
+fn storage_line(s: &StorageHealth) -> String {
+    let mut parts = Vec::new();
+    if s.damaged > 0 {
+        parts.push(format!(
+            "повреждено файлов: {}, ждём их с устройств",
+            s.damaged
+        ));
+    }
+    if s.server_problem {
+        parts.push("повреждение, которое исправит только админ (selfsync verify)".to_owned());
+    }
+    if parts.is_empty() {
+        parts.push("проблем нет".to_owned());
+    }
+    if s.verified_at > 0 {
+        parts.push(format!("проверено {}", fmt_time(s.verified_at)));
+    }
+    parts.join("; ")
 }
 
 fn fmt_time(ms: i64) -> String {

@@ -10,8 +10,8 @@ use std::time::Duration;
 use notify::event::{ModifyKind, RenameMode};
 use notify::{EventKind, RecursiveMode, Watcher};
 use selfsync_core::engine::{
-    Action, ConflictChoice, Engine, EngineConfig, Event, LogLevel, Notice, SyncState, SyncStatus,
-    UiCommand, UiResult,
+    Action, ConflictChoice, Engine, EngineConfig, Event, LogLevel, Notice, StorageHealth,
+    SyncState, SyncStatus, UiCommand, UiResult,
 };
 use tokio::sync::mpsc;
 
@@ -126,6 +126,15 @@ impl Loop {
                         let _ = std::fs::remove_file(&marker);
                     }
                 }
+                if status.storage != self.status.storage {
+                    // Для `status` без сети: итог проверки хранилища знает только сервер.
+                    let marker = self.key_path.with_file_name(STORAGE_MARKER);
+                    if status.storage == StorageHealth::default() {
+                        let _ = std::fs::remove_file(&marker);
+                    } else if let Ok(b) = serde_json::to_vec(&status.storage) {
+                        let _ = std::fs::write(&marker, b);
+                    }
+                }
                 if status.server_minor != self.status.server_minor
                     && let Some(m) = status.server_minor
                     && m < selfsync_core::proto::PROTO_MINOR
@@ -235,6 +244,8 @@ pub async fn folder_command(dir: &Path, cfg: &Config, cmd: UiCommand) -> anyhow:
 
 /// Файл в `.selfsync/`: последний синк прошёл в режиме «только чтение».
 pub const READ_ONLY_MARKER: &str = "read-only";
+/// Файл в `.selfsync/`: состояние хранилища на сервере (JSON [`StorageHealth`]).
+pub const STORAGE_MARKER: &str = "storage.json";
 
 fn notify_user(n: &Notice) {
     match n {
@@ -258,6 +269,23 @@ fn notify_user(n: &Notice) {
         }
         Notice::NonPortableName { path } => {
             tracing::warn!("{path}: имя недопустимо на Windows и Android — туда файл не попадёт")
+        }
+        Notice::StorageDamaged {
+            damaged,
+            server_problem,
+        } => {
+            if *damaged > 0 {
+                tracing::warn!(
+                    "на сервере повреждено файлов: {damaged}; устройства с целыми копиями \
+                     восстановят их при синке"
+                );
+            }
+            if *server_problem {
+                tracing::error!(
+                    "проверка нашла на сервере повреждение, которое исправит только админ \
+                     (база vault'а или запись ключа): selfsync verify"
+                );
+            }
         }
         Notice::MigrationProgress { done, total } => {
             tracing::info!("шифрование vault'а: {done}/{total}")

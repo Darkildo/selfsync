@@ -4,7 +4,7 @@ import { type App, Notice, PluginSettingTab, requireApiVersion, Setting, type Se
 
 import { clientOlderThan, readOnlyMinor } from "../pkg/selfsync_wasm.js";
 import { buildRules, type ConfigSync, DEFAULT_CONFIG_SYNC, type Preset, PRESETS } from "./configsync.ts";
-import { t } from "./i18n.ts";
+import { storageText, t } from "./i18n.ts";
 import type SelfsyncPlugin from "./main.ts";
 import type { DeviceView } from "./types.ts";
 import { ConnectModal } from "./ui/connect.ts";
@@ -136,7 +136,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
       { heading: t("encryption.heading"), rows: [this.encryptionRow(), this.recoveryRow()], needsRunner: true },
       {
         heading: t("devices.heading"),
-        rows: [this.readOnlyRow(), this.retentionRow(), this.joinRow(), this.joinReadOnlyRow(), this.devicesRow()],
+        rows: [this.readOnlyRow(), this.storageRow(), this.retentionRow(), this.joinRow(), this.joinReadOnlyRow(), this.devicesRow()],
         needsRunner: true,
       },
     ];
@@ -276,6 +276,22 @@ export class SelfsyncSettingTab extends PluginSettingTab {
           return;
         }
         row.setName(t("status.readOnly")).setDesc(t("readOnly.desc"));
+      },
+    };
+  }
+
+  /** Итог последней проверки хранилища на сервере (`selfsync verify`). */
+  private storageRow(): Row {
+    return {
+      name: t("storage.name"),
+      desc: t("storage.desc"),
+      build: (row) => {
+        const text = storageText(this.plugin.runner?.status().storage);
+        if (text === null) {
+          row.settingEl.hide();
+          return;
+        }
+        row.setName(t("storage.name")).setDesc(text);
       },
     };
   }

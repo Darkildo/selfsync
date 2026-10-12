@@ -78,8 +78,8 @@ fn pause(cx: &Ctx, reason: &str, notice: Option<Notice>) -> SyncError {
 
 /// Сверяет режим vault'а на сервере с локальным.
 pub(crate) async fn check_state(cx: &Ctx, vs: &pb::VaultState) -> SyncResult<()> {
+    cx.note_server_state(vs);
     cx.with_mut(|s| {
-        s.server_state = Some(*vs);
         s.set_read_only(Some(vs.read_only));
         // Запись ключа сменилась после проверки: ключ в памяти мог устареть.
         if s.keys_verified && vs.key_version != 0 && s.verified_version != vs.key_version {

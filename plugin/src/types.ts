@@ -63,6 +63,17 @@ export interface SyncStatus {
   recovery: boolean;
   /** Минорная версия протокола сервера (0 — сервер 0.1.x); `null` — ещё не отвечал. */
   serverMinor?: number | null;
+  /** Состояние хранилища на сервере по последнему `selfsync verify`. */
+  storage?: StorageHealth;
+}
+
+export interface StorageHealth {
+  /** Когда сервер последний раз проверял vault, мс; 0 — не проверял или сервер старее 0.4.0. */
+  verifiedAt: number;
+  /** Повреждено на сервере; ждут копии с устройств. */
+  damaged: number;
+  /** Повреждение, которое исправит только админ сервера. */
+  serverProblem: boolean;
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -80,6 +91,7 @@ export type Notice =
   | { kind: "synced"; pulled: string[]; pushed: string[] }
   | { kind: "recoveryPhrase"; words: string[] }
   | { kind: "readOnly"; pending: number }
+  | { kind: "storageDamaged"; damaged: number; serverProblem: boolean }
   | { kind: "unsupportedName"; path: string }
   | { kind: "nonPortableName"; path: string }
   | { kind: "wrongPassword" }

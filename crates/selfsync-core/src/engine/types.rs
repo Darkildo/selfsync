@@ -454,6 +454,37 @@ pub struct SyncStatus {
     /// одного ответа. Меньше [`selfsync_proto::PROTO_MINOR`] — сервер старее клиента
     /// и часть возможностей недоступна.
     pub server_minor: Option<u32>,
+    /// Состояние хранилища на сервере по последнему `selfsync verify`.
+    #[serde(default)]
+    pub storage: StorageHealth,
+}
+
+/// Состояние хранилища на сервере (итог `selfsync verify`, протокол 1.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageHealth {
+    /// Когда сервер последний раз проверял vault, мс; `0` — не проверял или сервер
+    /// старее 0.4.0.
+    pub verified_at: i64,
+    /// Блобов повреждено или потеряно на сервере; ждут копии с устройств.
+    pub damaged: u32,
+    /// Повреждение, которое устройства не исправят (база vault'а, запись ключа):
+    /// нужен админ сервера.
+    pub server_problem: bool,
+}
+
+impl StorageHealth {
+    pub fn of(vs: &selfsync_proto::v1::VaultState) -> StorageHealth {
+        StorageHealth {
+            verified_at: vs.verified_at,
+            damaged: vs.blobs_wanted,
+            server_problem: vs.storage_problem,
+        }
+    }
+
+    pub fn damaged(&self) -> bool {
+        self.damaged > 0 || self.server_problem
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -532,6 +563,11 @@ pub enum Notice {
     /// уйдут. Один раз за сессию.
     ReadOnly {
         pending: u32,
+    },
+    /// Проверка на сервере нашла повреждения. Один раз, пока они не исчезнут.
+    StorageDamaged {
+        damaged: u32,
+        server_problem: bool,
     },
     /// Имя недопустимо на этом устройстве (`?` на Android и т.п.): файл или папка
     /// с другого устройства не скачаны. `path` — до недопустимого сегмента.

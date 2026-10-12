@@ -887,3 +887,18 @@ async fn rekey_then_other_folder_needs_password() {
         "secret from b\n"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn storage_state_is_kept_for_status() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "stor", "a");
+    std::fs::write(a.path().join("x.md"), "x\n").unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    let marker = a.path().join(".selfsync/storage.json");
+    assert!(!marker.exists(), "verify ещё не запускался");
+    selfsync_server::verify::verify_vault(&srv.state.config, "stor", Default::default()).unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    let s: selfsync_core::engine::StorageHealth =
+        serde_json::from_slice(&std::fs::read(&marker).unwrap()).unwrap();
+    assert!(s.verified_at > 0 && !s.damaged(), "{s:?}");
+}

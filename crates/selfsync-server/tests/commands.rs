@@ -442,9 +442,14 @@ async fn wanted_blob_is_settled_by_upload() {
     let t = s.token("notes", "b");
     let v = open_vault(s.config(), "notes", 1).unwrap();
     let h = blob_hash(b"first file");
+    let before = s.changes(&t, 0).await.vault.unwrap();
+    assert_eq!((before.verified_at, before.storage_problem), (0, false));
     flip_byte(&v.blobs.path_of(&h));
     verify::verify_vault(s.config(), "notes", VerifyOptions::default()).unwrap();
-    assert_eq!(s.changes(&t, 0).await.vault.unwrap().blobs_wanted, 1);
+    let vs = s.changes(&t, 0).await.vault.unwrap();
+    assert_eq!(vs.blobs_wanted, 1);
+    assert!(vs.verified_at > 0, "время проверки доходит до устройств");
+    assert!(!vs.storage_problem, "битый блоб чинят устройства, не админ");
     let wanted: pb::HashList = s.get("/v1/blobs/wanted", &t).await.proto();
     assert_eq!(wanted.hashes, vec![h.to_vec()]);
     // чужие байты под этим именем не принимаются, запрос остаётся
@@ -465,6 +470,12 @@ async fn wanted_blob_is_settled_by_upload() {
     assert_eq!(s.changes(&t, 0).await.vault.unwrap().blobs_wanted, 0);
     let r = verify::verify_vault(s.config(), "notes", VerifyOptions::default()).unwrap();
     assert!(r.clean() && r.wanted.is_empty(), "{r:?}");
+    // запись ключа не читается — это чинит только админ
+    {
+        let c = v.pool.get().unwrap();
+        selfsync_server::db::vault::set_meta_int(&c, "verify_key_problem", 1).unwrap();
+    }
+    assert!(s.changes(&t, 0).await.vault.unwrap().storage_problem);
 }
 
 #[tokio::test]

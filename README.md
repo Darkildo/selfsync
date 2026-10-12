@@ -182,6 +182,8 @@ Back up with `backup`: the copy is consistent even while the server is running. 
 
 **Repair from devices.** A damaged or missing blob that `verify` could not take from a backup is requested from the devices: the damaged file is moved to `quarantine/`, and any device (plugin or `selfsync-cli` 0.3.2+, not read-only) whose copy of the file matches the server rebuilds the blob and uploads it on its next sync. The server checks the hash. Blobs that only old versions in the history refer to cannot be rebuilt this way; `verify` lists those still waiting after a day.
 
+The devices also see the result of the last check (server 0.4.0+): the plugin shows it under "Server storage" in the settings and notifies once when damage appears, and `selfsync-cli status` prints it.
+
 A damaged or missing blob can be taken from any backup, since storage is content-addressed and the backup holds the same file under the same name: `selfsync verify --repair-from /backups/selfsync-2026-10-01`. Every file from the backup is checked against its hash first; the damaged original is moved to `quarantine/` in the vault directory (`gc` leaves it alone, `backup` copies it).
 
 The `selfsync-verify.timer` unit runs the check weekly; when problems are found the service fails, so it shows up in `systemctl --failed`, and you can hang your own `OnFailure=` notification on it. A one-off run under `DynamicUser`, and in Docker:

@@ -103,6 +103,8 @@ pub(crate) struct State {
     pub read_only_forced: bool,
     /// Уведомление `ReadOnly` уже показано в этой сессии.
     pub read_only_notified: bool,
+    /// Уведомление `StorageDamaged` показано; сбрасывается, когда повреждений нет.
+    pub storage_notified: bool,
     /// Что изменил текущий цикл: локальные пути, тронутые синком, и отправленные.
     /// В конце цикла — `Notice::Synced`.
     pub pulled: BTreeSet<String>,
@@ -147,8 +149,9 @@ pub(crate) struct State {
     pub rules_changed: bool,
     /// Пропущенные файлы, которые попросили скачать (в начале ближайшего цикла).
     pub download_queue: BTreeSet<String>,
-    /// Запрос сервера на блобы разобран: сколько их было и когда (см. `repair`).
-    pub wanted_checked: Option<(u32, i64)>,
+    /// Запрос сервера на блобы разобран: сколько их было, время `verify` на сервере
+    /// и когда разобран (см. `repair`).
+    pub wanted_checked: Option<(u32, i64, i64)>,
 }
 
 impl State {
@@ -184,6 +187,7 @@ impl State {
             read_only: false,
             read_only_forced: false,
             read_only_notified: false,
+            storage_notified: false,
             pulled: BTreeSet::new(),
             pushed: BTreeSet::new(),
             blocked: None,
@@ -870,6 +874,19 @@ impl Ctx {
         for e in evict {
             let key = e.to_hex();
             let _ = self.hub.submit(|id| Action::CacheDelete { id, key }).await;
+        }
+    }
+
+    /// Запомнить `VaultState` из ответа сервера; статус — только если изменилось
+    /// состояние хранилища.
+    pub fn note_server_state(&self, vs: &pb::VaultState) {
+        let storage = StorageHealth::of(vs);
+        let changed = self.with_mut(|s| {
+            s.server_state = Some(*vs);
+            s.status.storage != storage
+        });
+        if changed {
+            self.set_status(|st| st.storage = storage);
         }
     }
 

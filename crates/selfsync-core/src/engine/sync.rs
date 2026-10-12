@@ -118,6 +118,18 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
     if !read_only {
         super::repair::offer_wanted(cx).await?;
     }
+    let storage = cx.with(|s| s.status.storage);
+    let first = cx.with_mut(|s| {
+        let first = storage.damaged() && !s.storage_notified;
+        s.storage_notified = storage.damaged();
+        first
+    });
+    if first {
+        cx.notify(Notice::StorageDamaged {
+            damaged: storage.damaged,
+            server_problem: storage.server_problem,
+        });
+    }
     if read_only && pending > 0 && !cx.with(|s| s.read_only_notified) {
         cx.with_mut(|s| s.read_only_notified = true);
         cx.notify(Notice::ReadOnly {

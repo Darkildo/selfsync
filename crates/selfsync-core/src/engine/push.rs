@@ -378,7 +378,7 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
     let ops: Vec<pb::Op> = prepared.iter().map(|p| p.op.clone()).collect();
     let resp = api::ops(cx, ops).await?;
     if let Some(vs) = &resp.vault {
-        cx.with_mut(|s| s.server_state = Some(*vs));
+        cx.note_server_state(vs);
     }
     if resp.results.len() != prepared.len() {
         return Err(SyncError::Protocol(

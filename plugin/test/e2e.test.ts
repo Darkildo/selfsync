@@ -183,6 +183,30 @@ describe("подключение", () => {
     await writer.stop();
   });
 
+  test("повреждение хранилища видно в статусе и чинится с устройства", async () => {
+    const [a, b] = await pair("storage");
+    await a.write("s.md", "keep me safe\n");
+    await a.sync();
+    await b.sync();
+    server.cli("verify");
+    await b.sync();
+    assert.ok((b.status?.storage?.verifiedAt ?? 0) > 0, JSON.stringify(b.status));
+    assert.equal(b.status?.storage?.damaged, 0);
+    // Блобы пропали с сервера: verify просит их у устройств (код выхода 1).
+    const blobs = join(server.data, "vaults", "storage", "blobs");
+    for (const d of await fsp.readdir(blobs)) await fsp.rm(join(blobs, d), { recursive: true });
+    assert.throws(() => server.cli("verify"));
+    await b.sync();
+    const n = b.notices.filter((x) => x.kind === "storageDamaged");
+    assert.deepEqual(n, [{ kind: "storageDamaged", damaged: 1, serverProblem: false }]);
+    // b залил целую копию; следующий ответ сервера — без повреждений.
+    await b.sync();
+    assert.equal(b.status?.storage?.damaged, 0);
+    server.cli("verify");
+    await a.stop();
+    await b.stop();
+  });
+
   test("отозванный токен останавливает синк", async () => {
     const token = server.token("revoke", "gone");
     const c = await TestClient.create(server, { name: "gone", token });

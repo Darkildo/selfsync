@@ -11,22 +11,30 @@ use super::transfer::{Src, prepare_big, prepare_small, upload_big, upload_small}
 use super::types::LogLevel;
 use crate::hash::Hash;
 
-/// Повторно разбирать тот же запрос не чаще (если число запрошенных не изменилось).
+/// Повторно разбирать тот же запрос не чаще (если число запрошенных и время `verify`
+/// на сервере не изменились).
 const RECHECK_MS: i64 = 60 * 60 * 1000;
 
 pub(crate) async fn offer_wanted(cx: &Ctx) -> SyncResult<()> {
-    let (count, checked, now, busy) = cx.with(|s| {
+    let (count, verified_at, checked, now, busy) = cx.with(|s| {
+        let vs = s.server_state.unwrap_or_default();
         (
-            s.server_state.map_or(0, |v| v.blobs_wanted),
+            vs.blobs_wanted,
+            vs.verified_at,
             s.wanted_checked,
             s.now,
             s.index.migration.is_some(),
         )
     });
-    if count == 0 || busy {
+    if count == 0 {
+        // Запрос исполнен: новый с тем же числом блобов — уже другой.
+        cx.with_mut(|s| s.wanted_checked = None);
         return Ok(());
     }
-    if checked.is_some_and(|(n, at)| n == count && now - at < RECHECK_MS) {
+    if busy {
+        return Ok(());
+    }
+    if checked.is_some_and(|(n, v, at)| n == count && v == verified_at && now - at < RECHECK_MS) {
         return Ok(());
     }
     let wanted: BTreeSet<Hash> = api::blobs_wanted(cx).await?.into_iter().collect();
@@ -95,6 +103,6 @@ pub(crate) async fn offer_wanted(cx: &Ctx) -> SyncResult<()> {
             sent.insert(h);
         }
     }
-    cx.with_mut(|s| s.wanted_checked = Some((count, now)));
+    cx.with_mut(|s| s.wanted_checked = Some((count, verified_at, now)));
     Ok(())
 }

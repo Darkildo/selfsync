@@ -142,7 +142,8 @@ pub fn retention_days(c: &Connection) -> rusqlite::Result<u32> {
 
 pub fn vault_state(c: &Connection) -> rusqlite::Result<pb::VaultState> {
     let mut st = c.prepare_cached(
-        "SELECT key, value FROM meta WHERE key IN ('seq','vault_key_version','migration','retention_days','purged_seq','key_epoch')",
+        "SELECT key, value FROM meta WHERE key IN ('seq','vault_key_version','migration','retention_days','purged_seq','key_epoch',
+                       'verify_at','verify_db_errors','verify_key_problem')",
     )?;
     let mut s = pb::VaultState {
         retention_days: DEFAULT_RETENTION_DAYS,
@@ -161,6 +162,10 @@ pub fn vault_state(c: &Connection) -> rusqlite::Result<pb::VaultState> {
             }
             "purged_seq" => s.purged_seq = u(r.get(1)?),
             "key_epoch" => s.key_epoch = u32::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+            "verify_at" => s.verified_at = r.get(1)?,
+            "verify_db_errors" | "verify_key_problem" => {
+                s.storage_problem |= r.get::<_, i64>(1)? != 0;
+            }
             _ => {}
         }
     }

@@ -2100,6 +2100,68 @@ fn blobs_restored_from_devices_encrypted() {
     blobs_restored_from_devices(true);
 }
 
+fn storage_notices(w: &World, c: usize) -> Vec<(u32, bool)> {
+    w.clients[c]
+        .notices
+        .iter()
+        .filter_map(|n| match n {
+            Notice::StorageDamaged {
+                damaged,
+                server_problem,
+            } => Some((*damaged, *server_problem)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn storage(w: &World, c: usize) -> selfsync_core::engine::StorageHealth {
+    w.clients[c].status.as_ref().unwrap().storage
+}
+
+/// Итог `verify` доходит до устройств: статус и одно уведомление, пока повреждение
+/// не исчезнет; новое повреждение — новое уведомление.
+#[test]
+fn storage_state_reaches_devices() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    assert_eq!(storage(&w, 0).verified_at, 0, "verify ещё не запускался");
+    assert!(verify(&w).clean());
+    w.sync(0);
+    let s = storage(&w, 0);
+    assert!(s.verified_at > 0 && !s.damaged(), "{s:?}");
+    assert!(storage_notices(&w, 0).is_empty());
+
+    // Блоб потерян: read-only устройство видит повреждение, но не чинит.
+    w.set_read_only(1);
+    let v = w.state.vault("sim").unwrap();
+    let a = blob_of(&w, &read(&w, 1, "a.md"));
+    std::fs::remove_file(v.blobs.path_of(&a)).unwrap();
+    verify(&w);
+    w.sync(1);
+    w.sync(1);
+    assert_eq!(storage(&w, 1).damaged, 1);
+    assert_eq!(storage_notices(&w, 1), vec![(1, false)], "одно уведомление");
+
+    // Устройство с целой копией чинит; следующий ответ сервера — без повреждений.
+    w.sync(0);
+    w.sync(0);
+    w.sync(1);
+    assert!(!storage(&w, 0).damaged() && !storage(&w, 1).damaged());
+    assert_eq!(storage_notices(&w, 1).len(), 1);
+
+    // Новое повреждение — снова уведомление; ошибка, которую чинит только админ.
+    std::fs::write(v.blobs.path_of(&a), b"rot").unwrap();
+    verify(&w);
+    {
+        let c = v.pool.get().unwrap();
+        selfsync_server::db::vault::set_meta_int(&c, "verify_key_problem", 1).unwrap();
+    }
+    w.sync(1);
+    assert_eq!(storage_notices(&w, 1), vec![(1, false), (1, true)]);
+    w.sync(0);
+    finish(&mut w);
+}
+
 #[test]
 fn read_only_device_does_not_upload_wanted_blobs() {
     let mut w = World::new(quiet(2));
