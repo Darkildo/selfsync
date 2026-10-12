@@ -1477,6 +1477,15 @@ async fn rekey_epochs_and_purge() {
     assert_eq!(code(&res.results[0]), "applied");
     let res = s.ops(&t, vec![put(path(3, 0), &h, 0)]).await;
     assert_eq!(code(&res.results[0]), "applied");
+    // открытая запись — нет: в отличие от включения шифрования, vault уже
+    // зашифрован, и перешифровка её не подберёт
+    let plain = pb::Path {
+        segments: vec![b"p.md".to_vec()],
+        encrypted: false,
+        key_epoch: 0,
+    };
+    let res = s.ops(&t, vec![put(plain, &h, 0)]).await;
+    assert_eq!(code(&res.results[0]), "plaintext_in_encrypted_vault");
     let ch = s.changes(&t, 0).await;
     assert_eq!(ch.entries.len(), 3);
     assert!(

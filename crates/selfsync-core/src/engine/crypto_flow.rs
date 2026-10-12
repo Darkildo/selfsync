@@ -709,6 +709,7 @@ pub(crate) async fn migrate(cx: &Ctx) -> SyncResult<()> {
         }
         Err(e) => return Err(e),
     }
+    let mut refused = None;
     loop {
         if !cx.with(|s| s.index.migration.as_ref().is_some_and(|m| m.uploaded)) {
             let mut complete = false;
@@ -730,6 +731,14 @@ pub(crate) async fn migrate(cx: &Ctx) -> SyncResult<()> {
         if api::purge_plaintext(cx, max_seq).await? {
             break;
         }
+        if refused == Some(max_seq) {
+            // Перезаливка ничего не добавила, а сервер снова отказал: на нём записи,
+            // которые здесь не прочитать. Не крутиться — повтор в следующем цикле.
+            return Err(SyncError::Io(
+                "миграция: на сервере записи, которые не удалось перешифровать".into(),
+            ));
+        }
+        refused = Some(max_seq);
         // Открытые файлы изменились после снимка: доперезалить.
         cx.with_mut(|s| {
             if let Some(m) = &mut s.index.migration {
@@ -803,10 +812,12 @@ async fn upload_all(cx: &Ctx, src: Option<&VaultKeys>) -> SyncResult<bool> {
                 }
                 continue;
             }
+            // Открытая запись при смене ключа (её мог принять сервер 0.3.0) тоже
+            // переносится: иначе purge не прошёл бы никогда.
             let vp = match src {
-                None if !p.encrypted => VaultPath::from_segments(&p.segments).ok(),
-                Some(k) if p.encrypted => k.decrypt_path(p).ok(),
-                _ => None,
+                _ if !p.encrypted => VaultPath::from_segments(&p.segments).ok(),
+                Some(k) => k.decrypt_path(p).ok(),
+                None => None,
             };
             let Some(vp) = vp else {
                 continue;
