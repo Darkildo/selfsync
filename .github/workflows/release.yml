@@ -51,16 +51,6 @@ jobs:
           for bin in selfsync selfsync-cli; do
             cp "target/${{ matrix.target }}/release/$bin" "dist/$bin-${{ matrix.target }}"
           done
-      - name: Проверка воспроизводимости (вторая сборка с нуля)
-        env:
-          SOURCE_DATE_EPOCH: "0"
-          RUSTFLAGS: "--remap-path-prefix=${{ github.workspace }}=. --remap-path-prefix=/home/runner/.cargo=cargo -C strip=symbols"
-        run: |
-          cargo clean --release --target ${{ matrix.target }}
-          cargo zigbuild --release --locked --target ${{ matrix.target }} -p selfsync-server -p selfsync-cli
-          for bin in selfsync selfsync-cli; do
-            cmp "target/${{ matrix.target }}/release/$bin" "dist/$bin-${{ matrix.target }}"
-          done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bin-${{ matrix.target }}

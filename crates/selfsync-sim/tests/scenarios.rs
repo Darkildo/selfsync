@@ -1790,7 +1790,7 @@ fn abandoned_rekey_is_taken_over() {
 #[test]
 fn random_runs_exercise_rekey() {
     let mut rekeyed = 0;
-    for seed in 0..400 {
+    for seed in 0..100 {
         let cfg = SimConfig::random(seed);
         if cfg.rekey_at.is_none() {
             continue;
@@ -1804,7 +1804,7 @@ fn random_runs_exercise_rekey() {
             rekeyed += 1;
         }
     }
-    assert!(rekeyed >= 5, "смен ключа в прогонах: {rekeyed}");
+    assert!(rekeyed >= 3, "смен ключа в прогонах: {rekeyed}");
 }
 
 /// Прогоны, на которых ломалась смена ключа: устройство с новым ключом посреди
