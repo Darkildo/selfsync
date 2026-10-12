@@ -617,11 +617,13 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
 /// Запись, ушедшая с этого пути (переименование вслед за сервером, копия), считается
 /// разобранной.
 fn hold_unsettled(cx: &Ctx, key: &str, it: &Item) {
+    // Пока наше переименование сюда не отправлено, base_rev — ревизия старого пути,
+    // и совпадение номеров ничего не значит.
     if cx.with(|s| {
         s.index
             .files
             .get(key)
-            .is_some_and(|f| f.base_rev != it.r.rev)
+            .is_some_and(|f| f.base_rev != it.r.rev || f.server_path.is_some())
     }) {
         hold(cx, it.e.seq);
     }
@@ -734,11 +736,14 @@ async fn apply_tombstone(cx: &Ctx, it: &Item) -> SyncResult<bool> {
         }
         return Ok(true);
     }
-    // Правка побеждает удаление: Put с base_rev tombstone'а вернёт файл.
+    // Правка побеждает удаление: Put с base_rev tombstone'а вернёт файл. Базы
+    // больше нет — иначе файл, вернувшийся к её содержимому, не ушёл бы ни Put'ом,
+    // ни под tombstone (ревизия уже его).
     cx.with_mut(|s| {
         if let Some(f) = s.index.files.get_mut(key) {
             f.base_rev = r.rev;
             f.base_blob = None;
+            f.base_plain = None;
         }
     });
     cx.log(

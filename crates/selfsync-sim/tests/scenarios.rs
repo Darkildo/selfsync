@@ -1816,3 +1816,204 @@ fn rekey_regression_seeds() {
         selfsync_sim::run_seed(SimConfig::random(seed)).unwrap();
     }
 }
+
+// Временное имя двухшагового переименования занято файлом, отличающимся только
+// регистром: нормализация и смена регистра берут свободное.
+
+#[test]
+fn temp_name_taken_by_user_file() {
+    let mut cfg = quiet(2);
+    cfg.case_insensitive = vec![true, true];
+    let mut w = World::new(cfg);
+    let nfc = "Caf\u{e9}.md";
+    let t0 = w.ledger.fresh(0);
+    w.user_write(
+        0,
+        &format!("{nfc}.nfc.selfsync-tmP"),
+        format!("x {t0}\n").into_bytes(),
+    );
+    let t1 = w.ledger.fresh(0);
+    w.user_write(0, "Cafe\u{301}.md", format!("nfd {t1}\n").into_bytes());
+    w.sync(0);
+    shared_note(&mut w, "note.md");
+    let t2 = w.ledger.fresh(1);
+    w.user_write(
+        1,
+        "Note.md.case.selfsync-tmP",
+        format!("y {t2}\n").into_bytes(),
+    );
+    w.sync(1);
+    assert!(w.user_rename(0, "note.md", "Note.md"));
+    w.sync(0);
+    w.sync(1);
+    finish(&mut w);
+    let files = w.server_files();
+    assert!(
+        String::from_utf8_lossy(&files[nfc]).contains(&t1),
+        "NFD-файл дошёл под NFC-именем: {:?}",
+        files.keys()
+    );
+    assert_eq!(w.clients[1].fs.display_name("note.md"), Some("Note.md"));
+}
+
+// Пока push читал файл, его переименовали и на старом месте создали новый того же
+// размера: stat и содержимое — от разных файлов. Наблюдение не должно перейти к
+// переименованному файлу и выдать его за неизменённый.
+
+#[test]
+fn file_replaced_between_stat_and_read() {
+    let mut w = World::new(quiet(2));
+    w.sync(0);
+    let (ta, tb) = (w.ledger.fresh(0), w.ledger.fresh(0));
+    assert_eq!(ta.len(), tb.len());
+    w.user_write(0, "x.md", format!("one {ta}\n").into_bytes());
+    w.deliver(0, Event::SyncNow);
+    while let Some(label) = w.pump_one(0) {
+        if label.starts_with("HTTP GET /v1/changes") {
+            break;
+        }
+    }
+    assert_eq!(
+        w.pump_one(0).as_deref(),
+        Some("Stat"),
+        "stat перед чтением в push"
+    );
+    assert!(w.user_rename(0, "x.md", "y.md"));
+    w.user_write(0, "x.md", format!("one {tb}\n").into_bytes());
+    w.drain(0);
+    w.sync(1);
+    finish(&mut w);
+    let files = w.server_files();
+    assert!(String::from_utf8_lossy(&files["y.md"]).contains(&ta));
+    assert!(String::from_utf8_lossy(&files["x.md"]).contains(&tb));
+}
+
+// Наше переименование отклонено (источник правили), а файл тем временем удалён, и
+// событие удаления потерялось. Удаление по старому пути не должно стереть правку,
+// которую здесь не видели, а чужой файл на месте назначения — потеряться (номера
+// ревизий обоих путей совпадают).
+
+#[test]
+fn rejected_rename_then_delete_keeps_unseen_edit() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    assert!(w.user_rename(1, "a.md", "b.md"));
+    w.planned_faults.push_back(("POST /v1/ops".into(), false));
+    w.sync(1);
+    assert!(w.planned_faults.is_empty());
+    w.clients[1].fs.user_delete("b.md");
+    let te = edit_line(&mut w, 0, "a.md", 2);
+    let tb = base_note(&mut w, 0, "b.md");
+    w.sync(0);
+    let tb2 = edit_line(&mut w, 0, "b.md", 3);
+    w.sync(0);
+    // Повтор по таймеру — без полного сканирования, удаление не замечено.
+    for _ in 0..6 {
+        w.now += 10_000;
+        w.tick(1);
+        w.drain(1);
+    }
+    finish(&mut w);
+    let files = w.server_files();
+    assert!(
+        files
+            .get("a.md")
+            .is_some_and(|d| String::from_utf8_lossy(d).contains(&te)),
+        "правка c0 не удалена: {:?}",
+        files.keys()
+    );
+    let b = String::from_utf8_lossy(&files["b.md"]).into_owned();
+    assert!(b.contains(&tb) && b.contains(&tb2), "{b}");
+}
+
+// То же, но источник правят между каждой попыткой переименования: push исчерпывает
+// раунды, и pull встречает чужой файл на месте назначения раньше, чем ушло наше
+// удаление. Запись нужно перечитать: после удаления по старому пути её здесь не
+// останется, а курсор уже ушёл бы дальше.
+
+#[test]
+fn rename_rejected_every_round_keeps_destination_file() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    assert!(w.user_rename(1, "a.md", "b.md"));
+    w.planned_faults.push_back(("POST /v1/ops".into(), false));
+    w.sync(1);
+    w.clients[1].fs.user_delete("b.md");
+    edit_line(&mut w, 0, "a.md", 1);
+    // Шесть раундов push: ревизия a.md дойдёт до 7, у b.md — столько же.
+    let tb = base_note(&mut w, 0, "b.md");
+    w.sync(0);
+    for i in 0..6 {
+        edit_line(&mut w, 0, "b.md", 1 + i % 4);
+        w.sync(0);
+    }
+    let mut rounds = 0;
+    for _ in 0..6 {
+        w.now += 10_000;
+        w.tick(1);
+        while let Some(label) = w.pump_one(1) {
+            if label == "HTTP POST /v1/ops" && rounds < 5 {
+                rounds += 1;
+                edit_line(&mut w, 0, "a.md", 1 + rounds % 4);
+                w.sync(0);
+            }
+        }
+    }
+    assert_eq!(rounds, 5, "все раунды push отклонены");
+    finish(&mut w);
+    let b = w.clients[1]
+        .fs
+        .read_file("b.md")
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        String::from_utf8_lossy(&b).contains(&tb),
+        "b.md c0 пришёл на c1"
+    );
+}
+
+// Правка победила удаление, но вернуть файл не успели, а пользователь откатил его
+// к удалённой версии: файл всё равно возвращается на сервер, а не застревает
+// только здесь.
+
+#[test]
+fn restored_file_reverted_to_deleted_version_is_pushed() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    let before = w.clients[1].fs.read_file("a.md").cloned().unwrap();
+    edit_line(&mut w, 1, "a.md", 2);
+    assert!(w.clients[0].fs.user_delete("a.md").len() == 1);
+    w.deliver(
+        0,
+        Event::Deleted {
+            path: "a.md".into(),
+        },
+    );
+    w.sync(0);
+    w.deliver(1, Event::SyncNow);
+    while let Some(label) = w.pump_one(1) {
+        if label == "HTTP POST /v1/ops" {
+            break;
+        }
+    }
+    // Put отклонён (файл удалён), повторный срывается.
+    w.planned_faults
+        .push_back(("POST /v1/blobs/missing".into(), false));
+    w.drain(1);
+    assert!(w.planned_faults.is_empty());
+    w.user_write(1, "a.md", before.clone());
+    w.sync(1);
+    w.sync(0);
+    finish(&mut w);
+    assert_eq!(w.server_files().get("a.md"), Some(&before));
+}
+
+#[test]
+fn sync_regression_seeds() {
+    // Потерянная правка при шифровании (stat/read), не-NFC имя при занятом
+    // временном, удаление по чужой ревизии после отклонённого переименования,
+    // возвращённый файл, совпавший с базой.
+    for seed in [25590, 26866, 50362, 57632, 77055, 81938] {
+        selfsync_sim::run_seed(SimConfig::random(seed)).unwrap();
+    }
+}

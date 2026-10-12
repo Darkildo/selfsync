@@ -236,11 +236,12 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
                 return Ok(());
             }
         }
-        // Правка побеждает удаление: файл возвращается.
+        // Правка побеждает удаление: файл возвращается (база — как в apply_tombstone).
         cx.with_mut(|s| {
             if let Some(f) = s.index.files.get_mut(key) {
                 f.base_rev = r.rev;
                 f.base_blob = None;
+                f.base_plain = None;
                 f.server_path = None;
             }
         });
@@ -780,6 +781,17 @@ pub(crate) async fn resolve_rename(
                     });
                 }
             }
+        } else {
+            // Файла здесь уже нет (событие удаления потерялось) — тогда наше
+            // переименование превращается в удаление старого пути; иначе файл занят,
+            // пересканировать.
+            let gone = cx.stat(key).await?.is_none();
+            cx.with_mut(|s| {
+                if gone && let Some(f) = s.index.files.get_mut(key) {
+                    f.local = None;
+                }
+                s.dirty.insert(key.to_owned());
+            });
         }
         return Ok(());
     }
@@ -870,15 +882,7 @@ pub(crate) async fn split_case(
 pub(crate) async fn rename_local(cx: &Ctx, from: &str, to: &str) -> SyncResult<bool> {
     let case_only = from != to && from.to_lowercase() == to.to_lowercase();
     if case_only {
-        let tmp = format!("{to}.case{}", super::ctx::TEMP_SUFFIX);
-        if cx.rename(from, &tmp).await?.is_none() {
-            return Ok(false);
-        }
-        if cx.rename(&tmp, to).await?.is_none() {
-            cx.rename(&tmp, from).await?;
-            return Ok(false);
-        }
-        return Ok(true);
+        return cx.rename_via_temp(from, to, "case").await;
     }
     Ok(cx.rename(from, to).await?.is_some())
 }

@@ -9,7 +9,9 @@ use selfsync_proto::v1 as pb;
 use super::api;
 use super::ctx::{Ctx, SMALL_BLOB, SyncError, SyncResult};
 use super::resolve::{Remote, resolve_content, resolve_delete, resolve_rename};
-use super::transfer::{PreparedBlob, Src, prepare_big, prepare_small, upload_big, upload_small};
+use super::transfer::{
+    PreparedBlob, Src, prepare_big, prepare_small, unchanged_since, upload_big, upload_small,
+};
 use super::types::{LogLevel, Notice};
 use crate::hash::Hash;
 use crate::index::{FileState, LocalObs};
@@ -202,6 +204,12 @@ async fn prepare_put(
         let Some(data) = cx.read(key, 0, None).await? else {
             return Ok(None);
         };
+        if !unchanged_since(cx, key, &meta).await? {
+            cx.with_mut(|s| {
+                s.dirty.insert(key.to_owned());
+            });
+            return Ok(None);
+        }
         let obs = LocalObs {
             size: data.len() as u64,
             mtime: meta.mtime,
@@ -239,19 +247,24 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
     let mut prepared: Vec<Prepared> = Vec::new();
     let mut blobs: Vec<(String, PreparedBlob, LocalObs)> = Vec::new();
     for item in batch {
-        let (base_rev, folder) = match &item {
-            Item::Mkdir { key }
-            | Item::Rename { key, .. }
-            | Item::Put { key }
-            | Item::Delete { key } => cx.with(|s| {
-                s.index
-                    .files
-                    .get(key)
-                    .map(|f| (f.base_rev, f.folder))
-                    .unwrap_or((0, false))
+        let base_rev = match &item {
+            Item::Mkdir { key } | Item::Rename { key, .. } | Item::Put { key } => {
+                cx.with(|s| s.index.files.get(key).map_or(0, |f| f.base_rev))
+            }
+            // Ревизия, содержимое которой здесь не видели (переименование или
+            // tombstone, сверка ещё впереди), не основание удалять: с base_rev 0
+            // сервер ответит конфликтом, и resolve_delete удалит только ту же версию,
+            // а чужую правку вернёт.
+            Item::Delete { key } => cx.with(|s| {
+                s.index.files.get(key).map_or(0, |f| {
+                    if !f.folder && f.base_blob.is_none() {
+                        0
+                    } else {
+                        f.base_rev
+                    }
+                })
             }),
         };
-        let _ = folder;
         let op = match &item {
             Item::Mkdir { key } => {
                 let path = cx.with(|s| s.encode_path(&vp(key)?))?;

@@ -37,7 +37,19 @@ pub(crate) struct LocalContent {
     pub data: Option<Vec<u8>>,
 }
 
-/// Читает и хэширует локальный файл. `None` — файла нет.
+/// Файл не менялся, пока его читали: размер и mtime те же, что до чтения. Иначе
+/// (перезаписан; переименован, и на его месте создан новый) прочитанное нельзя
+/// связать с `meta`: наблюдение с mtime одного файла и хэшем другого потом
+/// перенеслось бы событием переименования и выглядело бы неизменным.
+pub(crate) async fn unchanged_since(cx: &Ctx, path: &str, meta: &FileMeta) -> SyncResult<bool> {
+    Ok(cx
+        .stat(path)
+        .await?
+        .is_some_and(|m| !m.dir && m.size == meta.size && m.mtime == meta.mtime))
+}
+
+/// Читает и хэширует локальный файл. `None` — файла нет или он менялся во время
+/// чтения.
 pub(crate) async fn read_local(
     cx: &Ctx,
     path: &str,
@@ -47,6 +59,9 @@ pub(crate) async fn read_local(
         let Some(data) = cx.read(path, 0, None).await? else {
             return Ok(None);
         };
+        if !unchanged_since(cx, path, meta).await? {
+            return Ok(None);
+        }
         let obs = LocalObs {
             size: data.len() as u64,
             mtime: meta.mtime,
@@ -69,6 +84,9 @@ pub(crate) async fn read_local(
         }
         h.update(&chunk);
         off += chunk.len() as u64;
+    }
+    if !unchanged_since(cx, path, meta).await? {
+        return Ok(None);
     }
     Ok(Some(LocalContent {
         obs: LocalObs {

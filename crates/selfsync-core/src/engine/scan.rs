@@ -62,15 +62,10 @@ async fn canonical(cx: &Ctx, raw: &str, is_dir: bool) -> SyncResult<Option<Strin
                 format!("есть и NFD, и NFC вариант имени: NFD-файл сохранён как {target}"),
             );
         }
-        let tmp = format!("{target}.nfc{}", super::ctx::TEMP_SUFFIX);
-        if cx.rename(raw, &tmp).await?.is_none() {
-            return Ok(None);
-        }
-        if cx.rename(&tmp, &target).await?.is_none() {
-            cx.rename(&tmp, raw).await?;
-            return Ok(None);
-        }
         let _ = is_dir;
+        if !cx.rename_via_temp(raw, &target, "nfc").await? {
+            return Ok(None);
+        }
         return Ok(Some(target));
     }
     Ok(Some(nfc))
@@ -95,9 +90,7 @@ async fn recover_temp(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
         cx.trash(raw, super::types::Expect::Any).await?;
         return Ok(None);
     }
-    let target = base
-        .strip_suffix(".case")
-        .or_else(|| base.strip_suffix(".nfc"));
+    let target = strip_tag(base, ".case").or_else(|| strip_tag(base, ".nfc"));
     let Some(target) = target else {
         cx.log(
             LogLevel::Warn,
@@ -117,6 +110,18 @@ async fn recover_temp(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
         format!("доведено прерванное переименование: {raw} → {dest}"),
     );
     Ok(cx.rename(raw, &dest).await?.map(|_| dest))
+}
+
+/// `X.tag` или `X.tag-N` (см. `Ctx::free_temp`) → `X`.
+fn strip_tag<'a>(base: &'a str, tag: &str) -> Option<&'a str> {
+    if let Some(t) = base.strip_suffix(tag) {
+        return Some(t);
+    }
+    let (head, n) = base.rsplit_once('-')?;
+    if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    head.strip_suffix(tag)
 }
 
 /// Вносит в индекс переименования из событий Obsidian.
@@ -238,7 +243,14 @@ async fn observe(cx: &Ctx, path: &str, meta: &FileMeta, delta: &mut ScanDelta) -
         return Ok(());
     }
     let Some(content) = read_local(cx, path, meta).await? else {
-        mark_gone(cx, path, delta);
+        if cx.stat(path).await?.is_some() {
+            // Меняется прямо сейчас: перечитать в следующем цикле.
+            cx.with_mut(|s| {
+                s.dirty.insert(path.to_owned());
+            });
+        } else {
+            mark_gone(cx, path, delta);
+        }
         return Ok(());
     };
     cx.with_mut(|s| {
@@ -436,4 +448,19 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
     }
     detect_renames(cx, &delta);
     cx.save().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_tag;
+
+    #[test]
+    fn temp_tags() {
+        assert_eq!(strip_tag("a.md.nfc", ".nfc"), Some("a.md"));
+        assert_eq!(strip_tag("a.md.nfc-3", ".nfc"), Some("a.md"));
+        assert_eq!(strip_tag("a.md.case-12", ".case"), Some("a.md"));
+        assert_eq!(strip_tag("a.md.nfc-", ".nfc"), None);
+        assert_eq!(strip_tag("a.md.nfc-x", ".nfc"), None);
+        assert_eq!(strip_tag("a-2.md", ".nfc"), None);
+    }
 }

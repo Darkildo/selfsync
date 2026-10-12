@@ -740,6 +740,38 @@ impl Ctx {
         r
     }
 
+    /// Свободное временное имя `{base}.{tag}.selfsync-tmp` для двухшагового
+    /// переименования. Занято (в том числе файлом, отличающимся только регистром) —
+    /// `{base}.{tag}-N.selfsync-tmp`.
+    pub async fn free_temp(&self, base: &str, tag: &str) -> SyncResult<String> {
+        let mut name = format!("{base}.{tag}{TEMP_SUFFIX}");
+        for n in 2..100 {
+            if self.stat(&name).await?.is_none() {
+                break;
+            }
+            name = format!("{base}.{tag}-{n}{TEMP_SUFFIX}");
+        }
+        Ok(name)
+    }
+
+    /// Двухшаговое переименование через временное имя (смена регистра или
+    /// нормализации — для ФС это «то же самое» имя). `false` — не удалось, файл
+    /// остался под старым именем (или временным, если откат тоже не удался —
+    /// его доведёт `recover_temp`).
+    pub async fn rename_via_temp(&self, from: &str, to: &str, tag: &str) -> SyncResult<bool> {
+        let tmp = self.free_temp(to, tag).await?;
+        if self.rename(from, &tmp).await?.is_none() {
+            return Ok(false);
+        }
+        match self.rename(&tmp, to).await {
+            Ok(Some(_)) => Ok(true),
+            r => {
+                let _ = self.rename(&tmp, from).await;
+                r.map(|_| false)
+            }
+        }
+    }
+
     async fn rename_inner(&self, from: &str, to: &str) -> SyncResult<Option<FileMeta>> {
         let (f, t) = (from.to_owned(), to.to_owned());
         match self
