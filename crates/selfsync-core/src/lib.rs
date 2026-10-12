@@ -14,6 +14,7 @@ pub mod hash;
 pub mod index;
 pub mod merge;
 pub mod path;
+pub mod version;
 
 pub use selfsync_proto as proto;
 pub use selfsync_proto::v1 as pb;

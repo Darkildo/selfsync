@@ -142,7 +142,7 @@ In TOML the limits go into a `[rate]` section with the same names in lower case 
 selfsync token add --vault notes --name laptop   # device token (the vault is created on first use)
 selfsync link --vault notes --name phone         # one-time link + QR code in the terminal
 selfsync token add --vault notes --name nas --read-only   # receives changes, cannot send any
-selfsync token list | revoke --name phone
+selfsync token list | revoke --name phone      # list shows each device's client (plugin/0.3.0)
 selfsync vault list
 selfsync import --vault notes --from ~/Notes     # upload an existing folder
 selfsync backup /backups/selfsync-$(date +%F)    # consistent copy while running
@@ -270,7 +270,7 @@ The hook gets `SELFSYNC_DIR`, `SELFSYNC_PULLED` (paths changed here by the sync)
 
 ## Encryption
 
-Turn on encryption from the plugin settings or with `selfsync-cli encrypt` on a vault that is already in use. Existing files are re-uploaded encrypted, then the plaintext copies on the server are erased. The server sees only ciphertext of contents and names, sizes and modification times. When encryption is turned on, the plugin also shows a **recovery phrase** of 24 words, once: write it down and keep it apart from the password. If the password is forgotten, "Forgot the password?" in the password window (or `selfsync-cli recover --phrase-file F --new-password-file P`) opens the vault with the phrase and sets a new password; the phrase stays valid. Devices that remember the key keep working, the others ask for the new password. The phrase can be replaced or removed in the plugin settings or with `selfsync-cli recovery create|remove`; `selfsync-cli encrypt --recovery` creates one when turning encryption on. A vault with a recovery phrase can be opened only by plugin and CLI 0.2.0 or newer: update every device first. Without the phrase the password cannot be recovered: the server copy is unreadable (local files on your devices stay). The threat model and what encryption does not hide are in [SECURITY.md](SECURITY.md) (in Russian).
+Turn on encryption from the plugin settings or with `selfsync-cli encrypt` on a vault that is already in use. Existing files are re-uploaded encrypted, then the plaintext copies on the server are erased. The server sees only ciphertext of contents and names, sizes and modification times. When encryption is turned on, the plugin also shows a **recovery phrase** of 24 words, once: write it down and keep it apart from the password. If the password is forgotten, "Forgot the password?" in the password window (or `selfsync-cli recover --phrase-file F --new-password-file P`) opens the vault with the phrase and sets a new password; the phrase stays valid. Devices that remember the key keep working, the others ask for the new password. The phrase can be replaced or removed in the plugin settings or with `selfsync-cli recovery create|remove`; `selfsync-cli encrypt --recovery` creates one when turning encryption on. A vault with a recovery phrase can be opened only by plugin and CLI 0.2.1 or newer: update every device first. The device list in the plugin settings shows which version each device runs, and before creating a phrase the plugin and CLI name the devices that are older (or whose version is unknown because they run something older than 0.3.0). Without the phrase the password cannot be recovered: the server copy is unreadable (local files on your devices stay). The threat model and what encryption does not hide are in [SECURITY.md](SECURITY.md) (in Russian).
 
 ## Development
 

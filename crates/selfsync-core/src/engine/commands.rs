@@ -195,6 +195,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                         last_seen: x.last_seen,
                         revoked: x.revoked,
                         read_only: x.read_only,
+                        client: x.client,
                     })
                     .collect(),
             })

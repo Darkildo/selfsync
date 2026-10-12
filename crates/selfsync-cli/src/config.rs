@@ -8,6 +8,9 @@ use selfsync_core::engine::EngineConfig;
 use selfsync_core::path::NameRules;
 use serde::{Deserialize, Serialize};
 
+/// Заголовок `x-selfsync-client`: сервер показывает его в списке устройств.
+pub const CLIENT: &str = concat!("cli/", env!("CARGO_PKG_VERSION"));
+
 /// Служебный каталог внутри папки (исключается из синка всегда).
 pub const STATE_DIR: &str = ".selfsync";
 /// Локальная корзина — как у Obsidian, чтобы папка оставалась vault'ом.
@@ -80,6 +83,7 @@ impl Config {
     pub fn engine(&self) -> EngineConfig {
         EngineConfig {
             device_name: self.device_name.clone(),
+            client: CLIENT.to_owned(),
             excludes: self.excludes.clone(),
             hard_excludes: vec![format!("{STATE_DIR}/"), format!("{TRASH_DIR}/")],
             // Настройки Obsidian — JSON: при расхождении побеждает поздняя версия.

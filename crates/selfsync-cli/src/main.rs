@@ -149,6 +149,9 @@ enum Cmd {
     },
 }
 
+/// Первая выпущенная версия, которая открывает запись ключа формата 2 (с фразой).
+const RECOVERY_MIN: &str = "0.2.1";
+
 fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -457,6 +460,9 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             };
             // Пароль нужен и синку перед командой, если ключ ещё не запомнен.
             let cfg = Config::load(&dir)?;
+            if create {
+                warn_old_devices(&dir, &cfg, RECOVERY_MIN, "запись ключа с фразой").await;
+            }
             let (o, r) =
                 runner::with_vault(&dir, &cfg, Some(password), true, VaultCommand::Ui(cmd)).await?;
             return match r {
@@ -526,6 +532,9 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             let cfg = Config::load(&dir)?;
             let password = read_password(password_file)?
                 .context("нужен пароль: --password-file или SELFSYNC_PASSWORD")?;
+            if recovery {
+                warn_old_devices(&dir, &cfg, RECOVERY_MIN, "запись ключа с фразой").await;
+            }
             let opts = Options {
                 once: true,
                 watch: false,
@@ -753,6 +762,35 @@ async fn vault_command(
             Ok(outcome(o))
         }
         None => Ok(outcome(o)),
+    }
+}
+
+/// Предупредить об устройствах, которые старее `min` (или версия которых
+/// неизвестна): они не поймут то, что сейчас будет сделано. Без сети — молча.
+async fn warn_old_devices(dir: &std::path::Path, cfg: &Config, min: &str, what: &str) {
+    let Ok(UiResult::Devices { devices, .. }) =
+        runner::folder_command(dir, cfg, UiCommand::Devices).await
+    else {
+        return;
+    };
+    let old: Vec<String> = devices
+        .iter()
+        .filter(|d| !d.revoked && !d.current)
+        .filter(|d| selfsync_core::version::older_than(&d.client, min))
+        .map(|d| {
+            if d.client.is_empty() {
+                format!("«{}» (версия неизвестна)", d.name)
+            } else {
+                format!("«{}» ({})", d.name, d.client)
+            }
+        })
+        .collect();
+    if !old.is_empty() {
+        eprintln!(
+            "внимание: {what} не поймут устройства старее {min}: {}. Обновите на них \
+             плагин или selfsync-cli.",
+            old.join(", ")
+        );
     }
 }
 

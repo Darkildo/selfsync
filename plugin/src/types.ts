@@ -3,6 +3,8 @@
 
 export interface EngineConfig {
   deviceName?: string;
+  /** `plugin/<версия>`: сервер показывает в списке устройств. */
+  client?: string;
   excludes?: string[];
   hardExcludes?: string[];
   /** Не сливать построчно: при расхождении побеждает более поздняя версия. */
@@ -123,6 +125,8 @@ export interface DeviceView {
   revoked: boolean;
   current: boolean;
   readOnly: boolean;
+  /** Клиент устройства (`plugin/0.3.0`); пусто — неизвестен (старее 0.3.0). */
+  client?: string;
 }
 
 export type UiResult =

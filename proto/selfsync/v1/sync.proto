@@ -249,6 +249,9 @@ message Device {
   int64 last_seen = 4;
   bool revoked = 5;
   bool read_only = 6;        // устройство только для чтения
+  // Последний клиент устройства из заголовка x-selfsync-client (`plugin/0.3.0`).
+  // Пусто — неизвестен: клиент старше 0.3.0 или не выходил на связь.
+  string client = 7;
 }
 
 message DevicesResponse {

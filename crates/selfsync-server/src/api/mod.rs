@@ -20,7 +20,8 @@ use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use prost::Message;
 use selfsync_proto::{
-    CONTENT_TYPE_PROTOBUF, HEADER_PROTO, MINOR_READ_ONLY, PROTO_VERSION, parse_proto, proto_header,
+    CONTENT_TYPE_PROTOBUF, HEADER_CLIENT, HEADER_PROTO, MINOR_READ_ONLY, PROTO_VERSION,
+    parse_proto, proto_header,
 };
 
 use crate::error::{ApiError, ApiResult};
@@ -144,14 +145,27 @@ async fn auth(State(st): State<AppState>, mut req: Request, next: Next) -> Respo
     };
     let ip = throttle::client_ip(&st.config, req.headers(), req.extensions());
     let keys = throttle::auth_keys(&st.config.rate, ip);
+    let client = req
+        .headers()
+        .get(HEADER_CLIENT)
+        .and_then(|v| v.to_str().ok())
+        .map(crate::db::server::client_label)
+        .filter(|s| !s.is_empty());
     let found = st
         .server_db(move |c| {
             if let Some(secs) = throttle::check_now(c, &keys)? {
                 return Err(ApiError::too_many(secs));
             }
             let dev = crate::db::server::authenticate(c, &token)?;
-            if dev.is_none() {
-                throttle::fail_now(c, &keys)?;
+            match &dev {
+                None => throttle::fail_now(c, &keys)?,
+                Some(d) => {
+                    if let Some(cl) = client.as_deref()
+                        && cl != d.client
+                    {
+                        crate::db::server::set_client(c, d.id, cl)?;
+                    }
+                }
             }
             Ok(dev)
         })

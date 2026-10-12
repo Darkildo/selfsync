@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use selfsync_proto::v1 as pb;
-use selfsync_proto::{HEADER_PROTO, PROTO_VERSION, parse_proto};
+use selfsync_proto::{HEADER_CLIENT, HEADER_PROTO, PROTO_VERSION, parse_proto};
 
 use super::runtime::Hub;
 use super::types::*;
@@ -417,8 +417,12 @@ impl Ctx {
 
     pub async fn http(
         &self,
-        req: HttpRequest,
+        mut req: HttpRequest,
     ) -> SyncResult<(u16, Vec<(String, String)>, Vec<u8>)> {
+        let client = self.with(|s| s.cfg.client.clone());
+        if !client.is_empty() {
+            req.headers.push((HEADER_CLIENT.to_owned(), client));
+        }
         match self.hub.submit(|id| Action::Http { id, req }).await {
             IoResult::Http {
                 status,

@@ -119,12 +119,17 @@ pub fn token_list(config: &Config, vault_name: Option<&str>) -> anyhow::Result<(
     }
     for d in rows {
         println!(
-            "#{}\t{}\t{}\tсоздано {}\tбыл {}\t{}\t{}",
+            "#{}\t{}\t{}\tсоздано {}\tбыл {}\t{}\t{}\t{}",
             d.id,
             d.vault,
             d.name,
             fmt_time(d.created_at),
             fmt_time(d.last_seen),
+            if d.client.is_empty() {
+                "клиент неизвестен"
+            } else {
+                &d.client
+            },
             if d.read_only {
                 "чтение"
             } else {

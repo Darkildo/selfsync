@@ -63,7 +63,7 @@ async function loadPlugin(vault: string, token: string, extra: Record<string, un
   const app = obsidian.stubApp(vault, { server: server.url, token, deviceName: "stub", ...extra });
   const require = Module.createRequire(import.meta.url);
   const Plugin = (require(join(PLUGIN, "main.js")) as { default: new (a: unknown, m: unknown) => LoadedPlugin }).default;
-  const plugin = new Plugin(app, { id: "selfsync", dir: ".obsidian/plugins/selfsync" });
+  const plugin = new Plugin(app, { id: "selfsync", dir: ".obsidian/plugins/selfsync", version: "9.9.9" });
   await plugin.onload();
   for (let i = 0; i < 100 && !plugin.runner; i++) await new Promise((r) => setTimeout(r, 10));
   assert.ok(plugin.runner, "движок запущен");
@@ -129,6 +129,8 @@ test("main.js: устройство только для чтения — ста�
   for (const b of ["Включить шифрование", "Создать ссылку", "Отозвать"]) assert.ok(buttons(rwRows).includes(b), `${b}: ${buttons(rwRows)}`);
   assert.ok(rwRows.some((r) => r.name === "Только чтение" && r.toggles === 1), "переключатель для ссылки");
   assert.ok(rwRows.some((r) => r.desc.includes("только чтение")), "пометка в списке устройств");
+  // версия клиента — у тех, кто уже выходил на связь
+  assert.ok(rwRows.some((r) => r.name.startsWith("mirror") && r.desc.includes("plugin/9.9.9")), "версия клиента в списке");
   const roRows = await renderSettings(ro);
   for (const b of ["Включить шифрование", "Создать ссылку", "Отозвать"]) assert.ok(!buttons(roRows).includes(b), `${b}: ${buttons(roRows)}`);
   assert.ok(roRows.some((r) => r.desc.includes("подключено только для чтения")), "пояснение");

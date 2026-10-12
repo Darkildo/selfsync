@@ -536,6 +536,7 @@ pub async fn command(
     let (tx, mut rx) = mpsc::unbounded_channel();
     let cfg = EngineConfig {
         device_name: device.to_owned(),
+        client: crate::config::CLIENT.to_owned(),
         ..EngineConfig::default()
     };
     let mut lp = Loop::new(cfg, None, exec, tx);

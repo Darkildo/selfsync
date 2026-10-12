@@ -2,7 +2,7 @@
 
 import { type App, Notice, PluginSettingTab, requireApiVersion, Setting, type SettingDefinitionItem } from "obsidian";
 
-import { readOnlyMinor } from "../pkg/selfsync_wasm.js";
+import { clientOlderThan, readOnlyMinor } from "../pkg/selfsync_wasm.js";
 import { buildRules, type ConfigSync, DEFAULT_CONFIG_SYNC, type Preset, PRESETS } from "./configsync.ts";
 import { t } from "./i18n.ts";
 import type SelfsyncPlugin from "./main.ts";
@@ -42,6 +42,9 @@ export const DEFAULT_SETTINGS: Settings = {
   pollActiveSec: 15,
   pollIdleMaxMin: 5,
 };
+
+/** Первая выпущенная версия, которая открывает запись ключа с фразой (формат 2). */
+const RECOVERY_MIN = "0.2.1";
 
 /** Текст ошибки команды: известные коды — локализованно. */
 function errorText(r: { code: string; message: string }): string {
@@ -318,7 +321,8 @@ export class SelfsyncSettingTab extends PluginSettingTab {
             b
               .setButtonText(t("encryption.enable"))
               .setWarning()
-              .onClick(() =>
+              .onClick(async () => {
+                if (!(await this.confirmOldDevices(RECOVERY_MIN))) return;
                 new PasswordModal(
                   this.app,
                   { title: t("encryption.enable"), desc: t("encryption.enableDesc"), submit: t("encryption.enable"), showStrength: true },
@@ -327,8 +331,8 @@ export class SelfsyncSettingTab extends PluginSettingTab {
                     runner.send({ type: "enableEncryption", password: r.password, remember: r.remember, recovery: true });
                     runner.send({ type: "syncNow" });
                   },
-                ).open(),
-              ),
+                ).open();
+              }),
           );
         } else {
           row.addButton((b) =>
@@ -359,14 +363,16 @@ export class SelfsyncSettingTab extends PluginSettingTab {
           b
             .setButtonText(has ? t("recovery.createNew") : t("recovery.create"))
             .setCta()
-            .onClick(() =>
+            .onClick(async () => {
+              // Новая фраза старым устройствам не мешает: формат записи тот же.
+              if (!has && !(await this.confirmOldDevices(RECOVERY_MIN))) return;
               ask(t("recovery.createDesc"), has ? t("recovery.createNew") : t("recovery.create"), async (password) => {
                 const r = await runner.command({ type: "createRecovery", password });
                 if (r.type === "recoveryPhrase") new PhraseModal(this.app, r.words).open();
                 else new Notice(r.type === "error" ? errorText(r) : r.type);
                 this.refresh();
-              }),
-            ),
+              });
+            }),
         );
         if (has) {
           row.addButton((b) =>
@@ -491,6 +497,23 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     };
   }
 
+  /** Устройства старее `min` (или с неизвестной версией) — для предупреждения. Без
+   *  сети список пуст: не мешать действию из-за того, что проверить не удалось. */
+  private async oldDevices(min: string): Promise<string[]> {
+    const r = await this.plugin.runner?.command({ type: "devices" });
+    if (r?.type !== "devices") return [];
+    return r.devices
+      .filter((d) => !d.revoked && !d.current && clientOlderThan(d.client ?? "", min))
+      .map((d) => `${d.name} (${d.client || t("devices.clientUnknown")})`);
+  }
+
+  /** Есть старые устройства — спросить; `true` — продолжать. */
+  private async confirmOldDevices(min: string): Promise<boolean> {
+    const old = await this.oldDevices(min);
+    if (old.length === 0) return true;
+    return confirm(this.app, t("devices.oldWarning", { min, names: old.join(", ") }), t("common.continue"));
+  }
+
   private deviceRow(list: HTMLElement, d: DeviceView): void {
     const runner = this.plugin.runner;
     if (!runner) return;
@@ -498,7 +521,11 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     const row = new Setting(list)
       .setName(d.current ? `${d.name} (${t("devices.current")})` : d.name)
       .setDesc(
-        [d.revoked ? t("devices.revoked") : t("devices.lastSeen", { when: seen }), d.readOnly ? t("devices.readOnly") : ""]
+        [
+          d.revoked ? t("devices.revoked") : t("devices.lastSeen", { when: seen }),
+          d.readOnly ? t("devices.readOnly") : "",
+          d.client ? d.client : t("devices.clientUnknown"),
+        ]
           .filter((x) => x)
           .join(" · "),
       );

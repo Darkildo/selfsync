@@ -21,6 +21,11 @@ pub const MINOR_READ_ONLY: u32 = 1;
 /// сервера. Значение — `мажорная.минорная` или только `мажорная` (минорная 0).
 pub const HEADER_PROTO: &str = "x-selfsync-proto";
 
+/// Заголовок клиента в запросах: `<вид>/<версия>` (`plugin/0.3.0`, `cli/0.3.0`).
+/// Сервер запоминает его у устройства — показать админу и другим устройствам, кто
+/// чем подключён. Не влияет на поведение сервера (для этого — [`HEADER_PROTO`]).
+pub const HEADER_CLIENT: &str = "x-selfsync-client";
+
 /// Значение [`HEADER_PROTO`] этой сборки.
 pub fn proto_header() -> String {
     format!("{PROTO_VERSION}.{PROTO_MINOR}")

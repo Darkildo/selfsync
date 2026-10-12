@@ -319,6 +319,7 @@ impl World {
         let rules = self.cfg.name_rules.get(i).copied().unwrap_or_default();
         let mut cfg = EngineConfig {
             device_name: name.clone(),
+            client: "sim/1.0.0".into(),
             excludes: vec![".trash/".into()],
             case_insensitive: ci,
             name_rules: rules,

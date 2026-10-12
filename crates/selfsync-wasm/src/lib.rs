@@ -97,6 +97,12 @@ pub fn read_only_minor() -> u32 {
     selfsync_core::proto::MINOR_READ_ONLY
 }
 
+/// Клиент устройства (`plugin/0.3.0`) старее `min`; пустой или неразборчивый — тоже.
+#[wasm_bindgen(js_name = clientOlderThan)]
+pub fn client_older_than(client: &str, min: &str) -> bool {
+    selfsync_core::version::older_than(client, min)
+}
+
 /// QR-код строки (ссылки подключения): `[ширина, модули…]`, модуль 1 — тёмный.
 /// Рисует интерфейс: так в WASM не попадает рендерер SVG/картинок.
 #[wasm_bindgen(js_name = qrModules)]

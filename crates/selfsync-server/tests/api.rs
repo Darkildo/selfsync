@@ -1352,3 +1352,48 @@ async fn proto_minor_both_directions() {
     // новый клиент с тем же токеном читает
     assert_eq!(s.get("/v1/changes", &ro).await.status, StatusCode::OK);
 }
+
+/// Заголовок клиента запоминается у устройства и виден в списке; мусор обрезается.
+#[tokio::test]
+async fn device_remembers_client() {
+    let s = TestServer::new();
+    let laptop = s.token("notes", "laptop");
+    let phone = s.token("notes", "phone");
+    async fn list(s: &TestServer, t: String) -> Vec<(String, String)> {
+        let r: pb::DevicesResponse = s.get("/v1/devices", &t).await.proto();
+        r.devices.into_iter().map(|d| (d.name, d.client)).collect()
+    }
+    // без заголовка — неизвестен
+    assert_eq!(
+        list(&s, laptop.clone()).await,
+        [
+            ("laptop".into(), String::new()),
+            ("phone".into(), String::new())
+        ]
+    );
+    let with_client = |t: &str, c: &str| {
+        http::Request::get("/v1/changes")
+            .header("x-selfsync-proto", selfsync_proto::proto_header())
+            .header("authorization", format!("Bearer {t}"))
+            .header("x-selfsync-client", c)
+            .body(axum::body::Body::empty())
+            .unwrap()
+    };
+    assert_eq!(
+        s.send(with_client(&laptop, "plugin/0.3.0")).await.status,
+        StatusCode::OK
+    );
+    // табуляция допустима в заголовке, но не в имени клиента; длина — до 64
+    let junk = format!("cli/0.3.0\t{}", "x".repeat(100));
+    assert_eq!(
+        s.send(with_client(&phone, &junk)).await.status,
+        StatusCode::OK
+    );
+    let got = list(&s, laptop.clone()).await;
+    assert_eq!(got[0], ("laptop".into(), "plugin/0.3.0".into()));
+    assert_eq!(got[1].1.len(), 64);
+    assert!(got[1].1.starts_with("cli/0.3.0xxx"), "{:?}", got[1]);
+    // новая версия того же устройства заменяет прежнюю
+    s.send(with_client(&laptop, "plugin/0.3.1")).await;
+    assert_eq!(list(&s, phone).await[0].1, "plugin/0.3.1");
+}

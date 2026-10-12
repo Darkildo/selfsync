@@ -50,7 +50,32 @@ CREATE TABLE throttle (
 ALTER TABLE devices ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE join_codes ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0;
 ",
+    "
+ALTER TABLE devices ADD COLUMN client TEXT NOT NULL DEFAULT '';
+",
 ];
+
+/// Длина строки клиента в БД.
+const CLIENT_MAX: usize = 64;
+
+/// Заголовок `x-selfsync-client` для хранения: только печатный ASCII, не длиннее
+/// [`CLIENT_MAX`]. Данные не доверенные — только для показа админу и устройствам.
+pub fn client_label(raw: &str) -> String {
+    raw.trim()
+        .chars()
+        .filter(|c| c.is_ascii_graphic() || *c == ' ')
+        .take(CLIENT_MAX)
+        .collect()
+}
+
+/// Запомнить, каким клиентом подключено устройство.
+pub fn set_client(c: &Connection, id: u32, client: &str) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE devices SET client = ?1 WHERE id = ?2",
+        params![client, id],
+    )?;
+    Ok(())
+}
 
 pub fn migrate_server(c: &mut Connection) -> rusqlite::Result<()> {
     migrate(c, MIGRATIONS)
@@ -64,6 +89,8 @@ pub struct DeviceAuth {
     pub name: String,
     /// Только GET и HEAD.
     pub read_only: bool,
+    /// Последний известный клиент (`plugin/0.3.0`); пусто — неизвестен.
+    pub client: String,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +102,7 @@ pub struct DeviceRow {
     pub last_seen: i64,
     pub revoked: bool,
     pub read_only: bool,
+    pub client: String,
 }
 
 /// Новый токен: 32 случайных байта в base64url с префиксом `ns_`.
@@ -146,9 +174,9 @@ pub fn authenticate(c: &Connection, token: &str) -> rusqlite::Result<Option<Devi
     }
     let h = hash_secret(token);
     #[allow(clippy::type_complexity)]
-    let row: Option<(i64, String, String, Vec<u8>, i64, bool)> = c
+    let row: Option<(i64, String, String, Vec<u8>, i64, bool, String)> = c
         .query_row(
-            "SELECT id, vault, name, token_hash, last_seen, read_only FROM devices
+            "SELECT id, vault, name, token_hash, last_seen, read_only, client FROM devices
              WHERE token_hash = ?1 AND revoked_at IS NULL",
             params![h],
             |r| {
@@ -159,11 +187,12 @@ pub fn authenticate(c: &Connection, token: &str) -> rusqlite::Result<Option<Devi
                     r.get(3)?,
                     r.get(4)?,
                     r.get(5)?,
+                    r.get(6)?,
                 ))
             },
         )
         .optional()?;
-    let Some((id, vault, name, stored, last_seen, read_only)) = row else {
+    let Some((id, vault, name, stored, last_seen, read_only, client)) = row else {
         return Ok(None);
     };
     // Поиск по хэшу сам по себе не раскрывает токен, но сравнение — константное.
@@ -182,6 +211,7 @@ pub fn authenticate(c: &Connection, token: &str) -> rusqlite::Result<Option<Devi
         vault,
         name,
         read_only,
+        client,
     }))
 }
 
@@ -196,6 +226,7 @@ fn row_to_device(r: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceRow> {
         last_seen: r.get(4)?,
         revoked: revoked.is_some(),
         read_only: r.get(6)?,
+        client: r.get(7)?,
     })
 }
 
@@ -204,7 +235,7 @@ pub fn list_devices(c: &Connection, vault: Option<&str>) -> rusqlite::Result<Vec
     match vault {
         Some(v) => {
             let mut st = c.prepare(
-                "SELECT id, vault, name, created_at, last_seen, revoked_at, read_only FROM devices
+                "SELECT id, vault, name, created_at, last_seen, revoked_at, read_only, client FROM devices
                  WHERE vault = ?1 ORDER BY id",
             )?;
             for d in st.query_map(params![v], row_to_device)? {
@@ -213,7 +244,7 @@ pub fn list_devices(c: &Connection, vault: Option<&str>) -> rusqlite::Result<Vec
         }
         None => {
             let mut st = c.prepare(
-                "SELECT id, vault, name, created_at, last_seen, revoked_at, read_only FROM devices
+                "SELECT id, vault, name, created_at, last_seen, revoked_at, read_only, client FROM devices
                  ORDER BY vault, id",
             )?;
             for d in st.query_map([], row_to_device)? {

@@ -121,6 +121,7 @@ export default class SelfsyncPlugin extends Plugin {
   engineConfig(): EngineConfig {
     return {
       deviceName: this.settings.deviceName,
+      client: `plugin/${this.manifest.version}`,
       // Каталог настроек Obsidian (не обязательно `.obsidian`) — по пресетам.
       excludes: buildRules(this.app.vault.configDir, this.settings.configSync, this.settings.excludes),
       // Каталог плагина (индекс, кэш, токен) и локальная корзина Obsidian — никогда.

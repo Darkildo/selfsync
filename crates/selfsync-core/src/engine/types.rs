@@ -14,6 +14,9 @@ use crate::path::NameRules;
 pub struct EngineConfig {
     /// Имя устройства — для имён конфликтных копий.
     pub device_name: String,
+    /// Кто это (`plugin/0.3.0`, `cli/0.3.0`): заголовок `x-selfsync-client`, сервер
+    /// показывает его в списке устройств. Пусто — не отправлять.
+    pub client: String,
     /// Пользовательские исключения (см. [`crate::exclude`]).
     pub excludes: Vec<String>,
     /// Исключения, которые пользователь не может снять (каталог плагина).
@@ -55,6 +58,7 @@ impl Default for EngineConfig {
     fn default() -> Self {
         EngineConfig {
             device_name: "device".to_owned(),
+            client: String::new(),
             excludes: Vec::new(),
             hard_excludes: Vec::new(),
             no_merge: Vec::new(),
@@ -663,6 +667,8 @@ pub struct DeviceView {
     pub revoked: bool,
     pub current: bool,
     pub read_only: bool,
+    /// Клиент устройства (`plugin/0.3.0`); пусто — неизвестен (старее 0.3.0).
+    pub client: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

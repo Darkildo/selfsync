@@ -31,6 +31,7 @@ pub async fn list(
                 last_seen: d.last_seen,
                 revoked: d.revoked,
                 read_only: d.read_only,
+                client: d.client,
             })
             .collect(),
         self_id: a.device_id,

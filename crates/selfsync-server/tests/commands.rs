@@ -249,6 +249,7 @@ fn token_cli_roundtrip() {
         .unwrap();
     let l = String::from_utf8(list.stdout).unwrap();
     assert!(l.contains("laptop"));
+    assert!(l.contains("клиент неизвестен"), "{l}");
     assert!(!l.contains(token), "токен не показывается повторно");
     let rv = Command::new(bin)
         .args(["token", "revoke", "--name", "laptop", "--data"])
