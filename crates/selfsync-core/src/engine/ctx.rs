@@ -132,6 +132,8 @@ pub(crate) struct State {
     /// исключёнными, и увёл курсор за них) и в конце записал бы свой курсор поверх
     /// запрошенного повтора.
     pub rules_changed: bool,
+    /// Пропущенные файлы, которые попросили скачать (в начале ближайшего цикла).
+    pub download_queue: BTreeSet<String>,
 }
 
 impl State {
@@ -178,6 +180,7 @@ impl State {
             hold_seq: None,
             stale_temps: Vec::new(),
             rules_changed: false,
+            download_queue: BTreeSet::new(),
         };
         // Правила могли смениться между запусками (CLI правят конфиг при
         // остановленной службе): событие Configure тогда не придёт.
@@ -197,12 +200,38 @@ impl State {
             .as_ref()
             .is_some_and(|old| rules_narrowed(old, &lines));
         self.forget_excluded();
-        let replay = narrowed && self.index.initial_done && self.index.last_seq > 0;
+        // Снова включённое — уже не «можно удалить»: оно синхронизируется.
+        let ex = &self.excludes;
+        self.index.offloadable.retain(|k, _| ex.is_excluded(k));
+        let mut replay = narrowed && self.index.initial_done && self.index.last_seq > 0;
+        // Лимит скачивания подняли или сняли: пропущенное может стать нужным.
+        let (old, new) = (self.index.max_download, self.cfg.max_download_size);
+        if old > 0 && (new == 0 || new > old) && !self.index.skipped.is_empty() {
+            replay |= self.index.last_seq > 0;
+            self.index.skipped.clear();
+        }
+        self.index.max_download = new;
         if replay {
             self.index.last_seq = 0;
         }
         self.index.excludes = Some(lines);
         replay
+    }
+
+    /// Запись не скачивается из-за лимита: её здесь нет (ни файла, ни записи в
+    /// индексе, в том числе по старому пути переименования), это файл, и он больше
+    /// лимита. Всё, что уже есть локально, синхронизируется как обычно.
+    pub fn over_download_limit(&self, key: &str, e: &pb::Entry) -> bool {
+        let limit = self.index.max_download;
+        limit > 0
+            && !e.folder
+            && !e.deleted
+            && e.size > limit
+            && !self.index.files.contains_key(key)
+            && e.renamed_from
+                .as_ref()
+                .and_then(|p| self.decode_path(p))
+                .is_none_or(|from| !self.index.files.contains_key(from.as_str()))
     }
 
     /// Убрать из индекса исключённые пути: ни удаления на сервер, ни отмены там —
@@ -216,10 +245,18 @@ impl State {
             .cloned()
             .collect();
         for k in &gone {
-            if let Some(f) = self.index.files.remove(k)
-                && let Some(crate::index::Transfer::Download { temp, .. }) = f.transfer
-            {
-                self.stale_temps.push(temp);
+            if let Some(f) = self.index.files.remove(k) {
+                // Совпадает с сервером — локальную копию можно удалить без потерь.
+                if !f.folder
+                    && f.base_rev > 0
+                    && f.clean()
+                    && let Some(l) = f.local
+                {
+                    self.index.offloadable.insert(k.clone(), l);
+                }
+                if let Some(crate::index::Transfer::Download { temp, .. }) = f.transfer {
+                    self.stale_temps.push(temp);
+                }
             }
             self.dirty.remove(k);
         }
@@ -631,6 +668,24 @@ impl Ctx {
         match self.hub.submit(|id| Action::DeleteTemp { id, temp }).await {
             IoResult::Done | IoResult::NotFound => Ok(()),
             other => Err(io_err("delete_temp", other)),
+        }
+    }
+
+    /// Удалить насовсем. `Ok(false)` — файл изменился (условие не выполнено).
+    pub async fn delete(&self, path: &str, expect: Expect) -> SyncResult<bool> {
+        let key = path.to_owned();
+        match self
+            .hub
+            .submit(|id| Action::Delete {
+                id,
+                path: key,
+                expect,
+            })
+            .await
+        {
+            IoResult::Done | IoResult::NotFound => Ok(true),
+            IoResult::Precondition => Ok(false),
+            other => Err(io_err("delete", other)),
         }
     }
 

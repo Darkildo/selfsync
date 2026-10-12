@@ -318,6 +318,23 @@ impl FakeFs {
         self.stat(p)
     }
 
+    /// Удалить насовсем (освобождение места под исключённым путём).
+    pub fn delete(&mut self, p: &str, expect: &Expect) -> IoResult {
+        if self.get(p).is_none() {
+            return IoResult::NotFound;
+        }
+        if !self.check(p, expect) {
+            return IoResult::Precondition;
+        }
+        match self.get(p) {
+            Some(Node::File { .. }) => {
+                self.nodes.remove(&self.key(p));
+                IoResult::Done
+            }
+            _ => IoResult::Precondition,
+        }
+    }
+
     pub fn trash(&mut self, p: &str, expect: &Expect) -> IoResult {
         if self.get(p).is_none() {
             return IoResult::NotFound;

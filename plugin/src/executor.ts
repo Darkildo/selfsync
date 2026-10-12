@@ -82,6 +82,13 @@ export class Executor {
         await this.fs.trash(cur.path);
         return { type: "done" };
       }
+      case "delete": {
+        const cur = await this.fs.stat(a.path);
+        if (!cur) return { type: "notFound" };
+        if (cur.dir || !matches(cur, a.expect)) return { type: "precondition" };
+        await this.fs.remove(cur.path);
+        return { type: "done" };
+      }
       case "rename": {
         const src = await this.fs.stat(a.from);
         if (!src) return { type: "notFound" };

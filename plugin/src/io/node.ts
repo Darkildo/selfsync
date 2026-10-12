@@ -105,6 +105,10 @@ export class NodeBackend implements FileBackend {
     }
   }
 
+  async remove(path: string): Promise<void> {
+    await this.fsp.unlink(this.abs(path));
+  }
+
   async trash(path: string): Promise<void> {
     if (this.opts.trash) return this.opts.trash(path);
     const dir = this.stored("trash");

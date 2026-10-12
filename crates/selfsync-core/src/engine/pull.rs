@@ -8,6 +8,7 @@
 
 use std::collections::BTreeSet;
 
+use prost::Message;
 use selfsync_proto::v1 as pb;
 
 use super::api;
@@ -19,7 +20,7 @@ use super::resolve::{
 use super::transfer::{download_to, read_local};
 use super::types::{Expect, LogLevel, Notice};
 use crate::hash::Hash;
-use crate::index::{FileState, LocalObs};
+use crate::index::{FileState, LocalObs, SkippedFile};
 use crate::path::VaultPath;
 
 const PAGE: u32 = 1000;
@@ -140,6 +141,47 @@ async fn full_reconcile(cx: &Ctx) -> SyncResult<()> {
     cx.save().await
 }
 
+/// Пропущенные из-за лимита файлы, которые попросили скачать (`UiCommand::Download`).
+/// Скачанный файл попадает в индекс и дальше синхронизируется как обычно; не
+/// скачавшийся остаётся в списке пропущенных — можно попросить снова.
+pub(crate) async fn download_requested(cx: &Ctx) -> SyncResult<bool> {
+    let queue = cx.with_mut(|s| std::mem::take(&mut s.download_queue));
+    let mut changed = false;
+    for key in queue {
+        let Some(sk) = cx.with(|s| s.index.skipped.get(&key).cloned()) else {
+            continue;
+        };
+        let Ok(e) = pb::Entry::decode(&sk.entry[..]) else {
+            cx.with_mut(|s| s.index.skipped.remove(&key));
+            continue;
+        };
+        let Some(it) = decode(cx, vec![e]).pop() else {
+            continue;
+        };
+        changed |= guard(cx, &it, apply_file(cx, &it).await)?;
+        cx.with_mut(|s| {
+            match s.index.files.get(&key) {
+                Some(f) if f.local.is_some() => {
+                    s.index.skipped.remove(&key);
+                }
+                // Не скачалось: убрать недоделанную запись, файл остаётся пропущенным.
+                Some(_) => {
+                    if let Some(FileState {
+                        transfer: Some(crate::index::Transfer::Download { temp, .. }),
+                        ..
+                    }) = s.index.files.remove(&key)
+                    {
+                        s.stale_temps.push(temp);
+                    }
+                }
+                None => {}
+            }
+        });
+        cx.save().await?;
+    }
+    Ok(changed)
+}
+
 fn decode(cx: &Ctx, entries: Vec<pb::Entry>) -> Vec<Item> {
     let mut out: Vec<Item> = Vec::with_capacity(entries.len());
     let mut seen: BTreeSet<String> = BTreeSet::new();
@@ -178,7 +220,36 @@ async fn apply_batch(cx: &Ctx, entries: Vec<pb::Entry>, full_listing: bool) -> S
     let mut renames = Vec::new();
     let mut tombs = Vec::new();
     let mut files = Vec::new();
+    let mut new_skipped = 0u32;
     for it in items {
+        if cx.with(|s| s.over_download_limit(&it.key, &it.e)) {
+            // Больше лимита и здесь его нет: не скачивать, запомнить, курсор — дальше.
+            let from =
+                it.e.renamed_from
+                    .as_ref()
+                    .and_then(|p| cx.with(|s| s.decode_path(p)));
+            cx.with_mut(|s| {
+                if let Some(f) = from {
+                    s.index.skipped.remove(f.as_str());
+                }
+                let fresh = s
+                    .index
+                    .skipped
+                    .insert(
+                        it.key.clone(),
+                        SkippedFile {
+                            seq: it.e.seq,
+                            size: it.e.size,
+                            entry: it.e.encode_to_vec(),
+                        },
+                    )
+                    .is_none();
+                new_skipped += u32::from(fresh);
+            });
+            continue;
+        }
+        // Удалён, стал меньше лимита или уже есть здесь — больше не «пропущен».
+        cx.with_mut(|s| s.index.skipped.remove(&it.key));
         if it.e.deleted {
             tombs.push(it);
         } else if it.e.folder {
@@ -227,6 +298,17 @@ async fn apply_batch(cx: &Ctx, entries: Vec<pb::Entry>, full_listing: bool) -> S
     }
     if full_listing {
         changed |= drop_missing(cx, &listed).await?;
+        cx.with_mut(|s| s.index.skipped.retain(|k, _| listed.contains(k)));
+    }
+    if new_skipped > 0 && cx.with_mut(|s| s.notified.insert("skipped".into())) {
+        let (count, limit) = cx.with(|s| (s.index.skipped.len(), s.index.max_download));
+        cx.log(
+            LogLevel::Info,
+            format!("не скачано файлов больше лимита ({limit} байт): {count}"),
+        );
+        cx.notify(Notice::Skipped {
+            count: u32::try_from(count).unwrap_or(u32::MAX),
+        });
     }
     cx.set_status(|st| st.done = total);
     Ok(changed)

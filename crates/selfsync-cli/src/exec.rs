@@ -209,6 +209,16 @@ impl Exec {
                 }
                 IoResult::Done
             }
+            Action::Delete { path, expect, .. } => {
+                let Some(cur) = self.stat(&path).await? else {
+                    return Ok(IoResult::NotFound);
+                };
+                if cur.dir || !matches(&cur, &expect) {
+                    return Ok(IoResult::Precondition);
+                }
+                tokio::fs::remove_file(self.abs(&cur.path)).await?;
+                IoResult::Done
+            }
             Action::Trash { path, expect, .. } => {
                 let Some(cur) = self.stat(&path).await? else {
                     return Ok(IoResult::NotFound);

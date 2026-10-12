@@ -64,11 +64,14 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
         }
         cx.save().await?;
     }
+    let mut changed = false;
+    if cx.with(|s| !s.download_queue.is_empty()) {
+        changed |= super::pull::download_requested(cx).await?;
+    }
     for temp in cx.with_mut(|s| std::mem::take(&mut s.stale_temps)) {
         cx.delete_temp(&temp).await?;
     }
     scan(cx).await?;
-    let mut changed = false;
     for _round in 0..3 {
         if cx.with(|s| s.index.pending_count() > 0 && !s.read_only) {
             // Перед отправкой — режим vault'а (не слать открытый текст в зашифрованный).

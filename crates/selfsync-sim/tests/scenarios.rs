@@ -1444,3 +1444,155 @@ fn read_only_join_needs_new_server() {
     assert!(minor.unwrap() >= MINOR_READ_ONLY);
     assert!(matches!(join(&mut w, 4, true), UiResult::Join { .. }));
 }
+
+/// Файл примерно `size` байт с токеном (для лимита скачивания).
+fn sized_file(w: &mut World, c: usize, path: &str, size: usize) -> String {
+    let t = w.ledger.fresh(c);
+    let mut text = format!("big {t}\n");
+    text.push_str(&"x".repeat(size));
+    text.push('\n');
+    w.user_write(c, path, text.into_bytes());
+    t
+}
+
+/// Лимит скачивания: большое не скачивается и не считается удалённым, обновления
+/// и удаление на сервере отражаются в списке пропущенных, «Скачать» и снятие
+/// лимита докачивают.
+#[test]
+fn download_limit_skips_large_files() {
+    use selfsync_core::engine::{SkippedView, UiCommand, UiResult};
+    let mut w = World::new(quiet(2));
+    w.sync(0);
+    w.sync(1);
+    w.set_download_limit(1, 200);
+    let note = base_note(&mut w, 0, "note.md");
+    let big = sized_file(&mut w, 0, "img/big.png", 500);
+    sized_file(&mut w, 0, "img/other.png", 600);
+    w.sync(0);
+    w.sync(1);
+    let local = w.clients[1].fs.snapshot();
+    assert!(local.contains_key("note.md") && !local.contains_key("img/big.png"));
+    let skipped = |w: &mut World, req| match ui_result(w, 1, req, UiCommand::Skipped) {
+        UiResult::Skipped { files } => files
+            .into_iter()
+            .map(|SkippedView { path, .. }| path)
+            .collect::<Vec<_>>(),
+        r => panic!("{r:?}"),
+    };
+    assert_eq!(skipped(&mut w, 1), ["img/big.png", "img/other.png"]);
+    let notices = |w: &World| {
+        w.clients[1]
+            .notices
+            .iter()
+            .filter(|n| matches!(n, Notice::Skipped { .. }))
+            .count()
+    };
+    assert_eq!(notices(&w), 1);
+    // своё по-прежнему уходит; пропущенное на сервере цело
+    let mine = sized_file(&mut w, 1, "img/mine.png", 900);
+    w.sync(1);
+    let server = server_tokens(&w);
+    assert!(server.contains(&mine) && server.contains(&big) && server.contains(&note));
+    // удаление на сервере убирает из списка
+    w.user_delete(0, "img/other.png");
+    w.sync(0);
+    w.now += 20_000;
+    w.sync(1);
+    assert_eq!(skipped(&mut w, 2), ["img/big.png"]);
+    assert_eq!(notices(&w), 1, "уведомление — раз за сессию");
+    // скачать один файл несмотря на лимит; дальше он обычный
+    assert_eq!(
+        ui_result(
+            &mut w,
+            1,
+            3,
+            UiCommand::Download {
+                path: "img/big.png".into()
+            }
+        ),
+        UiResult::Ok
+    );
+    w.sync(1);
+    assert!(w.clients[1].fs.read_file("img/big.png").is_some());
+    assert!(skipped(&mut w, 4).is_empty());
+    sized_file(&mut w, 0, "img/big.png", 700);
+    w.sync(0);
+    w.now += 20_000;
+    w.sync(1);
+    assert_eq!(
+        w.clients[1].fs.read_file("img/big.png"),
+        w.clients[0].fs.read_file("img/big.png"),
+        "уже скачанный файл обновляется и сверх лимита"
+    );
+    // новый большой — пропущен; лимит сняли — докачан повтором журнала
+    sized_file(&mut w, 0, "img/late.png", 800);
+    w.sync(0);
+    w.now += 20_000;
+    w.sync(1);
+    assert!(w.clients[1].fs.read_file("img/late.png").is_none());
+    w.set_download_limit(1, 0);
+    w.now += 20_000;
+    w.sync(1);
+    w.sync(1);
+    assert!(w.clients[1].fs.read_file("img/late.png").is_some());
+    assert!(skipped(&mut w, 5).is_empty());
+    finish(&mut w);
+    w.check_no_loss().unwrap();
+}
+
+/// «Освободить место»: удаляются только исключённые файлы, совпадавшие с сервером;
+/// новый, не отправленный файл остаётся. На сервере и других устройствах всё цело.
+#[test]
+fn remove_local_frees_only_synced_copies() {
+    use selfsync_core::engine::{UiCommand, UiResult};
+    let mut w = World::new(quiet(2));
+    let synced = shared_note(&mut w, "att/a.md");
+    shared_note(&mut w, "att/sub/b.md");
+    // не исключено — отказ
+    let r = ui_result(&mut w, 1, 1, UiCommand::RemoveLocal { path: "att".into() });
+    assert!(
+        matches!(&r, UiResult::Error { code, .. } if code == "not_excluded"),
+        "{r:?}"
+    );
+    shared_note(&mut w, "att/c.md");
+    // правка, которая не дошла до сервера до исключения (отправка сорвалась)
+    let unsent = edit_line(&mut w, 1, "att/sub/b.md", 1);
+    w.planned_faults.push_back(("POST /v1/ops".into(), false));
+    w.sync(1);
+    assert!(!server_tokens(&w).contains(&unsent));
+    w.set_excludes(1, &["att/"]);
+    w.sync(1);
+    // правка и новый файл уже после исключения: на сервер они не уйдут
+    let edited = edit_line(&mut w, 1, "att/c.md", 2);
+    let fresh = base_note(&mut w, 1, "att/new.md");
+    w.sync(1);
+    let r = ui_result(&mut w, 1, 2, UiCommand::RemoveLocal { path: "att".into() });
+    assert_eq!(
+        r,
+        UiResult::Removed {
+            removed: 1,
+            kept: 3
+        }
+    );
+    let local = w.clients[1].fs.snapshot();
+    assert!(!local.contains_key("att/a.md"));
+    let kept: String = ["att/sub/b.md", "att/c.md", "att/new.md"]
+        .iter()
+        .map(|p| String::from_utf8_lossy(&local[*p]).into_owned())
+        .collect();
+    assert!(kept.contains(&unsent) && kept.contains(&edited) && kept.contains(&fresh));
+    // на сервере и у другого устройства удаления нет
+    w.sync(1);
+    w.now += 20_000;
+    w.sync(0);
+    assert!(server_tokens(&w).contains(&synced));
+    assert!(w.clients[0].fs.read_file("att/a.md").is_some());
+    // вернули папку — снова скачана
+    w.set_excludes(1, &[]);
+    w.now += 20_000;
+    w.sync(1);
+    w.sync(1);
+    assert!(w.clients[1].fs.read_file("att/a.md").is_some());
+    finish(&mut w);
+    w.check_no_loss().unwrap();
+}

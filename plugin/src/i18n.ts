@@ -69,6 +69,21 @@ const en = {
   "settings.debounce": "Delay after an edit, seconds",
   "settings.pollActive": "Polling while active, seconds",
   "settings.pollIdle": "Maximum polling interval when idle, minutes",
+  "settings.maxDownload": "Do not download files larger than, MB",
+  "settings.maxDownloadDesc": "For a phone or a small disk: larger files from other devices stay on the server and are not downloaded here (0 — no limit). Files already here keep syncing; your own are sent as usual.",
+  "skipped.title": "Not downloaded",
+  "skipped.desc": "Files over the size limit: they are on the server and on other devices.",
+  "skipped.show": "Show",
+  "skipped.none": "Nothing was skipped",
+  "skipped.download": "Download",
+  "skipped.queued": "{path} will be downloaded with the next sync",
+  "notice.skipped": "selfsync: {count} files over the download limit were not downloaded — see the list in the settings",
+  "menu.excludeHere": "Do not sync on this device",
+  "menu.includeHere": "Sync on this device again",
+  "menu.removeLocal": "Free up space: delete local copies",
+  "menu.removeLocalConfirm": "Delete the local copies of «{path}» on this device? Files that are on the server stay there and on your other devices; files that are only here are kept.",
+  "menu.removeLocalDone": "Deleted: {removed}. Kept (not on the server or changed here): {kept}",
+  "menu.removeLocalWait": "The exclusion has not been applied yet — try again after the next sync",
 
   "connect.title": "Connect to selfsync",
   "connect.server": "Server address",
@@ -272,6 +287,21 @@ const ru: Record<Key, string> = {
   "settings.debounce": "Пауза после правки, секунды",
   "settings.pollActive": "Опрос при активности, секунды",
   "settings.pollIdle": "Наибольший интервал опроса в простое, минуты",
+  "settings.maxDownload": "Не скачивать файлы больше, МБ",
+  "settings.maxDownloadDesc": "Для телефона или маленького диска: большие файлы с других устройств остаются на сервере и сюда не скачиваются (0 — без лимита). Файлы, которые уже здесь, синхронизируются как раньше; свои отправляются как обычно.",
+  "skipped.title": "Не скачано",
+  "skipped.desc": "Файлы больше лимита: они есть на сервере и на других устройствах.",
+  "skipped.show": "Показать",
+  "skipped.none": "Ничего не пропущено",
+  "skipped.download": "Скачать",
+  "skipped.queued": "{path} скачается при следующей синхронизации",
+  "notice.skipped": "selfsync: не скачано файлов больше лимита: {count} — список в настройках",
+  "menu.excludeHere": "Не синхронизировать на этом устройстве",
+  "menu.includeHere": "Снова синхронизировать на этом устройстве",
+  "menu.removeLocal": "Освободить место: удалить локальные копии",
+  "menu.removeLocalConfirm": "Удалить локальные копии «{path}» на этом устройстве? Файлы, которые есть на сервере, останутся там и на других устройствах; файлы, которые есть только здесь, не удаляются.",
+  "menu.removeLocalDone": "Удалено: {removed}. Оставлено (нет на сервере или изменены здесь): {kept}",
+  "menu.removeLocalWait": "Исключение ещё не применилось — попробуйте после следующей синхронизации",
 
   "connect.title": "Подключение к selfsync",
   "connect.server": "Адрес сервера",
@@ -446,6 +476,8 @@ export function noticeText(n: Notice): string | null {
       return t("notice.rejected", { path: n.path, code: n.code });
     case "caseCollision":
       return t("notice.caseCollision", { path: n.path, existing: n.existing });
+    case "skipped":
+      return t("notice.skipped", { count: n.count });
     case "tooLarge":
       return t("notice.tooLarge", { path: n.path, size: formatBytes(n.size) });
     case "synced":

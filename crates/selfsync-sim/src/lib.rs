@@ -91,6 +91,12 @@ pub struct SimConfig {
     pub exclude_toggle_rate: f64,
     /// Шаблоны `no_merge` у всех клиентов (в последней ревизии побеждает поздняя mtime).
     pub no_merge: Vec<String>,
+    /// Вероятность на шаге сменить у клиента лимит размера скачивания (облегчённое
+    /// устройство). К успокоению лимит снимается — пропущенное должно докачаться.
+    pub download_limit_rate: f64,
+    /// Вероятность на шаге попросить клиента удалить локальные копии исключённой
+    /// папки (`RemoveLocal`).
+    pub remove_local_rate: f64,
 }
 
 impl SimConfig {
@@ -110,6 +116,8 @@ impl SimConfig {
             skip_event_rate: 0.05,
             exclude_toggle_rate: 0.0,
             no_merge: Vec::new(),
+            download_limit_rate: 0.0,
+            remove_local_rate: 0.0,
         }
     }
 
@@ -143,6 +151,10 @@ impl SimConfig {
             None
         };
         c.exclude_toggle_rate = [0.0, 0.0, 0.01, 0.03][r.idx(4)];
+        c.download_limit_rate = [0.0, 0.0, 0.01, 0.03][r.idx(4)];
+        if c.exclude_toggle_rate > 0.0 {
+            c.remove_local_rate = [0.0, 0.02][r.idx(2)];
+        }
         // Проигравшая версия no_merge живёт только в истории сервера, а миграция на
         // шифрование открытую историю стирает: инвариант «ничего не потеряно» для
         // таких файлов держится только без неё.
@@ -360,6 +372,14 @@ impl World {
         ex.extend(extra.iter().map(|s| (*s).to_owned()));
         self.log(format!("c{c} EXCLUDES {ex:?}"));
         self.clients[c].cfg.excludes = ex;
+        let config = self.clients[c].cfg.clone();
+        self.deliver(c, Event::Configure { config });
+    }
+
+    /// Лимит размера скачивания клиента (0 — без лимита): событие Configure.
+    pub fn set_download_limit(&mut self, c: usize, limit: u64) {
+        self.log(format!("c{c} DOWNLOAD LIMIT {limit}"));
+        self.clients[c].cfg.max_download_size = limit;
         let config = self.clients[c].cfg.clone();
         self.deliver(c, Event::Configure { config });
     }
@@ -582,6 +602,11 @@ impl World {
             Action::Trash { path, expect, .. } => {
                 let r = self.clients[c].fs.trash(&path, &expect);
                 self.log(format!("c{c} trash {path} -> {}", short(&r)));
+                r
+            }
+            Action::Delete { path, expect, .. } => {
+                let r = self.clients[c].fs.delete(&path, &expect);
+                self.log(format!("c{c} delete {path} -> {}", short(&r)));
                 r
             }
             Action::Rename { from, to, .. } => {
@@ -924,6 +949,27 @@ impl World {
             );
         }
         let c = self.rng.idx(self.clients.len());
+        if self.cfg.download_limit_rate > 0.0 && self.rng.chance(self.cfg.download_limit_rate) {
+            // Заметки — десятки байт, картинки — сотни: пропускаются то одни, то другие.
+            let limit = [0, 120, 260][self.rng.idx(3)];
+            self.set_download_limit(c, limit);
+            return;
+        }
+        if self.cfg.remove_local_rate > 0.0 && self.rng.chance(self.cfg.remove_local_rate) {
+            let ex = self.clients[c].cfg.excludes.clone();
+            if let Some(dir) = ex.iter().skip(1).find(|l| !l.starts_with('!')) {
+                let path = dir.trim_end_matches('/').to_owned();
+                self.log(format!("c{c} REMOVE LOCAL {path}"));
+                self.deliver(
+                    c,
+                    Event::Command {
+                        req: 0,
+                        command: selfsync_core::engine::UiCommand::RemoveLocal { path },
+                    },
+                );
+                return;
+            }
+        }
         if self.cfg.exclude_toggle_rate > 0.0 && self.rng.chance(self.cfg.exclude_toggle_rate) {
             let sets: [&[&str]; 3] = [&[], &["notes/"], &["deep/", "!deep/x/y.md"]];
             let pick = sets[self.rng.idx(sets.len())];
@@ -996,6 +1042,9 @@ impl World {
             }
             if self.clients[c].cfg.excludes != [".trash/"] {
                 self.set_excludes(c, &[]);
+            }
+            if self.clients[c].cfg.max_download_size != 0 {
+                self.set_download_limit(c, 0);
             }
             self.deliver(c, Event::Visible);
         }
@@ -1232,6 +1281,7 @@ fn local_write_target(a: &Action) -> Option<String> {
         Action::Write { path, .. }
         | Action::CommitTemp { path, .. }
         | Action::Trash { path, .. }
+        | Action::Delete { path, .. }
         | Action::Mkdir { path, .. } => Some(path.clone()),
         Action::Rename { from, to, .. } => Some(format!("{from} -> {to}")),
         _ => None,

@@ -42,6 +42,79 @@ fn error_result(e: &SyncError) -> UiResult {
     }
 }
 
+/// Удалить локальные копии под исключённым путём, которые при забывании совпадали
+/// с сервером и с тех пор не менялись. Удаление не уходит на сервер: исключённых
+/// путей в индексе нет, скан их не видит.
+async fn remove_local(cx: &Ctx, path: &str) -> SyncResult<UiResult> {
+    let p = vp(path)?;
+    let root = p.as_str().to_owned();
+    let under = |k: &str| k == root || k.starts_with(&format!("{root}/"));
+    if !cx.with(|s| s.is_excluded(&root)) {
+        return Err(SyncError::Http {
+            status: 409,
+            code: "not_excluded".into(),
+            message: format!(
+                "{root}: путь не исключён на этом устройстве (или правила ещё не применены)"
+            ),
+        });
+    }
+    let targets: Vec<(String, crate::index::LocalObs)> = cx.with(|s| {
+        s.index
+            .offloadable
+            .iter()
+            .filter(|(k, _)| under(k) && s.is_excluded(k) && !s.index.files.contains_key(*k))
+            .map(|(k, l)| (k.clone(), *l))
+            .collect()
+    });
+    let mut removed = 0u32;
+    let mut dirs = std::collections::BTreeSet::new();
+    for (k, l) in targets {
+        let gone = cx
+            .delete(
+                &k,
+                Expect::Stat {
+                    size: l.size,
+                    mtime: l.mtime,
+                },
+            )
+            .await?;
+        // Изменён после исключения — оставить; в любом случае больше не «можно удалить».
+        cx.with_mut(|s| s.index.offloadable.remove(&k));
+        if gone {
+            removed += 1;
+            let mut d = k.as_str();
+            while let Some((parent, _)) = d.rsplit_once('/') {
+                if !under(parent) {
+                    break;
+                }
+                dirs.insert(parent.to_owned());
+                d = parent;
+            }
+        }
+    }
+    // Опустевшие папки — от глубоких к мелким; непустые остаются.
+    let mut dirs: Vec<String> = dirs.into_iter().collect();
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.matches('/').count()));
+    for d in dirs {
+        cx.rmdir(&d).await?;
+    }
+    cx.save().await?;
+    let kept = cx
+        .list()
+        .await?
+        .iter()
+        .filter(|m| !m.dir && under(&m.path))
+        .count();
+    cx.log(
+        LogLevel::Info,
+        format!("{root}: удалено локальных копий {removed}, оставлено {kept}"),
+    );
+    Ok(UiResult::Removed {
+        removed,
+        kept: u32::try_from(kept).unwrap_or(u32::MAX),
+    })
+}
+
 /// Минорная версия протокола сервера; ещё ни одного ответа — спросить health.
 async fn server_minor(cx: &Ctx) -> SyncResult<u32> {
     if let Some(m) = cx.with(|s| s.status.server_minor) {
@@ -245,6 +318,34 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                 devices: s.devices,
             })
         }
+        UiCommand::Skipped => Ok(UiResult::Skipped {
+            files: cx.with(|s| {
+                s.index
+                    .skipped
+                    .iter()
+                    .map(|(k, f)| SkippedView {
+                        path: k.clone(),
+                        size: f.size,
+                    })
+                    .collect()
+            }),
+        }),
+        UiCommand::Download { path } => {
+            let p = vp(&path)?;
+            if !cx.with(|s| s.index.skipped.contains_key(p.as_str())) {
+                return Err(SyncError::Http {
+                    status: 404,
+                    code: "not_skipped".into(),
+                    message: format!("{p}: не в списке пропущенных"),
+                });
+            }
+            cx.with_mut(|s| {
+                s.download_queue.insert(p.as_str().to_owned());
+                s.sync_due = Some(s.now);
+            });
+            Ok(UiResult::Ok)
+        }
+        UiCommand::RemoveLocal { path } => remove_local(cx, &path).await,
         UiCommand::Conflicts => Ok(UiResult::Conflicts {
             items: cx.with(|s| s.index.conflicts.clone()),
         }),

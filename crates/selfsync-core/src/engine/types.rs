@@ -41,6 +41,9 @@ pub struct EngineConfig {
     pub full_scan_ms: u64,
     /// Лимит размера файла на клиенте.
     pub max_file_size: u64,
+    /// Не скачивать серверные файлы больше этого размера, если их здесь нет
+    /// (облегчённое устройство); 0 — без лимита. Свои файлы отправляются как обычно.
+    pub max_download_size: u64,
     /// Параметры KDF для новых записей ключа (в тестах — облегчённые).
     #[serde(skip, default = "default_kdf")]
     pub kdf: KdfParams,
@@ -70,6 +73,7 @@ impl Default for EngineConfig {
             use_wait: false,
             full_scan_ms: 10 * 60_000,
             max_file_size: 512 * 1024 * 1024,
+            max_download_size: 0,
             kdf: KdfParams::DEFAULT,
             base_cache_bytes: 32 * 1024 * 1024,
             tz_offset_min: 0,
@@ -191,6 +195,14 @@ pub enum Action {
         path: String,
         expect: Expect,
     },
+    /// Удалить файл насовсем (освободить место; копия есть на сервере) → `Done` /
+    /// `Precondition` (файл изменился) / `NotFound`. Только для исключённых путей,
+    /// совпадавших с сервером (`RemoveLocal`).
+    Delete {
+        id: u64,
+        path: String,
+        expect: Expect,
+    },
     /// Переименовать → `Stat` / `Precondition` (назначение занято) / `NotFound`.
     Rename {
         id: u64,
@@ -272,6 +284,7 @@ impl Action {
             | Action::CommitTemp { id, .. }
             | Action::DeleteTemp { id, .. }
             | Action::Trash { id, .. }
+            | Action::Delete { id, .. }
             | Action::Rename { id, .. }
             | Action::Mkdir { id, .. }
             | Action::Rmdir { id, .. }
@@ -495,6 +508,10 @@ pub enum Notice {
         existing: String,
     },
     /// Файл больше лимита.
+    /// Файлы больше лимита скачивания не скачаны (раз за сессию).
+    Skipped {
+        count: u32,
+    },
     TooLarge {
         path: String,
         size: u64,
@@ -621,6 +638,26 @@ pub enum UiCommand {
         new_password: String,
         remember: bool,
     },
+    /// Файлы, не скачанные из-за лимита размера.
+    Skipped,
+    /// Скачать пропущенный файл несмотря на лимит (в ближайшем цикле синка); дальше
+    /// он синхронизируется как обычно.
+    Download {
+        path: String,
+    },
+    /// Удалить локальные копии под исключённым путём, совпадающие с сервером
+    /// (освободить место). Путь должен быть исключён уже применёнными правилами.
+    RemoveLocal {
+        path: String,
+    },
+}
+
+/// Файл, не скачанный из-за лимита размера.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkippedView {
+    pub path: String,
+    pub size: u64,
 }
 
 /// 24 слова фразы восстановления. `Debug` их не печатает: фраза не должна попасть
@@ -725,6 +762,15 @@ pub enum UiResult {
     },
     Conflicts {
         items: Vec<crate::index::ConflictRecord>,
+    },
+    Skipped {
+        files: Vec<SkippedView>,
+    },
+    /// `RemoveLocal`: удалено файлов и сколько оставлено (их нет на сервере или они
+    /// изменены здесь).
+    Removed {
+        removed: u32,
+        kept: u32,
     },
     Strength {
         bits: u32,

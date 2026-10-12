@@ -337,6 +337,7 @@ impl VaultCommand {
                     UiCommand::RestoreDeleted { .. }
                         | UiCommand::PurgeDeleted { .. }
                         | UiCommand::RestoreRevision { .. }
+                        | UiCommand::Download { .. }
                 )
         )
     }

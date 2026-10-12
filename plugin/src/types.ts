@@ -18,6 +18,8 @@ export interface EngineConfig {
   useWait?: boolean;
   fullScanMs?: number;
   maxFileSize?: number;
+  /** Не скачивать серверные файлы больше (байт), если их здесь нет; 0 — без лимита. */
+  maxDownloadSize?: number;
   baseCacheBytes?: number;
   tzOffsetMin?: number;
 }
@@ -74,6 +76,7 @@ export type Notice =
   | { kind: "rejected"; path: string; code: string }
   | { kind: "caseCollision"; path: string; existing: string }
   | { kind: "tooLarge"; path: string; size: number }
+  | { kind: "skipped"; count: number }
   | { kind: "synced"; pulled: string[]; pushed: string[] }
   | { kind: "recoveryPhrase"; words: string[] }
   | { kind: "readOnly"; pending: number }
@@ -149,6 +152,8 @@ export type UiResult =
       devices: number;
     }
   | { type: "conflicts"; items: ConflictRecord[] }
+  | { type: "skipped"; files: { path: string; size: number }[] }
+  | { type: "removed"; removed: number; kept: number }
   | { type: "strength"; bits: number }
   | { type: "restored"; count: number }
   | { type: "recoveryPhrase"; words: string[] };
@@ -170,7 +175,10 @@ export type UiCommand =
   | { type: "passwordStrength"; password: string }
   | { type: "createRecovery"; password: string }
   | { type: "removeRecovery"; password: string }
-  | { type: "recover"; phrase: string; newPassword: string; remember: boolean };
+  | { type: "recover"; phrase: string; newPassword: string; remember: boolean }
+  | { type: "skipped" }
+  | { type: "download"; path: string }
+  | { type: "removeLocal"; path: string };
 
 export type ConflictChoice = "keepBoth" | "keepMine" | "keepServer";
 
@@ -195,6 +203,7 @@ export type Action =
   | { type: "commitTemp"; id: number; temp: string; path: string; expect: Expect }
   | { type: "deleteTemp"; id: number; temp: string }
   | { type: "trash"; id: number; path: string; expect: Expect }
+  | { type: "delete"; id: number; path: string; expect: Expect }
   | { type: "rename"; id: number; from: string; to: string }
   | { type: "mkdir"; id: number; path: string }
   | { type: "rmdir"; id: number; path: string }

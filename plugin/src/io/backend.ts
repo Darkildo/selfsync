@@ -24,6 +24,8 @@ export interface FileBackend {
   rmdir(path: string): Promise<boolean>;
   /** В корзину (не стирать безвозвратно). */
   trash(path: string): Promise<void>;
+  /** Удалить насовсем: только копии, которые есть на сервере (освобождение места). */
+  remove(path: string): Promise<void>;
 
   // Личное хранилище плагина: временные файлы скачивания, кэш, индекс.
   tempWrite(name: string, offset: number, data: Uint8Array): Promise<void>;

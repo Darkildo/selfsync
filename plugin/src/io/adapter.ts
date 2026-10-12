@@ -121,6 +121,10 @@ export class AdapterBackend implements FileBackend {
     return true;
   }
 
+  async remove(path: string): Promise<void> {
+    await this.a.remove(path);
+  }
+
   async trash(path: string): Promise<void> {
     if (this.trashMode === "system" && (await this.a.trashSystem(path))) return;
     await this.a.trashLocal(path);

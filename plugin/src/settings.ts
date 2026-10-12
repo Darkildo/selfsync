@@ -12,6 +12,7 @@ import { JoinModal } from "./ui/join.ts";
 import { confirm } from "./ui/confirm.ts";
 import { ChangePasswordModal, PasswordModal } from "./ui/password.ts";
 import { PhraseModal } from "./ui/recovery.ts";
+import { SkippedModal } from "./ui/skipped.ts";
 
 export interface Settings {
   /** Базовый адрес сервера без завершающего «/». */
@@ -27,6 +28,8 @@ export interface Settings {
   debounceSec: number;
   pollActiveSec: number;
   pollIdleMaxMin: number;
+  /** Не скачивать файлы больше, МБ (0 — без лимита): облегчённое устройство. */
+  maxDownloadMb: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -41,6 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   debounceSec: 2.5,
   pollActiveSec: 15,
   pollIdleMaxMin: 5,
+  maxDownloadMb: 0,
 };
 
 /** Первая выпущенная версия, которая открывает запись ключа с фразой (формат 2). */
@@ -249,6 +253,8 @@ export class SelfsyncSettingTab extends PluginSettingTab {
       this.numberRow(t("settings.debounce"), () => s.debounceSec, 0.5, 60, (v) => (s.debounceSec = v)),
       this.numberRow(t("settings.pollActive"), () => s.pollActiveSec, 5, 600, (v) => (s.pollActiveSec = v)),
       this.numberRow(t("settings.pollIdle"), () => s.pollIdleMaxMin, 1, 60, (v) => (s.pollIdleMaxMin = v)),
+      this.numberRow(t("settings.maxDownload"), () => s.maxDownloadMb, 0, 1_000_000, (v) => (s.maxDownloadMb = v), t("settings.maxDownloadDesc")),
+      this.skippedRow(),
     ];
   }
 
@@ -544,19 +550,41 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     );
   }
 
-  private numberRow(name: string, get: () => number, min: number, max: number, set: (v: number) => void): Row {
+  /** Файлы, не скачанные из-за лимита: окно со списком и «Скачать». */
+  private skippedRow(): Row {
+    return {
+      name: t("skipped.title"),
+      desc: t("skipped.desc"),
+      build: (row) => {
+        if (!this.plugin.runner) {
+          row.settingEl.hide();
+          return;
+        }
+        row
+          .setName(t("skipped.title"))
+          .setDesc(t("skipped.desc"))
+          .addButton((b) => b.setButtonText(t("skipped.show")).onClick(() => new SkippedModal(this.app, this.plugin).open()));
+      },
+    };
+  }
+
+  private numberRow(name: string, get: () => number, min: number, max: number, set: (v: number) => void, desc?: string): Row {
     return {
       name,
+      desc,
       build: (row) =>
-        row.setName(name).addText((x) => {
-          x.inputEl.type = "number";
-          x.setValue(String(get())).onChange(async (raw) => {
-            const v = Number(raw);
-            if (!Number.isFinite(v)) return;
-            set(Math.min(max, Math.max(min, v)));
-            await this.plugin.saveSettings({ reconfigure: true });
-          });
-        }),
+        row
+          .setName(name)
+          .setDesc(desc ?? "")
+          .addText((x) => {
+            x.inputEl.type = "number";
+            x.setValue(String(get())).onChange(async (raw) => {
+              const v = Number(raw);
+              if (!Number.isFinite(v)) return;
+              set(Math.min(max, Math.max(min, v)));
+              await this.plugin.saveSettings({ reconfigure: true });
+            });
+          }),
     };
   }
 }

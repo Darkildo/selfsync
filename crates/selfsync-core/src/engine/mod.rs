@@ -213,7 +213,8 @@ impl Engine {
             Event::Configure { config } => cx.with_mut(|s| {
                 // Новые исключения вступают в силу в начале следующего цикла (см.
                 // `rules_changed`): идущий цикл доработает по старым.
-                s.rules_changed |= build_excludes(&config) != s.excludes;
+                s.rules_changed |= build_excludes(&config) != s.excludes
+                    || config.max_download_size != s.index.max_download;
                 s.no_merge = crate::exclude::Excludes::new(&config.no_merge);
                 s.cfg = config;
                 s.need_full_scan = true;

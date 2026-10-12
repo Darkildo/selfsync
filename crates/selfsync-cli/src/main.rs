@@ -139,6 +139,17 @@ enum Cmd {
         #[command(flatten)]
         v: VaultArgs,
     },
+    /// Файлы, не скачанные из-за лимита `max_download_size`.
+    Skipped {
+        #[command(flatten)]
+        v: VaultArgs,
+    },
+    /// Скачать пропущенный файл несмотря на лимит (дальше он синхронизируется).
+    Download {
+        path: String,
+        #[command(flatten)]
+        v: VaultArgs,
+    },
     /// Решить конфликт: оставить обе версии, свою или серверную.
     Resolve {
         id: u64,
@@ -318,6 +329,44 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 Ok(())
             })
             .await;
+        }
+        Cmd::Skipped { v } => {
+            let cmd = VaultCommand::Ui(UiCommand::Skipped);
+            return vault_command(&dir, v, cmd, |r, json| {
+                let UiResult::Skipped { files } = r else {
+                    anyhow::bail!("неожиданный ответ: {r:?}");
+                };
+                if json {
+                    return print_json(&files);
+                }
+                if files.is_empty() {
+                    println!("пропущенных нет");
+                }
+                for f in files {
+                    println!("{}\t{}", f.path, f.size);
+                }
+                Ok(())
+            })
+            .await;
+        }
+        Cmd::Download { path, v } => {
+            let path = vault_path(&dir, &path);
+            let cmd = VaultCommand::Ui(UiCommand::Download { path: path.clone() });
+            // Команда ставит файл в очередь; скачивает его следующий цикл синка.
+            let json = v.json;
+            let code = vault_command(&dir, v, cmd, |_, _| Ok(())).await?;
+            if code != ExitCode::SUCCESS {
+                return Ok(code);
+            }
+            let ok = dir.join(&path).is_file();
+            if json {
+                print_json(&serde_json::json!({ "path": path, "downloaded": ok }))?;
+            } else if ok {
+                println!("скачан: {path}");
+            } else {
+                eprintln!("{path}: не скачался — подробности в журнале, повторите позже");
+            }
+            return Ok(if ok { code } else { ExitCode::from(1) });
         }
         Cmd::Resolve { id, keep, v } => {
             let choice = match keep {

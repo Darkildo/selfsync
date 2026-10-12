@@ -1,7 +1,7 @@
 // Плагин Obsidian: тонкий слой между vault'ом и ядром. Ядро решает, что и когда
 // синхронизировать; здесь — события vault'а, исполнитель, статус-бар и окна.
 
-import { FileSystemAdapter, moment, Notice, Platform, Plugin, requestUrl, type TAbstractFile, TFile } from "obsidian";
+import { FileSystemAdapter, type Menu, moment, Notice, Platform, Plugin, requestUrl, type TAbstractFile, TFile, TFolder } from "obsidian";
 
 import wasmBytes from "selfsync-wasm-bytes";
 import { initWasm, Runner } from "./engine.ts";
@@ -19,6 +19,7 @@ import { ConnectModal } from "./ui/connect.ts";
 import { DeletedModal } from "./ui/deleted.ts";
 import { HistoryModal } from "./ui/history.ts";
 import { PasswordModal } from "./ui/password.ts";
+import { confirm } from "./ui/confirm.ts";
 import { PhraseModal, RecoverModal } from "./ui/recovery.ts";
 
 const KEY_STORAGE = "selfsync-master-key";
@@ -64,8 +65,11 @@ export default class SelfsyncPlugin extends Plugin {
     });
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
-        if (!this.runner || !(file instanceof TFile)) return;
-        menu.addItem((i) => i.setTitle(t("cmd.history")).setIcon("history").onClick(() => new HistoryModal(this.app, this, file.path).open()));
+        if (!this.runner) return;
+        if (file instanceof TFile) {
+          menu.addItem((i) => i.setTitle(t("cmd.history")).setIcon("history").onClick(() => new HistoryModal(this.app, this, file.path).open()));
+        }
+        this.deviceMenu(menu, file);
       }),
     );
     this.addCommand({ id: "log", name: t("cmd.log"), callback: () => this.showLog() });
@@ -108,6 +112,36 @@ export default class SelfsyncPlugin extends Plugin {
   }
 
   /** Сохранить настройки; при смене сервера/токена — перезапуск, иначе новая конфигурация ядру. */
+  /** Пункты «не синхронизировать здесь» / «освободить место» для файла или папки. */
+  private deviceMenu(menu: Menu, file: TAbstractFile): void {
+    if (file instanceof TFolder && file.isRoot()) return;
+    // Правило исключения этого устройства: папка — с «/» на конце.
+    const line = file instanceof TFolder ? `${file.path}/` : file.path;
+    const excluded = this.settings.excludes.some((l) => l.trim() === line);
+    const setExcluded = async (on: boolean): Promise<void> => {
+      const rest = this.settings.excludes.filter((l) => l.trim() !== line);
+      this.settings.excludes = on ? [...rest, line] : rest;
+      await this.saveSettings({ reconfigure: true });
+    };
+    if (!excluded) {
+      menu.addItem((i) => i.setTitle(t("menu.excludeHere")).setIcon("cloud-off").onClick(() => setExcluded(true)));
+      return;
+    }
+    menu.addItem((i) => i.setTitle(t("menu.includeHere")).setIcon("cloud").onClick(() => setExcluded(false)));
+    menu.addItem((i) => i.setTitle(t("menu.removeLocal")).setIcon("trash-2").onClick(() => this.removeLocal(file.path)));
+  }
+
+  /** Удалить локальные копии исключённого пути, которые есть на сервере. */
+  private async removeLocal(path: string): Promise<void> {
+    const runner = this.runner;
+    if (!runner) return;
+    if (!(await confirm(this.app, t("menu.removeLocalConfirm", { path }), t("menu.removeLocal")))) return;
+    const r = await runner.command({ type: "removeLocal", path });
+    if (r.type === "removed") new Notice(t("menu.removeLocalDone", { removed: r.removed, kept: r.kept }));
+    else if (r.type === "error" && r.code === "not_excluded") new Notice(t("menu.removeLocalWait"));
+    else new Notice(r.type === "error" ? r.message : r.type);
+  }
+
   async saveSettings(o: { restart?: boolean; reconfigure?: boolean } = {}): Promise<void> {
     await this.saveData(this.settings);
     if (o.restart) await this.start();
@@ -134,6 +168,7 @@ export default class SelfsyncPlugin extends Plugin {
       pollActiveMs: Math.round(this.settings.pollActiveSec * 1000),
       pollIdleMaxMs: Math.round(this.settings.pollIdleMaxMin * 60_000),
       useWait: this.settings.useWait,
+      maxDownloadSize: Math.round(this.settings.maxDownloadMb * 1024 * 1024),
       tzOffsetMin: -new Date().getTimezoneOffset(),
     };
   }

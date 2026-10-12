@@ -29,6 +29,10 @@ pub struct Config {
     pub debounce_ms: u64,
     pub poll_active_ms: u64,
     pub poll_idle_max_ms: u64,
+    /// Не скачивать файлы больше, байт (0 — без лимита): пропущенные — `skipped`,
+    /// скачать один — `download PATH`.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub max_download_size: u64,
     /// Команда после каждого цикла, который что-то изменил (как `run --exec`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exec: Option<String>,
@@ -51,6 +55,7 @@ impl Default for Config {
             debounce_ms: 2500,
             poll_active_ms: 15_000,
             poll_idle_max_ms: 300_000,
+            max_download_size: 0,
             exec: None,
             exec_timeout: None,
         }
@@ -98,6 +103,7 @@ impl Config {
             poll_active_ms: self.poll_active_ms,
             poll_idle_max_ms: self.poll_idle_max_ms,
             use_wait: self.use_wait,
+            max_download_size: self.max_download_size,
             tz_offset_min: local_offset_min(),
             ..EngineConfig::default()
         }
@@ -145,4 +151,8 @@ fn local_offset_min() -> i32 {
         }
     }
     0
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }

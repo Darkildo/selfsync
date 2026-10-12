@@ -777,3 +777,44 @@ async fn recover_with_phrase_sets_new_password() {
     assert_eq!(r, Some(UiResult::Ok));
     assert!(!server_has_recovery(&srv, "recov"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn download_limit_skipped_and_download() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "light", "a");
+    let (b, mut cb) = folder(&srv, "light", "b");
+    cb.max_download_size = 1000;
+    std::fs::write(a.path().join("small.md"), "note\n").unwrap();
+    std::fs::write(a.path().join("big.bin"), vec![7u8; 5000]).unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    assert!(b.path().join("small.md").is_file());
+    assert!(!b.path().join("big.bin").exists());
+    let (_, r) = vault_cmd(b.path(), &cb, None, VaultCommand::Ui(UiCommand::Skipped)).await;
+    let Some(UiResult::Skipped { files }) = r else {
+        panic!("{r:?}")
+    };
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, "big.bin");
+    let (o, r) = vault_cmd(
+        b.path(),
+        &cb,
+        None,
+        VaultCommand::Ui(UiCommand::Download {
+            path: "big.bin".into(),
+        }),
+    )
+    .await;
+    assert_eq!((o, r), (Outcome::Synced, Some(UiResult::Ok)));
+    assert_eq!(
+        std::fs::read(b.path().join("big.bin")).unwrap(),
+        vec![7u8; 5000]
+    );
+    // лимит в конфиге переживает сохранение и не пишется, когда не задан
+    cb.save(b.path()).unwrap();
+    let text = std::fs::read_to_string(selfsync_cli::config::Config::path(b.path())).unwrap();
+    assert!(text.contains("max_download_size = 1000"), "{text}");
+    ca.save(a.path()).unwrap();
+    let text = std::fs::read_to_string(selfsync_cli::config::Config::path(a.path())).unwrap();
+    assert!(!text.contains("max_download_size"), "{text}");
+}

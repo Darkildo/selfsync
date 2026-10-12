@@ -135,3 +135,35 @@ test("адаптер: имя с `?` с Linux не останавливает с�
   await phone.stop();
   await desk.stop();
 });
+
+test("адаптер: лимит скачивания, «Скачать» и освобождение места", async () => {
+  const [phone, stub, desk] = await mobileAndDesktop("adapter-light");
+  const config = { caseInsensitive: true, hardExcludes: [".obsidian/"], maxDownloadSize: 1000 };
+  await phone.restart(config);
+  await desk.write("small.md", "note\n");
+  await desk.write("big.bin", new Uint8Array(5000).fill(7));
+  await desk.write("att/a.md", "attachment\n");
+  await desk.sync();
+  await phone.sync();
+  assert.ok(stub.names().includes("small.md"));
+  assert.ok(!stub.names().includes("big.bin"), "больше лимита — не скачан");
+  const skipped = await phone.runner.command({ type: "skipped" });
+  assert.deepEqual(skipped.type === "skipped" && skipped.files.map((f) => f.path), ["big.bin"]);
+  assert.ok(phone.notices.some((n) => n.kind === "skipped"));
+  assert.equal((await phone.runner.command({ type: "download", path: "big.bin" })).type, "ok");
+  await phone.sync();
+  assert.ok(stub.names().includes("big.bin"), "скачан по просьбе");
+
+  // исключить папку на телефоне и освободить место: на сервере и на компьютере цело
+  await phone.restart({ ...config, excludes: ["att/"] });
+  await phone.sync();
+  const r = await phone.runner.command({ type: "removeLocal", path: "att" });
+  assert.deepEqual(r, { type: "removed", removed: 1, kept: 0 });
+  assert.ok(!stub.names().includes("att/a.md"));
+  assert.deepEqual(stub.trashed, [], "не в корзину — насовсем");
+  await phone.sync();
+  await desk.sync();
+  assert.equal(await desk.read("att/a.md"), "attachment\n");
+  await phone.stop();
+  await desk.stop();
+});

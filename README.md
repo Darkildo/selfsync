@@ -228,6 +228,13 @@ Settings files are not merged line by line (that would break the JSON): when two
 
 The command-line client syncs `.obsidian/` as before (except `workspace*.json`); its `excludes` in `.selfsync/config.toml` understand `!` too.
 
+### Light device
+
+A phone does not have to hold everything. Two tools, both per device:
+
+- **Download size limit.** "Do not download files larger than, MB" in the sync settings: larger files from other devices stay on the server and are not downloaded here. Files already on this device keep syncing, and files you create here are sent as usual. "Not downloaded" in the settings lists what was skipped, with a "Download" button for any single file. Raising or removing the limit downloads the rest.
+- **"Do not sync on this device"** in the context menu of a folder or file adds it to this device's exclusions; nothing is deleted on the server or on other devices. After the next sync, "Free up space: delete local copies" in the same menu deletes the local files that match the server copy. Files that exist only here or were changed here are kept. "Sync on this device again" brings the folder back.
+
 ### Mobile limitations
 
 On mobile Obsidian can only read a file whole (`readBinary`), so very large attachments need as much memory. The default file size limit is 512 MiB, but on a phone it is sensible to keep attachments much smaller. On desktop large files are read in chunks.
@@ -260,7 +267,11 @@ selfsync-cli restore notes/old.md
 selfsync-cli purge notes/old.md --yes       # erase from the trash for good, with its history
 selfsync-cli conflicts
 selfsync-cli resolve 4 --keep mine          # both | mine | server
+selfsync-cli skipped                        # files over max_download_size that were not downloaded
+selfsync-cli download media/talk.mp4        # download one anyway
 ```
+
+`max_download_size = 50000000` in `.selfsync/config.toml` (bytes, 0 — no limit) works as in the plugin.
 
 Only one process works with a folder at a time (`.selfsync/lock`): while `run` is running as a service, stop it first (`systemctl --user stop selfsync-cli@notes`).
 
