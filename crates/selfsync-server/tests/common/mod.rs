@@ -144,6 +144,12 @@ impl TestServer {
             .proto()
     }
 
+    /// Статус `GET /v1/changes` с этим токеном.
+    #[allow(dead_code)]
+    pub async fn changes_status(&self, token: &str) -> StatusCode {
+        self.get("/v1/changes?since=0", token).await.status
+    }
+
     pub async fn changes(&self, token: &str, since: u64) -> pb::ChangesResponse {
         self.get(&format!("/v1/changes?since={since}"), token)
             .await

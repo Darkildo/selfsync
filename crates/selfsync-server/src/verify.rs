@@ -20,7 +20,7 @@ use selfsync_core::path::canonical_decode;
 
 use crate::blobs::BlobStore;
 use crate::config::Config;
-use crate::db::vault::{meta_blob, unwant_blob, want_blobs, wanted_blobs};
+use crate::db::vault::{meta_blob, set_meta_int, unwant_blob, want_blobs, wanted_blobs};
 use crate::gc::{self, GcOptions};
 use crate::state::open_vault;
 
@@ -297,7 +297,18 @@ pub fn verify_vault(
         r.missing.push(Missing { hash: h, paths });
     }
     r.elapsed = start.elapsed();
+    save_result(&c, &r)?;
     Ok(r)
+}
+
+/// Итог проверки в базе vault'а — для `/metrics`.
+fn save_result(c: &Connection, r: &VerifyReport) -> rusqlite::Result<()> {
+    let n = |x: usize| i64::try_from(x).unwrap_or(i64::MAX);
+    set_meta_int(c, "verify_at", crate::db::now_ms())?;
+    set_meta_int(c, "verify_corrupt", n(r.corrupt.len()))?;
+    set_meta_int(c, "verify_missing", n(r.missing.len()))?;
+    set_meta_int(c, "verify_db_errors", n(r.db_errors.len()))?;
+    set_meta_int(c, "verify_key_problem", i64::from(r.key_problem.is_some()))
 }
 
 /// Битый блоб — в `quarantine/` (`gc` его не трогает).

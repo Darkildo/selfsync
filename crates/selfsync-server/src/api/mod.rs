@@ -6,6 +6,7 @@ mod core;
 mod devices;
 mod joinpage;
 mod meta;
+mod metrics;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -88,6 +89,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/health", get(core::health))
         .route("/v1/join/redeem", post(devices::join_redeem))
         .route("/join/{code}", get(joinpage::page))
+        .route("/metrics", get(metrics::metrics))
         .merge(authed)
         .fallback(|| async { ApiError::not_found("no_route") })
         .layer(DefaultBodyLimit::max(max_body))
@@ -240,14 +242,18 @@ impl Drop for InFlight<'_> {
 
 /// Access-лог и учёт активности. Ожидающий `/v1/wait` не считается запросом в
 /// обработке (иначе процесс с long-poll клиентом никогда не выйдет по простою),
-/// но его начало и конец — это активность.
+/// но его начало и конец — это активность. Опрос `/metrics` активностью не
+/// считается вовсе: иначе Prometheus не дал бы серверу по сокету выйти по простою.
 async fn access(State(st): State<AppState>, req: Request, next: Next) -> Response {
     let start = Instant::now();
     let method = req.method().clone();
     let path = req.uri().path().to_owned();
     let is_wait = path == "/v1/wait";
-    st.activity.touch();
-    let guard = if is_wait {
+    let is_metrics = path == "/metrics";
+    if !is_metrics {
+        st.activity.touch();
+    }
+    let guard = if is_wait || is_metrics {
         None
     } else {
         st.activity.in_flight.fetch_add(1, Ordering::SeqCst);
@@ -260,15 +266,33 @@ async fn access(State(st): State<AppState>, req: Request, next: Next) -> Respons
     if let Ok(v) = HeaderValue::from_str(&proto_header()) {
         resp.headers_mut().insert(HEADER_PROTO, v);
     }
-    st.activity.touch();
+    if !is_metrics {
+        st.activity.touch();
+    }
     let ms = start.elapsed().as_secs_f64() * 1000.0;
     let device = resp.extensions().get::<DeviceTag>().map(|d| d.0);
     let status = resp.status().as_u16();
     // Пути API не содержат имён файлов (они в теле), токены и пароли не логируются.
-    if path == "/v1/health" {
+    if path == "/v1/health" || is_metrics {
         tracing::debug!(%method, %path, status, ms, "request");
     } else {
         tracing::info!(%method, %path, status, ms, device, "request");
+    }
+    // Отказы и ошибки — в счётчики `/metrics` (редкие события, запись в БД дешева).
+    let event = match status {
+        401 => Some("unauthorized"),
+        403 => Some("forbidden"),
+        426 => Some("upgrade_required"),
+        429 => Some("rate_limited"),
+        500..=599 => Some("server_error"),
+        _ => None,
+    };
+    if let Some(e) = event
+        && let Err(err) = st
+            .server_db(move |c| Ok(crate::db::server::bump_counter(c, e)?))
+            .await
+    {
+        tracing::warn!(error = %err.message, "счётчик событий не записан");
     }
     if !st.first_request_done.swap(true, Ordering::SeqCst) {
         crate::sweep::spawn_after_first_request(&st);

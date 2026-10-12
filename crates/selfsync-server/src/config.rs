@@ -24,7 +24,12 @@ pub struct Config {
     pub rate: RateConfig,
     /// Доверять `X-Forwarded-For` (адрес клиента для лимитера).
     pub trusted_proxy: bool,
+    /// Bearer-токен для `GET /metrics`; `None` — метрик нет (404).
+    pub metrics_token: Option<String>,
 }
+
+/// Токен метрик короче — почти наверняка ошибка (или угадывается).
+pub const METRICS_TOKEN_MIN: usize = 16;
 
 /// Порог неудач за окно и блокировка после него. `attempts == 0` — лимит выключен.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +78,7 @@ struct FileConfig {
     max_body_size: Option<String>,
     log: Option<String>,
     trusted_proxy: Option<bool>,
+    metrics_token: Option<String>,
     #[serde(default)]
     rate: FileRate,
 }
@@ -142,6 +148,12 @@ impl Config {
             None => file.trusted_proxy.unwrap_or(false),
         };
         let rate = load_rate(&env, file.rate)?;
+        let metrics_token = env("SELFSYNC_METRICS_TOKEN").or(file.metrics_token);
+        if let Some(t) = &metrics_token
+            && t.trim().chars().count() < METRICS_TOKEN_MIN
+        {
+            bail!("SELFSYNC_METRICS_TOKEN: не короче {METRICS_TOKEN_MIN} символов");
+        }
         Ok(Config {
             data_dir,
             public_url,
@@ -151,6 +163,7 @@ impl Config {
             log,
             rate,
             trusted_proxy,
+            metrics_token,
         })
     }
 
@@ -165,6 +178,7 @@ impl Config {
             log: "warn".to_owned(),
             rate: RateConfig::default(),
             trusted_proxy: false,
+            metrics_token: None,
         }
     }
 }
@@ -310,5 +324,21 @@ mod tests {
         assert_eq!(parse_duration("0").unwrap(), Duration::ZERO);
         assert_eq!(parse_duration("10m").unwrap(), Duration::from_secs(600));
         assert!(parse_duration("abc").is_err());
+    }
+
+    #[test]
+    fn metrics_token_from_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let load = |token: &str| {
+            let p = dir.path().join("c.toml");
+            std::fs::write(&p, format!("metrics_token = \"{token}\"\n")).unwrap();
+            Config::load(Some(&p), Some(dir.path().to_path_buf()))
+        };
+        let c = load("0123456789abcdef").unwrap();
+        assert_eq!(c.metrics_token.as_deref(), Some("0123456789abcdef"));
+        assert!(
+            load("short").is_err(),
+            "короткий токен — ошибка конфигурации"
+        );
     }
 }

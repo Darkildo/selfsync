@@ -1540,3 +1540,84 @@ async fn rekey_epochs_and_purge() {
     assert_eq!(r.status, StatusCode::UPGRADE_REQUIRED);
     assert_eq!(r.error().code, "client_outdated");
 }
+
+/// `/metrics`: без токена в конфигурации — 404, с чужим — 401; метрики
+/// описывают vault, устройства, итог verify и счётчики отказов; опрос не продлевает
+/// простой, а счётчики живут в server.db.
+#[tokio::test]
+async fn metrics_need_token_and_describe_server() {
+    let get = |tok: Option<&str>| {
+        let mut r = http::Request::get("/metrics");
+        if let Some(t) = tok {
+            r = r.header("authorization", format!("Bearer {t}"));
+        }
+        r.body(axum::body::Body::empty()).unwrap()
+    };
+    let off = TestServer::new();
+    assert_eq!(off.send(get(None)).await.status, StatusCode::NOT_FOUND);
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = selfsync_server::Config::for_tests(dir.path().to_path_buf());
+    let secret = "metrics-secret-0123456789";
+    config.metrics_token = Some(secret.to_owned());
+    let s = TestServer::with_config(dir, config.clone(), Mode::Serve);
+    let t = s.token("notes", "lap\"top\\1");
+    s.write_file(&t, "a.md", 0, b"hello").await;
+    assert_eq!(
+        s.changes_status("ns_wrong-token").await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(s.send(get(None)).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        s.send(get(Some("metrics-secret-0123456780"))).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    // битый блоб после verify
+    let v = selfsync_server::state::open_vault(&config, "notes", 1).unwrap();
+    let h = Hash::of(&selfsync_core::blob::encode(b"hello", None));
+    std::fs::write(v.blobs.path_of(&h), b"rot").unwrap();
+    selfsync_server::verify::verify_vault(&config, "notes", Default::default()).unwrap();
+
+    s.state
+        .activity
+        .last
+        .store(0, std::sync::atomic::Ordering::SeqCst);
+    let r = s.send(get(Some(secret))).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(
+        s.state
+            .activity
+            .last
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "опрос метрик — не активность"
+    );
+    assert!(
+        r.headers["content-type"]
+            .to_str()
+            .unwrap()
+            .starts_with("text/plain; version=0.0.4")
+    );
+    let text = String::from_utf8(r.body.to_vec()).unwrap();
+    for want in [
+        &format!(
+            "selfsync_build_info{{version=\"{}\",proto=\"1.2\"}} 1",
+            env!("CARGO_PKG_VERSION")
+        ) as &str,
+        "selfsync_vault_files{vault=\"notes\"} 1",
+        "selfsync_vault_blobs_wanted{vault=\"notes\"} 1",
+        "selfsync_verify_corrupt_blobs{vault=\"notes\"} 1",
+        "selfsync_device_last_seen_timestamp_seconds{vault=\"notes\",device=\"lap\\\"top\\\\1\",id=\"1\",client=\"unknown\",read_only=\"false\"}",
+        "selfsync_events_total{event=\"unauthorized\"} 3",
+        "# TYPE selfsync_events_total counter",
+    ] {
+        assert!(text.contains(want), "нет «{want}» в\n{text}");
+    }
+    // счётчики — в server.db: новый процесс видит те же
+    let s2 = TestServer::with_config(tempfile::tempdir().unwrap(), config, Mode::Socket);
+    let text = String::from_utf8(s2.send(get(Some(secret))).await.body.to_vec()).unwrap();
+    assert!(
+        text.contains("selfsync_events_total{event=\"unauthorized\"} 3"),
+        "{text}"
+    );
+}

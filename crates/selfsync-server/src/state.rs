@@ -38,6 +38,8 @@ pub struct Inner {
     pub shutdown: watch::Sender<bool>,
     /// Первый запрос обслужен (после него — фоновый sweeper, раздел 5.4).
     pub first_request_done: AtomicBool,
+    /// Время запуска процесса (для метрик).
+    pub started_ms: i64,
 }
 
 impl std::ops::Deref for AppState {
@@ -97,6 +99,7 @@ impl AppState {
             activity: Activity::default(),
             shutdown,
             first_request_done: AtomicBool::new(false),
+            started_ms: crate::db::now_ms(),
         }));
         state.activity.touch();
         state

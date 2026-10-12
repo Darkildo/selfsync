@@ -124,6 +124,7 @@ Environment variables (or TOML via `--config`; variables take precedence):
 | `SELFSYNC_MAX_BODY_SIZE` | 16 MiB | request body (metadata, upload chunk); keep in line with the proxy |
 | `SELFSYNC_LOG` | `info` | log level (file names never reach the log) |
 | `SELFSYNC_TRUSTED_PROXY` | `0` | `1`: take the client address from `X-Forwarded-For` (rightmost entry) |
+| `SELFSYNC_METRICS_TOKEN` | — | enables `GET /metrics` behind this bearer token (16 characters or more) |
 | `SELFSYNC_RATE_REDEEM_ATTEMPTS` | `10` | wrong connect codes from one address per window |
 | `SELFSYNC_RATE_REDEEM_WINDOW` | `15m` | counting window for connect codes |
 | `SELFSYNC_RATE_REDEEM_BLOCK` | `15m` | how long an address is blocked after the limit |
@@ -135,6 +136,21 @@ Environment variables (or TOML via `--config`; variables take precedence):
 In TOML the limits go into a `[rate]` section with the same names in lower case and without the prefix (`redeem_attempts = 10`, `auth_window = "1m"`); `trusted_proxy = true` is a top-level key. A threshold of `0` turns that limit off; windows and blocks must be at least one second, otherwise the server refuses to start.
 
 **Failed-attempt limits.** Codes and tokens are far too long to guess, but a scanner should neither load SQLite nor look like normal traffic in the log. The server counts only failures (a wrong connect code, a rejected token) and answers `429` with `Retry-After` once a limit is reached; the plugin and the command-line client wait that long without retrying. Counters live in `server.db`, so they work in CGI mode too; `selfsync sweep` removes those idle for a day. Requests without a token are not counted. The client address is the connection address (in CGI, `REMOTE_ADDR`). Behind a reverse proxy in `serve`/`socket` mode every request comes from the proxy: set `SELFSYNC_TRUSTED_PROXY=1` and let the proxy pass the address (the configs in [deploy/](deploy/) already do). Never enable it without a proxy that overwrites the header — anyone could then pick their own address. Without a known address (Unix socket, no trusted proxy) all clients share one counter.
+
+**Metrics.** With `SELFSYNC_METRICS_TOKEN` set, `GET /metrics` returns Prometheus text format; without it the route does not exist (404), with a wrong token it is 401. What it shows: server version and start time; per vault — files, folders, trash, history, current-version bytes, blob count and size, encryption, blobs requested from devices, and the last `selfsync verify` result (time, damaged and missing blobs, database errors, key record problem); per device — last contact time, client version, read-only flag; addresses currently blocked by the limiter; counters of 401, 403, 426, 429 and 5xx answers. Counters are kept in `server.db`, so a server that exits when idle does not lose them, and scraping does not count as activity: it does not keep a socket-activated server running. Device names are visible to whoever holds the token. Example:
+
+```yaml
+scrape_configs:
+  - job_name: selfsync
+    scheme: https
+    scrape_interval: 1m
+    authorization:
+      credentials: <SELFSYNC_METRICS_TOKEN>
+    static_configs:
+      - targets: ["sync.example.com"]
+```
+
+Each scrape lists the blob directory, so an interval of a minute or more is enough. A device silent for a week: `time() - selfsync_device_last_seen_timestamp_seconds > 7*86400`.
 
 ### Admin commands
 

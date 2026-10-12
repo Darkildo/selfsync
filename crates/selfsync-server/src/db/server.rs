@@ -53,7 +53,36 @@ ALTER TABLE join_codes ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0;
     "
 ALTER TABLE devices ADD COLUMN client TEXT NOT NULL DEFAULT '';
 ",
+    "
+-- Счётчики событий для /metrics: переживают выход сервера по простою.
+CREATE TABLE counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID;
+",
 ];
+
+/// Увеличить счётчик событий.
+pub fn bump_counter(c: &Connection, name: &str) -> rusqlite::Result<()> {
+    c.prepare_cached(
+        "INSERT INTO counters (name, value) VALUES (?1, 1)
+         ON CONFLICT(name) DO UPDATE SET value = value + 1",
+    )?
+    .execute(params![name])?;
+    Ok(())
+}
+
+pub fn counters(c: &Connection) -> rusqlite::Result<Vec<(String, i64)>> {
+    let mut st = c.prepare("SELECT name, value FROM counters ORDER BY name")?;
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+}
+
+/// Ключи лимитера, заблокированные сейчас, по правилу (`auth`, `redeem`).
+pub fn blocked_now(c: &Connection, now: i64) -> rusqlite::Result<Vec<(String, i64)>> {
+    let mut st = c.prepare(
+        "SELECT substr(key, 1, instr(key, ':') - 1) AS rule, COUNT(*) FROM throttle
+         WHERE blocked_until > ?1 AND instr(key, ':') > 0 GROUP BY rule ORDER BY rule",
+    )?;
+    st.query_map(params![now], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect()
+}
 
 /// Длина строки клиента в БД.
 const CLIENT_MAX: usize = 64;
