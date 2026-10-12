@@ -18,3 +18,14 @@ test("хранилище на сервере: строка настроек и �
   assert.match(noticeText({ kind: "storageDamaged", damaged: 0, serverProblem: true }) ?? "", /админ/);
   setLanguage("en");
 });
+
+test("место на сервере: строка настроек", async () => {
+  const { quotaText } = await import("../src/i18n.ts");
+  setLanguage("ru");
+  assert.equal(quotaText(undefined), null, "старый сервер — строки нет");
+  assert.equal(quotaText({ used: 0, soft: 0, hard: 0, held: 0 }), null);
+  assert.equal(quotaText({ used: 2048, soft: 0, hard: 0, held: 0 }), "занято 2.0 КБ");
+  const full = quotaText({ used: 2048, soft: 1024, hard: 4096, held: 3 }) ?? "";
+  assert.match(full, /^занято 2.0 КБ из 4.0 КБ, предупреждение с 1.0 КБ\. Места нет: файлов ждут отправки — 3/);
+  setLanguage("en");
+});

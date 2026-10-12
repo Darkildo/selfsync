@@ -100,6 +100,9 @@ pub struct SimConfig {
     /// Вероятность на шаге попросить клиента удалить локальные копии исключённой
     /// папки (`RemoveLocal`).
     pub remove_local_rate: f64,
+    /// Вероятность на шаге сменить жёсткую квоту vault'а: почти полный vault или без
+    /// порога. К успокоению порог снимается — отложенное должно дойти.
+    pub quota_rate: f64,
 }
 
 impl SimConfig {
@@ -122,6 +125,7 @@ impl SimConfig {
             no_merge: Vec::new(),
             download_limit_rate: 0.0,
             remove_local_rate: 0.0,
+            quota_rate: 0.0,
         }
     }
 
@@ -169,6 +173,8 @@ impl SimConfig {
         if c.encrypt_at.is_none() && r.chance(0.2) {
             c.no_merge = vec!["notes/**".into()];
         }
+        // Последним: поля выше (и траектории старых seed) не сдвигаются.
+        c.quota_rate = [0.0, 0.0, 0.01, 0.03][r.idx(4)];
         c
     }
 }
@@ -393,6 +399,18 @@ impl World {
         self.clients[c].cfg.max_download_size = limit;
         let config = self.clients[c].cfg.clone();
         self.deliver(c, Event::Configure { config });
+    }
+
+    /// Жёсткая квота vault'а: `Some(n)` — ещё `n` байт сверх занятого, `None` — без
+    /// порога.
+    pub fn set_quota_room(&mut self, room: Option<u64>) {
+        use selfsync_server::quota;
+        let v = self.state.vault("sim").expect("vault");
+        let c = v.pool.get().expect("conn");
+        let mut own = quota::own(&c).expect("quota");
+        own.hard = room.map(|n| quota::usage(&c).unwrap_or(0) + n);
+        quota::set_own(&c, &own).expect("quota");
+        self.log(format!("QUOTA {:?}", own.hard));
     }
 
     /// Сделать устройство клиента устройством только для чтения (токен тот же).
@@ -986,6 +1004,11 @@ impl World {
             self.set_download_limit(c, limit);
             return;
         }
+        if self.cfg.quota_rate > 0.0 && self.rng.chance(self.cfg.quota_rate) {
+            let room = [None, Some(0), Some(150), Some(2000)][self.rng.idx(4)];
+            self.set_quota_room(room);
+            return;
+        }
         if self.cfg.remove_local_rate > 0.0 && self.rng.chance(self.cfg.remove_local_rate) {
             let ex = self.clients[c].cfg.excludes.clone();
             if let Some(dir) = ex.iter().skip(1).find(|l| !l.starts_with('!')) {
@@ -1067,6 +1090,9 @@ impl World {
     /// Успокоение: без сбоев гоняем синк на всех клиентах, пока ничего не меняется.
     pub fn settle(&mut self) -> Result<(), String> {
         self.faults_enabled = false;
+        if self.cfg.quota_rate > 0.0 {
+            self.set_quota_room(None);
+        }
         for c in 0..self.clients.len() {
             if self.clients[c].engine.is_none() {
                 self.start_client(c);

@@ -60,6 +60,22 @@ fn lock_folder(_state: &Path) -> anyhow::Result<Option<std::fs::File>> {
     Ok(None)
 }
 
+/// Ошибка со всеми причинами: у reqwest сама ошибка — «error sending request», а
+/// «connection refused» или ошибка сертификата — в `source()`.
+fn chain(e: &dyn std::error::Error) -> String {
+    let mut s = e.to_string();
+    let mut cur = e.source();
+    while let Some(c) = cur {
+        let t = c.to_string();
+        if !s.contains(&t) {
+            s.push_str(": ");
+            s.push_str(&t);
+        }
+        cur = c.source();
+    }
+    s
+}
+
 fn failed(e: impl std::fmt::Display) -> IoResult {
     IoResult::Failed {
         message: e.to_string(),
@@ -326,10 +342,10 @@ impl Exec {
                         headers,
                         body: body.to_vec(),
                     },
-                    Err(e) => failed(e),
+                    Err(e) => failed(chain(&e)),
                 }
             }
-            Err(e) => failed(e),
+            Err(e) => failed(chain(&e)),
         }
     }
 

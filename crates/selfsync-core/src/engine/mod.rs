@@ -9,6 +9,7 @@ mod api;
 mod commands;
 mod crypto_flow;
 mod ctx;
+mod diagnose;
 mod pull;
 mod push;
 mod repair;

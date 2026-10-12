@@ -51,6 +51,9 @@ pub enum SyncError {
     Blocked(String),
     #[error("блоб не найден на сервере")]
     BlobGone,
+    /// Место vault'а (или сервера) закончилось: новый блоб не принят.
+    #[error("место на сервере закончилось: {0}")]
+    QuotaExceeded(String),
     #[error("данные повреждены: {0}")]
     Corrupt(String),
     /// Режим vault'а сменился посреди цикла — начать цикл заново.
@@ -59,6 +62,39 @@ pub enum SyncError {
 }
 
 pub type SyncResult<T> = Result<T, SyncError>;
+
+/// Файлы, которые ждут места на сервере. Ожидание снимается, когда сменится порог,
+/// освободится место (по сравнению с первым `VaultState` после отказа) или пройдёт
+/// [`QUOTA_RETRY_MS`].
+#[derive(Debug, Clone, Default)]
+pub struct QuotaHold {
+    pub keys: BTreeSet<String>,
+    /// Занято и порог из первого ответа сервера после отказа; `None` — ответа ещё не
+    /// было (состояние до отказа могло быть старше порога).
+    pub seen: Option<(u64, u64)>,
+    pub at: i64,
+}
+
+impl QuotaHold {
+    /// Новый ответ сервера: снять ожидание или запомнить квоту.
+    pub fn release(&mut self, vs: &pb::VaultState, now: i64) -> bool {
+        match self.seen {
+            Some((used, hard)) => vs.quota_hard != hard || vs.used_bytes < used,
+            // Порога у vault'а нет — отказал общий потолок сервера, его не видно:
+            // повтор не раньше QUOTA_RETRY_UNSEEN_MS.
+            None if vs.quota_hard == 0 => now - self.at >= QUOTA_RETRY_UNSEEN_MS,
+            None => {
+                self.seen = Some((vs.used_bytes, vs.quota_hard));
+                false
+            }
+        }
+    }
+}
+
+/// Повторить отправку ждущих места файлов не реже.
+pub const QUOTA_RETRY_MS: i64 = 60 * 60 * 1000;
+/// Повтор, когда порог vault'а не задан (отказал общий потолок сервера).
+pub const QUOTA_RETRY_UNSEEN_MS: i64 = 5 * 60 * 1000;
 
 /// Состояние движка.
 pub(crate) struct State {
@@ -105,6 +141,12 @@ pub(crate) struct State {
     pub read_only_notified: bool,
     /// Уведомление `StorageDamaged` показано; сбрасывается, когда повреждений нет.
     pub storage_notified: bool,
+    /// Файлы, новые блобы которых сервер не принял: место закончилось (F16).
+    pub quota_hold: Option<QuotaHold>,
+    /// Уведомление `QuotaFull` показано; сбрасывается, когда ждущих не осталось.
+    pub quota_full_notified: bool,
+    /// Уведомление `QuotaSoft` показано; сбрасывается, когда занято меньше порога.
+    pub quota_soft_notified: bool,
     /// Что изменил текущий цикл: локальные пути, тронутые синком, и отправленные.
     /// В конце цикла — `Notice::Synced`.
     pub pulled: BTreeSet<String>,
@@ -188,6 +230,9 @@ impl State {
             read_only_forced: false,
             read_only_notified: false,
             storage_notified: false,
+            quota_hold: None,
+            quota_full_notified: false,
+            quota_soft_notified: false,
             pulled: BTreeSet::new(),
             pushed: BTreeSet::new(),
             blocked: None,
@@ -293,6 +338,29 @@ impl State {
                 .retain(|c| !ex.is_excluded(&c.path) && !ex.is_excluded(&c.copy));
         }
         gone
+    }
+
+    /// Квота для статуса: из последнего `VaultState` и ждущих файлов.
+    pub fn quota_status(&self) -> QuotaStatus {
+        let vs = self.server_state.unwrap_or_default();
+        QuotaStatus {
+            used: vs.used_bytes,
+            soft: vs.quota_soft,
+            hard: vs.quota_hard,
+            held: self
+                .quota_hold
+                .as_ref()
+                .map_or(0, |h| u32::try_from(h.keys.len()).unwrap_or(u32::MAX)),
+        }
+    }
+
+    /// Наибольший файл, который отправляется: лимит устройства и лимит vault'а на
+    /// сервере (протокол 1.3; `0` — сервер его не сообщил).
+    pub fn max_upload(&self) -> u64 {
+        match self.server_state.map_or(0, |v| v.max_file_size) {
+            0 => self.cfg.max_file_size,
+            n => n.min(self.cfg.max_file_size),
+        }
     }
 
     /// Режим «только чтение» из `VaultState` (`None` — узнали по 403).
@@ -878,12 +946,17 @@ impl Ctx {
     }
 
     /// Запомнить `VaultState` из ответа сервера; статус — только если изменилось
-    /// состояние хранилища.
+    /// состояние хранилища или квота.
     pub fn note_server_state(&self, vs: &pb::VaultState) {
         let storage = StorageHealth::of(vs);
         let changed = self.with_mut(|s| {
             s.server_state = Some(*vs);
-            s.status.storage != storage
+            // Место освободилось или порог сменился: ждущие файлы — пробовать снова.
+            let now = s.now;
+            if s.quota_hold.as_mut().is_some_and(|h| h.release(vs, now)) {
+                s.quota_hold = None;
+            }
+            s.status.storage != storage || s.status.quota != s.quota_status()
         });
         if changed {
             self.set_status(|st| st.storage = storage);
@@ -893,6 +966,7 @@ impl Ctx {
     pub fn set_status(&self, f: impl FnOnce(&mut SyncStatus)) {
         let status = self.with_mut(|s| {
             f(&mut s.status);
+            s.status.quota = s.quota_status();
             s.status.pending = u32::try_from(s.index.pending_count()).unwrap_or(u32::MAX);
             s.status.conflicts = u32::try_from(s.index.conflicts.len()).unwrap_or(u32::MAX);
             s.status.encrypted = s.encrypted();

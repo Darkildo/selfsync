@@ -65,6 +65,19 @@ export interface SyncStatus {
   serverMinor?: number | null;
   /** Состояние хранилища на сервере по последнему `selfsync verify`. */
   storage?: StorageHealth;
+  /** Квота vault'а на сервере и файлы, которые ждут места. */
+  quota?: QuotaStatus;
+}
+
+export interface QuotaStatus {
+  /** Занято на сервере: текущие версии, история и корзина. */
+  used: number;
+  /** Предупреждение; 0 — без порога. */
+  soft: number;
+  /** Новые файлы не принимаются; 0 — без порога. */
+  hard: number;
+  /** Файлы, которые ждут места на сервере. */
+  held: number;
 }
 
 export interface StorageHealth {
@@ -92,6 +105,8 @@ export type Notice =
   | { kind: "recoveryPhrase"; words: string[] }
   | { kind: "readOnly"; pending: number }
   | { kind: "storageDamaged"; damaged: number; serverProblem: boolean }
+  | { kind: "quotaFull"; held: number }
+  | { kind: "quotaSoft"; used: number; soft: number }
   | { kind: "unsupportedName"; path: string }
   | { kind: "nonPortableName"; path: string }
   | { kind: "wrongPassword" }
@@ -178,6 +193,7 @@ export type UiCommand =
   | { type: "purgeDeleted"; paths: string[] }
   | { type: "history"; path: string }
   | { type: "restoreRevision"; path: string; rev: number }
+  | { type: "purgeHistory"; path: string; beforeRev: number }
   | { type: "devices" }
   | { type: "revokeDevice"; id: number }
   | { type: "createJoin"; name: string; readOnly?: boolean }

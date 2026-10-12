@@ -1,7 +1,7 @@
 // Строки интерфейса ru/en. Язык — как у Obsidian (moment.locale()). Ядро присылает
 // только коды и данные, весь текст формируется здесь.
 
-import type { Notice, StorageHealth, SyncStatus } from "./types.ts";
+import type { Notice, QuotaStatus, StorageHealth, SyncStatus } from "./types.ts";
 
 const en = {
   "status.idle": "Synced",
@@ -135,6 +135,10 @@ const en = {
   "history.current": "current",
   "history.restore": "Restore",
   "history.restored": "Revision {rev} restored as a new version",
+  "history.purge": "Delete old versions",
+  "history.purgeDesc": "Frees space on the server. The current version stays.",
+  "history.purgeConfirm": "Delete {n} old versions of {path} forever? This cannot be undone.",
+  "history.purged": "Old versions deleted: {n}",
 
   "encryption.heading": "Encryption",
   "encryption.on": "The vault is end-to-end encrypted: the server stores only ciphertext.",
@@ -154,6 +158,15 @@ const en = {
 
   "retention.name": "Keep deleted files, days",
   "retention.desc": "How long the server keeps deleted files for restoring (for the whole vault)",
+  "quota.name": "Space on the server",
+  "quota.desc": "Current versions, history and deleted files of this vault",
+  "quota.used": "{used} used",
+  "quota.usedOf": "{used} of {hard} used",
+  "quota.soft": "warning at {soft}",
+  "quota.held": "Out of space: {n} files wait to be sent. Empty the trash or delete old versions in a file's history, or ask the server admin for more space.",
+  "status.quotaFull": "out of space: {n} waiting",
+  "notice.quotaFull": "selfsync: the vault is out of space on the server — {n} files wait to be sent. Empty the trash or delete old versions in a file's history, or ask the server admin for more space.",
+  "notice.quotaSoft": "selfsync: the vault takes {used} on the server, past the warning level of {soft}.",
   "storage.name": "Server storage",
   "storage.desc": "Result of the last integrity check on the server (selfsync verify)",
   "storage.ok": "No problems",
@@ -368,6 +381,10 @@ const ru: Record<Key, string> = {
   "history.renamed": "переименован из {from}",
   "history.device": "устройство №{id}",
   "history.current": "текущая",
+  "history.purge": "Удалить старые версии",
+  "history.purgeDesc": "Освобождает место на сервере. Текущая версия остаётся.",
+  "history.purgeConfirm": "Удалить навсегда старых версий {path}: {n}? Отменить будет нельзя.",
+  "history.purged": "Удалено старых версий: {n}",
   "history.restore": "Вернуть",
   "history.restored": "Ревизия {rev} возвращена новой версией",
 
@@ -389,6 +406,15 @@ const ru: Record<Key, string> = {
 
   "retention.name": "Хранить удалённое, дней",
   "retention.desc": "Сколько сервер хранит удалённые файлы для восстановления (для всего vault'а)",
+  "quota.name": "Место на сервере",
+  "quota.desc": "Текущие версии, история и удалённые файлы этого vault'а",
+  "quota.used": "занято {used}",
+  "quota.usedOf": "занято {used} из {hard}",
+  "quota.soft": "предупреждение с {soft}",
+  "quota.held": "Места нет: файлов ждут отправки — {n}. Очистите корзину или удалите старые версии в истории файла, либо попросите админа сервера о месте.",
+  "status.quotaFull": "нет места: ждут {n}",
+  "notice.quotaFull": "selfsync: место vault'а на сервере закончилось — файлов ждут отправки: {n}. Очистите корзину или удалите старые версии в истории файла, либо попросите админа сервера о месте.",
+  "notice.quotaSoft": "selfsync: vault занимает на сервере {used} — больше порога предупреждения ({soft}).",
   "storage.name": "Хранилище на сервере",
   "storage.desc": "Итог последней проверки целостности на сервере (selfsync verify)",
   "storage.ok": "Проблем нет",
@@ -493,6 +519,15 @@ export function formatBytes(n: number): string {
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+/** Строка о месте на сервере; `null` — сервер его не сообщает (старее 0.4.0). */
+export function quotaText(q: QuotaStatus | undefined): string | null {
+  if (!q || (q.used === 0 && q.soft === 0 && q.hard === 0 && q.held === 0)) return null;
+  const parts = [q.hard > 0 ? t("quota.usedOf", { used: formatBytes(q.used), hard: formatBytes(q.hard) }) : t("quota.used", { used: formatBytes(q.used) })];
+  if (q.soft > 0) parts.push(t("quota.soft", { soft: formatBytes(q.soft) }));
+  const line = parts.join(", ");
+  return q.held > 0 ? `${line}. ${t("quota.held", { n: q.held })}` : line;
+}
+
 /** Строка о хранилище на сервере; `null` — сервер о нём ничего не сообщил (старее 0.4.0). */
 export function storageText(s: StorageHealth | undefined): string | null {
   if (!s || (s.verifiedAt <= 0 && s.damaged === 0 && !s.serverProblem)) return null;
@@ -533,6 +568,10 @@ export function noticeText(n: Notice): string | null {
       return null;
     case "readOnly":
       return t("notice.readOnly", { n: n.pending });
+    case "quotaFull":
+      return t("notice.quotaFull", { n: n.held });
+    case "quotaSoft":
+      return t("notice.quotaSoft", { used: formatBytes(n.used), soft: formatBytes(n.soft) });
     case "storageDamaged":
       return n.serverProblem ? t("notice.storageServerProblem") : t("notice.storageDamaged", { n: n.damaged });
     case "unsupportedName":

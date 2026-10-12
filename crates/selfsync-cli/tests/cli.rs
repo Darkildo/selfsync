@@ -17,14 +17,57 @@ struct Server {
 
 async fn server() -> Server {
     let dir = tempfile::tempdir().unwrap();
-    let state = AppState::new(
-        selfsync_server::Config::for_tests(dir.path().to_path_buf()),
-        Mode::Serve,
-    );
+    let config = selfsync_server::Config::for_tests(dir.path().to_path_buf());
+    serve(config, dir).await
+}
+
+async fn serve(config: selfsync_server::Config, dir: tempfile::TempDir) -> Server {
+    let state = AppState::new(config, Mode::Serve);
     let listener = selfsync_server::modes::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.describe());
     let st = state.clone();
     tokio::spawn(async move { selfsync_server::modes::run(st, listener, Duration::ZERO).await });
+    Server {
+        url,
+        state,
+        _dir: dir,
+    }
+}
+
+/// Сервер за «прокси» с типичными огрехами настройки: тело больше 1 МиБ — 413 со
+/// страницей прокси, заголовок версии протокола из ответов срезается.
+async fn proxy() -> Server {
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::middleware::Next;
+    use axum::response::{IntoResponse, Response};
+    async fn layer(req: Request<Body>, next: Next) -> Response {
+        let big = req
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
+            .is_some_and(|n| n > 1 << 20);
+        if big {
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "<html>413 Request Entity Too Large</html>",
+            )
+                .into_response();
+        }
+        let mut resp = next.run(req).await;
+        resp.headers_mut()
+            .remove(selfsync_core::proto::HEADER_PROTO);
+        resp
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let state = AppState::new(
+        selfsync_server::Config::for_tests(dir.path().to_path_buf()),
+        Mode::Serve,
+    );
+    let app = selfsync_server::router(state.clone()).layer(axum::middleware::from_fn(layer));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await });
     Server {
         url,
         state,
@@ -889,16 +932,162 @@ async fn rekey_then_other_folder_needs_password() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn storage_state_is_kept_for_status() {
+async fn server_state_is_kept_for_status() {
     let srv = server().await;
     let (a, ca) = folder(&srv, "stor", "a");
     std::fs::write(a.path().join("x.md"), "x\n").unwrap();
     assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
-    let marker = a.path().join(".selfsync/storage.json");
-    assert!(!marker.exists(), "verify ещё не запускался");
+    let marker = a.path().join(".selfsync/server.json");
+    let read = || -> runner::ServerState {
+        serde_json::from_slice(&std::fs::read(&marker).unwrap()).unwrap()
+    };
+    // Занятое место сервер сообщает и без квоты.
+    assert!(read().quota.used > 0);
+    assert_eq!(read().storage.verified_at, 0, "verify ещё не запускался");
     selfsync_server::verify::verify_vault(&srv.state.config, "stor", Default::default()).unwrap();
+    {
+        let v = srv.state.vault("stor").unwrap();
+        let c = v.pool.get().unwrap();
+        selfsync_server::quota::set_own(
+            &c,
+            &selfsync_server::quota::Own {
+                soft: Some(1),
+                hard: Some(selfsync_server::quota::usage(&c).unwrap() + 10),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    std::fs::write(a.path().join("big.md"), "y".repeat(100)).unwrap();
     assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
-    let s: selfsync_core::engine::StorageHealth =
-        serde_json::from_slice(&std::fs::read(&marker).unwrap()).unwrap();
-    assert!(s.verified_at > 0 && !s.damaged(), "{s:?}");
+    let s = read();
+    assert!(s.storage.verified_at > 0 && !s.storage.damaged(), "{s:?}");
+    assert_eq!((s.quota.soft, s.quota.held), (1, 1), "{s:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn purge_history_frees_space() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "ph", "a");
+    for v in ["v1\n", "v2\n", "v3\n"] {
+        std::fs::write(a.path().join("x.md"), v).unwrap();
+        assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    }
+    let (o, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::PurgeHistory {
+            path: "x.md".into(),
+            before_rev: u64::MAX,
+        }),
+    )
+    .await;
+    assert_eq!(
+        (o, r),
+        (Outcome::Synced, Some(UiResult::Restored { count: 2 }))
+    );
+    let (_, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::History {
+            path: "x.md".into(),
+        }),
+    )
+    .await;
+    let Some(UiResult::History { revisions }) = r else {
+        panic!("{r:?}")
+    };
+    assert_eq!(revisions.iter().map(|x| x.rev).collect::<Vec<_>>(), [3]);
+}
+
+async fn diagnose(dir: &Path, cfg: &Config) -> Vec<(String, String)> {
+    let r = runner::folder_command(dir, cfg, UiCommand::Diagnose)
+        .await
+        .unwrap();
+    let UiResult::Diagnosis { checks } = r else {
+        panic!("{r:?}")
+    };
+    checks.into_iter().map(|c| (c.step, c.code)).collect()
+}
+
+fn pairs(x: &[(&str, &str)]) -> Vec<(String, String)> {
+    x.iter()
+        .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn diagnose_healthy_server() {
+    let srv = server().await;
+    let (a, mut ca) = folder(&srv, "diag", "a");
+    assert_eq!(
+        diagnose(a.path(), &ca).await,
+        pairs(&[
+            ("server", "ok"),
+            ("proxy", "ok"),
+            ("version", "ok"),
+            ("clock", "ok"),
+            ("token", "ok"),
+            ("body", "ok"),
+            ("longpoll", "off"),
+        ])
+    );
+    ca.use_wait = true;
+    let d = diagnose(a.path(), &ca).await;
+    assert_eq!(
+        d.last().unwrap(),
+        &("longpoll".into(), "ok".into()),
+        "{d:?}"
+    );
+    // Проверка ничего не синхронизирует.
+    assert!(!a.path().join(".selfsync/index.bin").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn diagnose_finds_typical_problems() {
+    // Прокси перед сервером: client_max_body_size 1m и срезанный заголовок версии.
+    let proxied = proxy().await;
+    let (a, ca) = folder(&proxied, "diag", "a");
+    let d = diagnose(a.path(), &ca).await;
+    assert!(
+        d.contains(&("proxy".into(), "headers_stripped".into())),
+        "{d:?}"
+    );
+    assert!(d.contains(&("body".into(), "body_limit".into())), "{d:?}");
+    // Свой лимит файла сервера — не беда прокси.
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = selfsync_server::Config::for_tests(dir.path().to_path_buf());
+    config.max_blob_size = 1 << 20;
+    let tiny = serve(config, dir).await;
+    let (t, ct) = folder(&tiny, "diag", "t");
+    let d = diagnose(t.path(), &ct).await;
+    assert!(d.contains(&("body".into(), "server_limit".into())), "{d:?}");
+
+    // Отозванный токен.
+    let srv = server().await;
+    let (b, cb) = folder(&srv, "diag", "b");
+    {
+        let c = srv.state.server_pool().unwrap().get().unwrap();
+        selfsync_server::db::server::revoke_by_name(&c, Some("diag"), "b").unwrap();
+    }
+    let d = diagnose(b.path(), &cb).await;
+    assert_eq!(
+        d.last().unwrap(),
+        &("token".into(), "unauthorized".into()),
+        "{d:?}"
+    );
+
+    // Никто не слушает.
+    let closed = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap()
+    };
+    let cc = Config {
+        server: format!("http://{closed}"),
+        ..cb.clone()
+    };
+    let d = diagnose(b.path(), &cc).await;
+    assert_eq!(d, pairs(&[("server", "refused")]), "{d:?}");
 }

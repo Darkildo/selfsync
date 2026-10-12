@@ -5,7 +5,9 @@ use anyhow::Context;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use selfsync_cli::config::{Config, STATE_DIR};
 use selfsync_cli::runner::{self, Options, Outcome, VaultCommand};
-use selfsync_core::engine::{ConflictChoice, StorageHealth, UiCommand, UiResult};
+use selfsync_core::engine::{
+    ConflictChoice, DiagCheck, DiagLevel, QuotaStatus, StorageHealth, UiCommand, UiResult,
+};
 use selfsync_core::index::Index;
 
 #[derive(Parser)]
@@ -101,6 +103,9 @@ enum Cmd {
     },
     /// Состояние: подключение, очередь, конфликты.
     Status,
+    /// Проверить соединение по шагам: адрес и сертификат, прокси, версия, часы,
+    /// токен, лимит размера запроса, long-poll. Без синка; код выхода 1 при отказе.
+    Check,
     /// История файла: ревизии на сервере (номер, дата, размер, устройство).
     History {
         /// Путь внутри папки.
@@ -127,6 +132,19 @@ enum Cmd {
     Purge {
         #[arg(required = true)]
         paths: Vec<String>,
+        /// Подтверждение: без него ничего не стирается.
+        #[arg(long)]
+        yes: bool,
+        #[command(flatten)]
+        v: VaultArgs,
+    },
+    /// Стереть старые версии файла на сервере (освободить место). Текущая версия и
+    /// последняя перед удалением остаются.
+    PurgeHistory {
+        path: String,
+        /// Стереть ревизии старше этой (по умолчанию — все старые).
+        #[arg(long)]
+        before: Option<u64>,
         /// Подтверждение: без него ничего не стирается.
         #[arg(long)]
         yes: bool,
@@ -301,6 +319,32 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     return print_json(&serde_json::json!({ "count": count }));
                 }
                 println!("стёрто окончательно: {count}");
+                Ok(())
+            })
+            .await;
+        }
+        Cmd::PurgeHistory {
+            path,
+            before,
+            yes,
+            v,
+        } => {
+            if !yes {
+                anyhow::bail!("стирание старых версий необратимо: добавьте --yes");
+            }
+            let path = vault_path(&dir, &path);
+            let cmd = VaultCommand::Ui(UiCommand::PurgeHistory {
+                path: path.clone(),
+                before_rev: before.unwrap_or(u64::MAX),
+            });
+            return vault_command(&dir, v, cmd, |r, json| {
+                let UiResult::Restored { count } = r else {
+                    anyhow::bail!("неожиданный ответ: {r:?}");
+                };
+                if json {
+                    return print_json(&serde_json::json!({ "count": count }));
+                }
+                println!("{path}: стёрто старых версий — {count}");
                 Ok(())
             })
             .await;
@@ -635,6 +679,29 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 _ => Ok(outcome(o)),
             };
         }
+        Cmd::Check => {
+            let cfg = Config::load(&dir)?;
+            let r = runner::folder_command(&dir, &cfg, UiCommand::Diagnose).await?;
+            let UiResult::Diagnosis { checks } = r else {
+                anyhow::bail!("неожиданный ответ: {r:?}");
+            };
+            let mut failed = false;
+            for c in &checks {
+                failed |= c.level == DiagLevel::Fail;
+                let mark = match c.level {
+                    DiagLevel::Ok => "✓",
+                    DiagLevel::Warn => "⚠",
+                    DiagLevel::Fail => "✗",
+                    DiagLevel::Skip => "–",
+                };
+                println!("{mark} {}: {}", diag_step(&c.step), diag_text(c));
+            }
+            return Ok(if failed {
+                ExitCode::from(1)
+            } else {
+                ExitCode::SUCCESS
+            });
+        }
         Cmd::Status => {
             let cfg = Config::load(&dir)?;
             println!("сервер:     {}", cfg.server);
@@ -680,11 +747,16 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     if dir.join(STATE_DIR).join(runner::READ_ONLY_MARKER).exists() {
                         println!("режим:      только чтение (локальные правки не отправляются)");
                     }
-                    if let Some(s) = std::fs::read(dir.join(STATE_DIR).join(runner::STORAGE_MARKER))
+                    if let Some(s) = std::fs::read(dir.join(STATE_DIR).join(runner::SERVER_MARKER))
                         .ok()
-                        .and_then(|b| serde_json::from_slice::<StorageHealth>(&b).ok())
+                        .and_then(|b| serde_json::from_slice::<runner::ServerState>(&b).ok())
                     {
-                        println!("хранилище:  {}", storage_line(&s));
+                        if s.storage != StorageHealth::default() {
+                            println!("хранилище:  {}", storage_line(&s.storage));
+                        }
+                        if let Some(q) = quota_line(&s.quota) {
+                            println!("место:      {q}");
+                        }
                     }
                     for c in &idx.conflicts {
                         println!("конфликт:   {} → копия {}", c.path, c.copy);
@@ -808,6 +880,115 @@ fn vault_path(dir: &std::path::Path, p: &str) -> String {
     };
     let rel = rel.replace('\\', "/");
     rel.trim_start_matches("./").trim_matches('/').to_owned()
+}
+
+fn diag_step(step: &str) -> &str {
+    match step {
+        "server" => "сервер",
+        "proxy" => "прокси",
+        "version" => "версия",
+        "clock" => "часы",
+        "token" => "токен",
+        "body" => "большие запросы",
+        "longpoll" => "long-poll",
+        other => other,
+    }
+}
+
+/// Итог шага проверки соединения: что не так и что сделать.
+fn diag_text(c: &DiagCheck) -> String {
+    let d = &c.detail;
+    match (c.step.as_str(), c.code.as_str()) {
+        ("server", "ok") => format!("отвечает, selfsync {d}"),
+        (_, "tls") => "сертификат не принят: самоподписанный, истёк или выписан на другое \
+                       имя. Нужен сертификат доверенного центра (Let's Encrypt) на этот адрес"
+            .into(),
+        (_, "dns") => "имя сервера не найдено — проверьте адрес".into(),
+        (_, "refused") => "соединение отклонено — сервер не запущен или порт закрыт".into(),
+        (_, "timeout") => {
+            "сервер не ответил — адрес недоступен из этой сети или блокируется".into()
+        }
+        (_, "network") => format!("сеть: {d}"),
+        (_, "not_selfsync") => {
+            format!("по адресу не selfsync ({d}) — проверьте адрес и путь в прокси")
+        }
+        (_, "headers_stripped") => "прокси или CDN убирает заголовок x-selfsync-proto из \
+                                    ответов — без него клиент не узнает версию сервера"
+            .into(),
+        (_, "proto_major") => {
+            format!("сервер другой версии протокола ({d}) — обновите клиент или сервер")
+        }
+        (_, "server_old") => {
+            format!("сервер {d} старее клиента — часть возможностей недоступна, обновите его")
+        }
+        ("version", "ok") => format!("совпадает ({d})"),
+        (_, "skew") => format!("часы расходятся с сервером на {d} с — проверьте время"),
+        (_, "no_date") => "сервер не сообщил время".into(),
+        ("token", "ok") => "принят".into(),
+        ("token", "read_only") => "принят, устройство только для чтения".into(),
+        (_, "unauthorized") => {
+            "не принят — устройство отозвано или токен неверный, подключитесь заново".into()
+        }
+        (_, "client_old") => "сервер требует более новый клиент — обновите selfsync-cli".into(),
+        (_, "rate_limited") => "сервер временно ограничил попытки — повторите позже".into(),
+        ("body", "ok") => "проходят".into(),
+        (_, "server_limit") => "проходят до лимита файла сервера".into(),
+        (_, "body_limit") => format!(
+            "прокси не пропускает запросы больше ~1,5 МБ ({d}) — поднимите лимит \
+             (nginx: client_max_body_size 32m)"
+        ),
+        (_, "quota") => "не проверено — место vault'а закончилось".into(),
+        ("body", "read_only") => "не проверяется на устройстве только для чтения".into(),
+        (_, "unexpected") => format!("неожиданный ответ ({d})"),
+        ("longpoll", "ok") => "работает".into(),
+        (_, "off") => "выключен (use_wait = false): изменения приходят по опросу".into(),
+        (_, "changed") => "не проверено — vault изменился во время проверки".into(),
+        (_, "no_longpoll") => "сервер отвечает сразу (CGI или прокси) — выключите use_wait \
+                               в .selfsync/config.toml"
+            .into(),
+        (_, "failed") => format!(
+            "запрос оборвался ({d}) — прокси рвёт долгие запросы: поднимите таймаут \
+             (nginx: proxy_read_timeout 60s) или выключите use_wait"
+        ),
+        ("clock", "ok") | ("proxy", "ok") => "в порядке".into(),
+        (_, code) => format!("{code} {d}"),
+    }
+}
+
+/// Строка `status` о квоте vault'а (по последнему синку); `None` — сервер старше 0.4.0.
+fn quota_line(q: &QuotaStatus) -> Option<String> {
+    if *q == QuotaStatus::default() {
+        return None;
+    }
+    let mut s = format!("занято {}", fmt_bytes(q.used));
+    if q.hard > 0 {
+        s.push_str(&format!(" из {}", fmt_bytes(q.hard)));
+    }
+    if q.soft > 0 {
+        s.push_str(&format!(", предупреждение с {}", fmt_bytes(q.soft)));
+    }
+    if q.held > 0 {
+        s.push_str(&format!(
+            "; места нет — ждут отправки: {} (purge, purge-history)",
+            q.held
+        ));
+    }
+    Some(s)
+}
+
+fn fmt_bytes(n: u64) -> String {
+    const U: [&str; 5] = ["Б", "КиБ", "МиБ", "ГиБ", "ТиБ"];
+    let mut v = n as f64;
+    let mut i = 0;
+    while v >= 1024.0 && i < U.len() - 1 {
+        v /= 1024.0;
+        i += 1;
+    }
+    if i == 0 {
+        format!("{n} {}", U[0])
+    } else {
+        format!("{v:.1} {}", U[i])
+    }
 }
 
 /// Строка `status` о хранилище на сервере (по последнему синку).

@@ -124,8 +124,59 @@ fn strip_tag<'a>(base: &'a str, tag: &str) -> Option<&'a str> {
     head.strip_suffix(tag)
 }
 
+/// Пути индекса внутри `from` (и сам `from`), чьё наблюдение совпадает с тем, что
+/// сейчас лежит на диске: событие переименования пришло поздно, и синк успел вернуть
+/// файл по старому пути (отменённое удаление, правка с другого устройства). Это уже не
+/// тот файл, что переехал: его база и ревизия к новому имени не относятся.
+async fn still_in_place(cx: &Ctx, from: &str, to: &str) -> SyncResult<BTreeSet<String>> {
+    let mut out = BTreeSet::new();
+    // Смена регистра или нормализации: на ФС без различия это тот же путь.
+    if from.to_lowercase() == to.to_lowercase() {
+        return Ok(out);
+    }
+    let from_vp = VaultPath::parse(from).ok();
+    let known: Vec<(String, Option<LocalObs>, bool)> = cx.with(|s| {
+        s.index
+            .files
+            .iter()
+            .filter(|(k, _)| {
+                k.as_str() == from
+                    || match (&from_vp, VaultPath::parse(k).ok()) {
+                        (Some(f), Some(kp)) => kp.is_inside(f),
+                        _ => false,
+                    }
+            })
+            .map(|(k, f)| (k.clone(), f.local, f.folder))
+            .collect()
+    });
+    for (k, local, folder) in known {
+        let Some(local) = local else { continue };
+        let Some(meta) = cx.stat(&k).await? else {
+            continue;
+        };
+        let same = if folder {
+            meta.dir
+        } else {
+            !meta.dir && meta.size == local.size && meta.mtime == local.mtime
+        };
+        if same {
+            out.insert(k);
+        }
+    }
+    Ok(out)
+}
+
 /// Вносит в индекс переименования из событий Obsidian.
-fn apply_rename_events(cx: &Ctx) {
+async fn apply_rename_events(cx: &Ctx) -> SyncResult<()> {
+    let pending = cx.with(|s| s.renames.clone());
+    let mut in_place = BTreeSet::new();
+    for (from_raw, to_raw) in &pending {
+        let (Ok(from), Ok(to)) = (VaultPath::normalize(from_raw), VaultPath::normalize(to_raw))
+        else {
+            continue;
+        };
+        in_place.extend(still_in_place(cx, from.as_str(), to.as_str()).await?);
+    }
     cx.with_mut(|s| {
         let renames = std::mem::take(&mut s.renames);
         for (from_raw, to_raw) in renames {
@@ -173,7 +224,7 @@ fn apply_rename_events(cx: &Ctx) {
                     _ => None,
                 };
                 let Some(new_key) = new_key else { continue };
-                if s.index.files.contains_key(&new_key) {
+                if s.index.files.contains_key(&new_key) || in_place.contains(&k) {
                     s.dirty.insert(k);
                     s.dirty.insert(new_key);
                     continue;
@@ -194,6 +245,7 @@ fn apply_rename_events(cx: &Ctx) {
             }
         }
     });
+    Ok(())
 }
 
 /// Обновляет наблюдение одного пути.
@@ -217,7 +269,7 @@ async fn observe(cx: &Ctx, path: &str, meta: &FileMeta, delta: &mut ScanDelta) -
         let unchanged = f
             .and_then(|f| f.local.as_ref())
             .is_some_and(|l| l.size == meta.size && l.mtime == meta.mtime);
-        (f.is_some(), unchanged, s.cfg.max_file_size)
+        (f.is_some(), unchanged, s.max_upload())
     });
     if unchanged {
         return Ok(());
@@ -353,7 +405,7 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
     if !ev.is_empty() {
         cx.log(LogLevel::Debug, format!("rename events {ev:?}"));
     }
-    apply_rename_events(cx);
+    apply_rename_events(cx).await?;
     let full = cx.with(|s| {
         s.need_full_scan
             || s.last_full_scan == 0

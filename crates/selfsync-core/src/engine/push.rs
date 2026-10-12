@@ -7,7 +7,7 @@
 use selfsync_proto::v1 as pb;
 
 use super::api;
-use super::ctx::{Ctx, SMALL_BLOB, SyncError, SyncResult};
+use super::ctx::{Ctx, QUOTA_RETRY_MS, QuotaHold, SMALL_BLOB, SyncError, SyncResult};
 use super::resolve::{Remote, resolve_content, resolve_delete, resolve_rename};
 use super::transfer::{
     PreparedBlob, Src, prepare_big, prepare_small, unchanged_since, upload_big, upload_small,
@@ -35,7 +35,12 @@ fn depth(p: &str) -> usize {
     p.matches('/').count()
 }
 
-fn plan(files: &std::collections::BTreeMap<String, FileState>, rebaselined: bool) -> Vec<Item> {
+/// `held` — файлы, которые ждут места на сервере: их содержимое не отправляется.
+fn plan(
+    files: &std::collections::BTreeMap<String, FileState>,
+    rebaselined: bool,
+    held: Option<&std::collections::BTreeSet<String>>,
+) -> Vec<Item> {
     let mut mkdirs = Vec::new();
     let mut renames = Vec::new();
     let mut puts = Vec::new();
@@ -70,6 +75,9 @@ fn plan(files: &std::collections::BTreeMap<String, FileState>, rebaselined: bool
             continue;
         }
         if f.content_dirty() {
+            if held.is_some_and(|h| h.contains(k)) {
+                continue;
+            }
             let (note, size) = (
                 VaultPath::parse(k).is_ok_and(|p| p.is_note()),
                 f.local.map_or(0, |l| l.size),
@@ -108,8 +116,22 @@ fn vp(key: &str) -> SyncResult<VaultPath> {
 /// Отправляет всё, что изменилось локально. Возвращает, было ли что отправлять.
 pub(crate) async fn push(cx: &Ctx) -> SyncResult<bool> {
     let mut did = false;
+    cx.with_mut(|s| {
+        if s.quota_hold
+            .as_ref()
+            .is_some_and(|h| s.now - h.at >= QUOTA_RETRY_MS)
+        {
+            s.quota_hold = None;
+        }
+    });
     for _round in 0..6 {
-        let items = cx.with(|s| plan(&s.index.files, s.index.rebaselined));
+        let items = cx.with(|s| {
+            plan(
+                &s.index.files,
+                s.index.rebaselined,
+                s.quota_hold.as_ref().map(|h| &h.keys),
+            )
+        });
         cx.log(LogLevel::Debug, format!("push plan {items:?}"));
         if items.is_empty() {
             break;
@@ -150,7 +172,51 @@ pub(crate) async fn push(cx: &Ctx) -> SyncResult<bool> {
             cx.set_status(|st| st.done = u32::try_from(idx).unwrap_or(u32::MAX));
         }
     }
+    let held = cx.with_mut(|s| {
+        let held = s.quota_hold.as_ref().map_or(0, |h| h.keys.len());
+        let first = held > 0 && !s.quota_full_notified;
+        s.quota_full_notified = held > 0;
+        first.then_some(u32::try_from(held).unwrap_or(u32::MAX))
+    });
+    if let Some(held) = held {
+        cx.notify(Notice::QuotaFull { held });
+    }
     Ok(did)
+}
+
+/// Сервер не принял новый блоб файла: место закончилось. Файл ждёт, пока оно
+/// появится; остальное (удаления, переименования, скачивание) идёт своим чередом.
+fn hold_for_quota(cx: &Ctx, key: &str) {
+    cx.with_mut(|s| {
+        let now = s.now;
+        s.quota_hold
+            .get_or_insert_with(|| QuotaHold {
+                keys: Default::default(),
+                seen: None,
+                at: now,
+            })
+            .keys
+            .insert(key.to_owned());
+    });
+}
+
+/// Сервер не принял файл по размеру (лимит vault'а меньше лимита устройства):
+/// как `too_large` при сканировании — до следующей правки файла.
+fn reject_too_large(cx: &Ctx, key: &str, obs: &LocalObs) {
+    let first = cx.with_mut(|s| {
+        let Some(f) = s.index.files.get_mut(key) else {
+            return false;
+        };
+        let first = f.rejected.as_ref().is_none_or(|(c, _)| c != "too_large");
+        f.rejected = Some(("too_large".into(), obs.plain));
+        first
+    });
+    if first {
+        cx.notify(Notice::TooLarge {
+            path: key.to_owned(),
+            size: obs.size,
+        });
+    }
 }
 
 /// Новое имя, которого не создать на Windows и Android: файл уйдёт на сервер, но
@@ -248,14 +314,15 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
     let mut blobs: Vec<(String, PreparedBlob, LocalObs)> = Vec::new();
     for item in batch {
         let base_rev = match &item {
-            Item::Mkdir { key } | Item::Rename { key, .. } | Item::Put { key } => {
+            Item::Mkdir { key } | Item::Rename { key, .. } => {
                 cx.with(|s| s.index.files.get(key).map_or(0, |f| f.base_rev))
             }
             // Ревизия, содержимое которой здесь не видели (переименование или
-            // tombstone, сверка ещё впереди), не основание удалять: с base_rev 0
-            // сервер ответит конфликтом, и resolve_delete удалит только ту же версию,
-            // а чужую правку вернёт.
-            Item::Delete { key } => cx.with(|s| {
+            // tombstone, сверка ещё впереди), не основание ни удалять, ни писать
+            // поверх: с base_rev 0 сервер ответит конфликтом, и resolve_delete удалит
+            // только ту же версию, а resolve_content сольёт правки по известной базе
+            // или сохранит обе.
+            Item::Put { key } | Item::Delete { key } => cx.with(|s| {
                 s.index.files.get(key).map_or(0, |f| {
                     if !f.folder && f.base_blob.is_none() {
                         0
@@ -330,14 +397,29 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
         let hashes: Vec<Hash> = blobs.iter().map(|b| b.1.hash).collect();
         let missing = api::blobs_missing(cx, &hashes).await?;
         let mut failed: Vec<String> = Vec::new();
+        let mut skipped: Vec<String> = Vec::new();
         for (key, b, obs) in &blobs {
             if !missing.contains(&b.hash) {
                 continue;
             }
-            if b.data.is_some() {
-                upload_small(cx, b).await?;
-            } else if !upload_big(cx, key, Src::Vault(key), obs, b, keys.as_ref()).await? {
-                failed.push(key.clone());
+            let res = if b.data.is_some() {
+                upload_small(cx, b).await.map(|()| true)
+            } else {
+                upload_big(cx, key, Src::Vault(key), obs, b, keys.as_ref()).await
+            };
+            match res {
+                Ok(true) => {}
+                Ok(false) => failed.push(key.clone()),
+                Err(SyncError::QuotaExceeded(m)) => {
+                    cx.log(LogLevel::Warn, format!("{key}: не отправлен — {m}"));
+                    hold_for_quota(cx, key);
+                    skipped.push(key.clone());
+                }
+                Err(SyncError::Http { code, .. }) if code == "too_large" => {
+                    reject_too_large(cx, key, obs);
+                    skipped.push(key.clone());
+                }
+                Err(e) => return Err(e),
             }
         }
         if !failed.is_empty() {
@@ -346,7 +428,11 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
                     s.dirty.insert(k.clone());
                 }
             });
-            prepared.retain(|p| !matches!(&p.item, Item::Put { key } if failed.contains(key)));
+        }
+        if !failed.is_empty() || !skipped.is_empty() {
+            prepared.retain(|p| {
+                !matches!(&p.item, Item::Put { key } if failed.contains(key) || skipped.contains(key))
+            });
         }
     }
     if prepared.is_empty() {

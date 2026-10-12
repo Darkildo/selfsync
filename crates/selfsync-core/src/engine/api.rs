@@ -53,6 +53,7 @@ fn error_of(status: u16, headers: &[(String, String)], body: &[u8]) -> SyncError
             retry_after_s: retry_after(headers),
         },
         426 => SyncError::ProtoUnsupported(e.supported_proto),
+        507 if e.code == "quota_exceeded" => SyncError::QuotaExceeded(e.message),
         s if s >= 500 => SyncError::Server {
             status: s,
             code: e.code,
@@ -317,6 +318,25 @@ pub async fn purge_deleted(cx: &Ctx, paths: Vec<pb::Path>) -> SyncResult<pb::Pur
     call(
         cx,
         proto_req("DELETE", "/v1/deleted".into(), &pb::PathList { paths }),
+    )
+    .await
+}
+
+pub async fn purge_history(
+    cx: &Ctx,
+    path: pb::Path,
+    before_rev: u64,
+) -> SyncResult<pb::PurgeResult> {
+    call(
+        cx,
+        proto_req(
+            "POST",
+            "/v1/history/purge".into(),
+            &pb::HistoryPurge {
+                path: Some(path),
+                before_rev,
+            },
+        ),
     )
     .await
 }

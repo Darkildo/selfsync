@@ -98,6 +98,12 @@ pub fn read_only_minor() -> u32 {
 }
 
 /// Клиент устройства (`plugin/0.3.0`) старее `min`; пустой или неразборчивый — тоже.
+/// Минорная версия протокола, с которой сервер стирает старые версии файла.
+#[wasm_bindgen(js_name = quotaMinor)]
+pub fn quota_minor() -> u32 {
+    selfsync_core::proto::MINOR_QUOTA
+}
+
 #[wasm_bindgen(js_name = clientOlderThan)]
 pub fn client_older_than(client: &str, min: &str) -> bool {
     selfsync_core::version::older_than(client, min)

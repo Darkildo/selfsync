@@ -457,6 +457,51 @@ pub struct SyncStatus {
     /// Состояние хранилища на сервере по последнему `selfsync verify`.
     #[serde(default)]
     pub storage: StorageHealth,
+    /// Квота vault'а на сервере и файлы, которые ждут места.
+    #[serde(default)]
+    pub quota: QuotaStatus,
+}
+
+/// Итог шага проверки соединения.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DiagLevel {
+    Ok,
+    Warn,
+    Fail,
+    /// Не проверялось (неприменимо или помешало другое).
+    Skip,
+}
+
+/// Шаг проверки соединения (`UiCommand::Diagnose`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagCheck {
+    /// `server`, `proxy`, `version`, `clock`, `token`, `body`, `longpoll`.
+    pub step: String,
+    pub level: DiagLevel,
+    /// Машинный код итога для текста интерфейса: `ok`, `tls`, `dns`, `refused`,
+    /// `timeout`, `network`, `not_selfsync`, `headers_stripped`, `proto_major`,
+    /// `server_old`, `skew`, `no_date`, `read_only`, `unauthorized`, `client_old`,
+    /// `rate_limited`, `body_limit`, `server_limit`, `quota`, `unexpected`, `off`, `changed`,
+    /// `no_longpoll`, `failed`, `error`.
+    pub code: String,
+    /// Подробность: сообщение сети, версия сервера, расхождение часов в секундах.
+    pub detail: String,
+}
+
+/// Квота vault'а (протокол 1.3; у старого сервера всё нули).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotaStatus {
+    /// Занято на сервере: текущие версии, история и корзина.
+    pub used: u64,
+    /// Предупреждение; `0` — без порога.
+    pub soft: u64,
+    /// Новые файлы не принимаются; `0` — без порога.
+    pub hard: u64,
+    /// Файлы, которые сервер не принял: места нет. Отправятся, когда оно появится.
+    pub held: u32,
 }
 
 /// Состояние хранилища на сервере (итог `selfsync verify`, протокол 1.3).
@@ -564,6 +609,16 @@ pub enum Notice {
     ReadOnly {
         pending: u32,
     },
+    /// Место vault'а на сервере закончилось: `held` файлов ждут, пока оно появится.
+    /// Один раз, пока ждут.
+    QuotaFull {
+        held: u32,
+    },
+    /// Занято больше мягкого порога квоты. Один раз, пока не станет меньше.
+    QuotaSoft {
+        used: u64,
+        soft: u64,
+    },
     /// Проверка на сервере нашла повреждения. Один раз, пока они не исчезнут.
     StorageDamaged {
         damaged: u32,
@@ -637,6 +692,13 @@ pub enum UiCommand {
         path: String,
         rev: u64,
     },
+    /// Стереть ревизии файла старше `before_rev` (текущая и последняя живая
+    /// остаются), освободить место. Нужны сервер 1.3+ и право записи. Ответ —
+    /// `Restored { count }` (сколько стёрто).
+    PurgeHistory {
+        path: String,
+        before_rev: u64,
+    },
     Devices,
     RevokeDevice {
         id: u32,
@@ -686,6 +748,9 @@ pub enum UiCommand {
         #[serde(default)]
         remember: bool,
     },
+    /// Проверка соединения по шагам (`Diagnosis`): адрес и TLS, прокси, версия,
+    /// часы, токен, лимит тела запроса, long-poll.
+    Diagnose,
     /// Файлы, не скачанные из-за лимита размера.
     Skipped,
     /// Скачать пропущенный файл несмотря на лимит (в ближайшем цикле синка); дальше
@@ -777,6 +842,9 @@ pub enum UiResult {
     },
     Deleted {
         items: Vec<DeletedView>,
+    },
+    Diagnosis {
+        checks: Vec<DiagCheck>,
     },
     History {
         revisions: Vec<RevisionView>,

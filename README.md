@@ -243,7 +243,8 @@ From Obsidian's community plugins (search for "Selfsync"), or by hand: copy `mai
 - **Sync** runs 2–3 seconds after the last edit, on startup, when Obsidian returns to the foreground, and on a polling schedule. When Obsidian goes to the background, pending changes are sent right away.
 - **Conflicts** raise a notice; the "Unresolved conflicts" window lets you keep both versions, yours or the server's.
 - **Deleted files** — the "Restore deleted files" command opens the server's trash.
-- **File history** — from the file context menu or a command.
+- **File history** — from the file context menu or a command. With server 0.4.0+, "Delete old versions" there frees space on the server; the current version stays.
+- **Space on the server** (server 0.4.0+): the settings show how much the vault takes and its limits, if the server has [quotas](#configuration). When the vault is out of space, new files wait on the device (the status bar shows how many) and are sent as soon as there is room; everything else keeps syncing.
 
 The vault's configuration folder (`.obsidian/` by default; settings differ between devices) and `.trash/` are not synced by default. Exclusions are configurable: one pattern per line, and `!pattern` brings back something an earlier line excluded (the last matching line wins, as in `.gitignore`).
 
@@ -304,6 +305,7 @@ selfsync-cli revert notes/plan.md --rev 3   # an unsent current version is kept 
 selfsync-cli trash                          # deleted on the server and when they expire (--all: expired ones too)
 selfsync-cli restore notes/old.md
 selfsync-cli purge notes/old.md --yes       # erase from the trash for good, with its history
+selfsync-cli purge-history notes/plan.md --yes   # erase old versions (server 0.4.0+); the current one stays
 selfsync-cli conflicts
 selfsync-cli resolve 4 --keep mine          # both | mine | server
 selfsync-cli skipped                        # files over max_download_size that were not downloaded

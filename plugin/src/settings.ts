@@ -4,7 +4,7 @@ import { type App, Notice, PluginSettingTab, requireApiVersion, Setting, type Se
 
 import { clientOlderThan, readOnlyMinor } from "../pkg/selfsync_wasm.js";
 import { buildRules, type ConfigSync, DEFAULT_CONFIG_SYNC, type Preset, PRESETS } from "./configsync.ts";
-import { storageText, t } from "./i18n.ts";
+import { quotaText, storageText, t } from "./i18n.ts";
 import type SelfsyncPlugin from "./main.ts";
 import type { DeviceView } from "./types.ts";
 import { ConnectModal } from "./ui/connect.ts";
@@ -136,7 +136,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
       { heading: t("encryption.heading"), rows: [this.encryptionRow(), this.recoveryRow()], needsRunner: true },
       {
         heading: t("devices.heading"),
-        rows: [this.readOnlyRow(), this.storageRow(), this.retentionRow(), this.joinRow(), this.joinReadOnlyRow(), this.devicesRow()],
+        rows: [this.readOnlyRow(), this.quotaRow(), this.storageRow(), this.retentionRow(), this.joinRow(), this.joinReadOnlyRow(), this.devicesRow()],
         needsRunner: true,
       },
     ];
@@ -276,6 +276,22 @@ export class SelfsyncSettingTab extends PluginSettingTab {
           return;
         }
         row.setName(t("status.readOnly")).setDesc(t("readOnly.desc"));
+      },
+    };
+  }
+
+  /** Место vault'а на сервере: занято, пороги, файлы, ждущие места. */
+  private quotaRow(): Row {
+    return {
+      name: t("quota.name"),
+      desc: t("quota.desc"),
+      build: (row) => {
+        const text = quotaText(this.plugin.runner?.status().quota);
+        if (text === null) {
+          row.settingEl.hide();
+          return;
+        }
+        row.setName(t("quota.name")).setDesc(text);
       },
     };
   }

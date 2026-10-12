@@ -2012,8 +2012,12 @@ fn restored_file_reverted_to_deleted_version_is_pushed() {
 fn sync_regression_seeds() {
     // Потерянная правка при шифровании (stat/read), не-NFC имя при занятом
     // временном, удаление по чужой ревизии после отклонённого переименования,
-    // возвращённый файл, совпавший с базой, открытая запись посреди смены ключа.
-    for seed in [25590, 26866, 50362, 57632, 70682, 77055, 81938] {
+    // возвращённый файл, совпавший с базой, открытая запись посреди смены ключа,
+    // файл, навсегда ждущий места после снятия квоты, позднее событие переименования
+    // после возврата файла, Put по несверенной ревизии после отменённого переименования.
+    for seed in [
+        25590, 26866, 50362, 57632, 70682, 77055, 81938, 51, 368, 63845, 11870,
+    ] {
         selfsync_sim::run_seed(SimConfig::random(seed)).unwrap();
     }
 }
@@ -2183,4 +2187,274 @@ fn read_only_device_does_not_upload_wanted_blobs() {
     w.sync(0);
     assert!(v.blobs.exists(&a));
     assert!(verify(&w).clean());
+}
+
+fn set_hard(w: &World, hard: Option<u64>) {
+    use selfsync_server::quota;
+    let v = w.state.vault("sim").unwrap();
+    let c = v.pool.get().unwrap();
+    let mut own = quota::own(&c).unwrap();
+    own.hard = hard;
+    quota::set_own(&c, &own).unwrap();
+}
+
+fn server_used(w: &World) -> u64 {
+    let v = w.state.vault("sim").unwrap();
+    selfsync_server::quota::usage(&v.pool.get().unwrap()).unwrap()
+}
+
+fn quota_of(w: &World, c: usize) -> selfsync_core::engine::QuotaStatus {
+    w.clients[c].status.as_ref().unwrap().quota
+}
+
+fn quota_full_notices(w: &World, c: usize) -> usize {
+    w.clients[c]
+        .notices
+        .iter()
+        .filter(|n| matches!(n, Notice::QuotaFull { .. }))
+        .count()
+}
+
+fn uploads_in_trace(w: &World) -> bool {
+    w.trace
+        .iter()
+        .any(|l| l.contains("HTTP PUT /v1/blobs") || l.contains("HTTP POST /v1/uploads"))
+}
+
+/// Место закончилось: новый файл ждёт, остальное идёт — удаление, переименование,
+/// новый маленький файл, правки с другого устройства. Место дали — файл уходит сам.
+#[test]
+fn quota_full_holds_new_files_until_room() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "keep.md");
+    shared_note(&mut w, "gone.md");
+    shared_note(&mut w, "old.md");
+    set_hard(&w, Some(server_used(&w) + 200));
+    sized_file(&mut w, 0, "big.bin", 2000);
+    base_note(&mut w, 0, "small.md");
+    w.user_delete(0, "gone.md");
+    assert!(w.user_rename(0, "old.md", "new.md"));
+    w.sync(0);
+    let q = quota_of(&w, 0);
+    assert_eq!(q.held, 1, "{q:?}");
+    assert!(q.hard > 0 && q.used > 0);
+    assert_eq!(quota_full_notices(&w, 0), 1);
+    w.sync(1);
+    let fs1 = &w.clients[1].fs;
+    assert!(fs1.read_file("gone.md").is_none());
+    assert!(fs1.read_file("new.md").is_some() && fs1.read_file("old.md").is_none());
+    assert!(fs1.read_file("small.md").is_some());
+    assert!(fs1.read_file("big.bin").is_none());
+    // Правка с другого устройства доходит до устройства с ждущим файлом.
+    let t = edit_line(&mut w, 1, "keep.md", 1);
+    w.sync(1);
+    w.sync(0);
+    assert!(
+        String::from_utf8(read(&w, 0, "keep.md"))
+            .unwrap()
+            .contains(&t)
+    );
+    // Пока места нет, ждущий файл не отправляется каждый цикл.
+    w.trace.clear();
+    w.sync(0);
+    assert!(!uploads_in_trace(&w), "повторная отправка без места");
+    assert_eq!(quota_full_notices(&w, 0), 1, "одно уведомление");
+    // Порог сняли — файл уходит в следующем цикле.
+    set_hard(&w, None);
+    w.sync(0);
+    assert_eq!(quota_of(&w, 0).held, 0);
+    w.sync(1);
+    assert!(w.clients[1].fs.read_file("big.bin").is_some());
+    finish(&mut w);
+}
+
+/// Освободить место из устройства: очистка корзины и стирание старых версий снимают
+/// ожидание без админа.
+#[test]
+fn purging_trash_and_history_frees_room() {
+    use selfsync_core::engine::{UiCommand, UiResult};
+    let mut w = World::new(quiet(2));
+    sized_file(&mut w, 0, "old.bin", 3000);
+    w.sync(0);
+    sized_file(&mut w, 0, "old.bin", 3000);
+    w.sync(0);
+    sized_file(&mut w, 0, "gone.bin", 3000);
+    w.sync(0);
+    w.user_delete(0, "gone.bin");
+    w.sync(0);
+    set_hard(&w, Some(server_used(&w) + 100));
+    sized_file(&mut w, 0, "new.bin", 2500);
+    w.sync(0);
+    assert_eq!(quota_of(&w, 0).held, 1);
+    let r = ui_result(
+        &mut w,
+        0,
+        1,
+        UiCommand::PurgeDeleted {
+            paths: vec!["gone.bin".into()],
+        },
+    );
+    assert_eq!(r, UiResult::Restored { count: 1 });
+    let r = ui_result(
+        &mut w,
+        0,
+        2,
+        UiCommand::PurgeHistory {
+            path: "old.bin".into(),
+            before_rev: 2,
+        },
+    );
+    assert_eq!(r, UiResult::Restored { count: 1 });
+    w.sync(0);
+    assert_eq!(quota_of(&w, 0).held, 0, "место освободилось — файл ушёл");
+    w.sync(1);
+    assert!(w.clients[1].fs.read_file("new.bin").is_some());
+    // Устройство только для чтения не стирает.
+    w.set_read_only(1);
+    w.sync(1);
+    let r = ui_result(
+        &mut w,
+        1,
+        3,
+        UiCommand::PurgeHistory {
+            path: "new.bin".into(),
+            before_rev: 9,
+        },
+    );
+    assert!(
+        matches!(&r, UiResult::Error { code, .. } if code == "read_only"),
+        "{r:?}"
+    );
+    finish(&mut w);
+}
+
+/// Лимит размера файла vault'а меньше лимита устройства: файл не отправляется, одно
+/// уведомление; правка файла в пределах лимита — снова отправляется.
+#[test]
+fn vault_max_file_is_respected() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    {
+        use selfsync_server::quota;
+        let v = w.state.vault("sim").unwrap();
+        let c = v.pool.get().unwrap();
+        quota::set_own(
+            &c,
+            &quota::Own {
+                max_file: Some(1500),
+                ..quota::Own::default()
+            },
+        )
+        .unwrap();
+    }
+    // Устройство ещё не знает лимита: отказ приходит на загрузку.
+    sized_file(&mut w, 0, "big.bin", 2000);
+    w.sync(0);
+    // Теперь знает: такой файл и не читается для отправки.
+    sized_file(&mut w, 0, "big2.bin", 2000);
+    w.sync(0);
+    w.sync(0);
+    let n = w.clients[0]
+        .notices
+        .iter()
+        .filter(|n| matches!(n, Notice::TooLarge { path, .. } if path == "big2.bin"))
+        .count();
+    assert_eq!(n, 1);
+    w.user_delete(0, "big2.bin");
+    w.sync(0);
+    let too_large = w.clients[0]
+        .notices
+        .iter()
+        .filter(|n| matches!(n, Notice::TooLarge { path, .. } if path == "big.bin"))
+        .count();
+    assert_eq!(too_large, 1);
+    sized_file(&mut w, 0, "big.bin", 100);
+    w.sync(0);
+    w.sync(1);
+    assert!(w.clients[1].fs.read_file("big.bin").is_some());
+    finish(&mut w);
+}
+
+/// Событие переименования пришло поздно: синк уже вернул файл по старому пути (с
+/// чужой правкой). Переехавший файл — новый, а не продолжение вернувшегося: иначе
+/// переименование на сервере увело бы чужую правку, и её затёрли бы старым текстом.
+#[test]
+fn late_rename_event_after_restore_keeps_remote_edit() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "c.md");
+    let t1 = edit_line(&mut w, 1, "c.md", 1);
+    w.sync(1);
+    let now = w.now;
+    assert!(w.clients[0].fs.user_rename("c.md", "r.md", now));
+    // Циклы по таймеру, без полного скана: синк узнаёт о пропаже c.md от сервера.
+    for _ in 0..6 {
+        w.now += 30_000;
+        w.tick(0);
+        w.drain(0);
+    }
+    let back = String::from_utf8(read(&w, 0, "c.md")).unwrap();
+    assert!(back.contains(&t1), "c.md возвращён с правкой: {back}");
+    w.deliver(
+        0,
+        Event::Renamed {
+            from: "c.md".into(),
+            to: "r.md".into(),
+        },
+    );
+    w.sync(0);
+    // Вернувшийся c.md на сервере не трогали: он не переименован и не создан заново.
+    let rev: i64 = {
+        use selfsync_core::path::{VaultPath, canonical_encode};
+        let key = canonical_encode(&VaultPath::parse("c.md").unwrap().to_proto());
+        let v = w.state.vault("sim").unwrap();
+        let c = v.pool.get().unwrap();
+        c.query_row("SELECT rev FROM files WHERE path = ?1", [key], |r| r.get(0))
+            .unwrap()
+    };
+    assert_eq!(rev, 2);
+    w.sync(1);
+    let c1 = String::from_utf8(read(&w, 1, "c.md")).unwrap();
+    assert!(c1.contains(&t1), "{c1}");
+    assert!(w.clients[1].fs.read_file("r.md").is_some());
+    finish(&mut w);
+}
+
+/// Переименование упёрлось в чужую правку источника (ревизия запомнена для повтора,
+/// содержимое ещё не сверено), потом имя вернули и файл поправили: Put по этой
+/// ревизии затёр бы чужую правку — он идёт как по неизвестной базе, со слиянием.
+#[test]
+fn undone_rename_after_conflict_keeps_remote_edit() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    let t1 = edit_line(&mut w, 1, "a.md", 1);
+    w.sync(1);
+    assert!(w.user_rename(0, "a.md", "b.md"));
+    // Конфликт переименования записан, а дальше связь пропала: ни повтора
+    // переименования, ни получения изменений — серверную правку устройство не видело.
+    w.deliver(0, Event::SyncNow);
+    while let Some(label) = w.pump_one(0) {
+        if label == "HTTP POST /v1/ops" {
+            break;
+        }
+    }
+    w.planned_faults.push_back(("POST /v1/ops".into(), false));
+    w.drain(0);
+    assert!(w.planned_faults.is_empty(), "повтор переименования оборван");
+    assert!(w.user_rename(0, "b.md", "a.md"));
+    let t0 = edit_line(&mut w, 0, "a.md", 3);
+    w.sync(0);
+    w.sync(1);
+    finish(&mut w);
+    for c in 0..2 {
+        let text = String::from_utf8(read(&w, c, "a.md")).unwrap_or_default();
+        let copies: String = w.clients[c]
+            .fs
+            .snapshot()
+            .into_iter()
+            .filter(|(p, _)| p.starts_with("a ("))
+            .map(|(_, b)| String::from_utf8(b).unwrap())
+            .collect();
+        assert!(text.contains(&t1) || copies.contains(&t1), "c{c}: {text}");
+        assert!(text.contains(&t0) || copies.contains(&t0), "c{c}: {text}");
+    }
 }

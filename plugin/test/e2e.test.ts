@@ -183,6 +183,36 @@ describe("подключение", () => {
     await writer.stop();
   });
 
+  test("квота: старые версии стираются, без места файл ждёт и уходит потом", async () => {
+    const [a, b] = await pair("quota");
+    for (const v of ["v1\n", "v2\n", "v3\n"]) {
+      await a.write("x.md", v);
+      await a.sync();
+    }
+    const p = await a.runner.command({ type: "purgeHistory", path: "x.md", beforeRev: 3 });
+    assert.deepEqual(p, { type: "restored", count: 2 });
+    const h = await a.runner.command({ type: "history", path: "x.md" });
+    assert.ok(h.type === "history" && h.revisions.length === 1, JSON.stringify(h));
+
+    server.cli("vault", "quota", "--vault", "quota", "--soft", "1", "--hard", "1");
+    await a.write("y.md", "no room\n");
+    await a.sync();
+    assert.equal(a.status?.quota?.held, 1, JSON.stringify(a.status));
+    assert.equal(a.status?.quota?.hard, 1);
+    assert.ok(a.notices.some((n) => n.kind === "quotaFull" && n.held === 1));
+    assert.ok(a.notices.some((n) => n.kind === "quotaSoft"));
+    await b.sync();
+    assert.equal(await b.read("y.md"), null);
+
+    server.cli("vault", "quota", "--vault", "quota", "--soft", "default", "--hard", "default");
+    await a.sync();
+    assert.equal(a.status?.quota?.held, 0);
+    await b.sync();
+    assert.equal(await b.read("y.md"), "no room\n");
+    await a.stop();
+    await b.stop();
+  });
+
   test("повреждение хранилища видно в статусе и чинится с устройства", async () => {
     const [a, b] = await pair("storage");
     await a.write("s.md", "keep me safe\n");

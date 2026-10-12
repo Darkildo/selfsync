@@ -73,6 +73,7 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
     }
     scan(cx).await?;
     for _round in 0..3 {
+        let mut pushed = false;
         if cx.with(|s| s.index.pending_count() > 0 && !s.read_only) {
             // Перед отправкой — режим vault'а (не слать открытый текст в зашифрованный).
             let peek = api::changes(cx, cx.with(|s| s.index.last_seq), 1).await?;
@@ -81,7 +82,10 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
             }
             if !cx.with(|s| s.read_only) {
                 match push(cx).await {
-                    Ok(c) => changed |= c,
+                    Ok(c) => {
+                        changed |= c;
+                        pushed = c;
+                    }
                     // Старый сервер не сообщает режим в VaultState: узнали по отказу.
                     Err(SyncError::ReadOnly) => {
                         cx.log(
@@ -95,7 +99,9 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
             }
         }
         changed |= pull(cx).await?;
-        if cx.with(|s| s.index.pending_count() == 0 || s.read_only) {
+        // Ждут только файлы без места на сервере — до следующего цикла.
+        let only_held = !pushed && cx.with(|s| s.quota_hold.is_some());
+        if only_held || cx.with(|s| s.index.pending_count() == 0 || s.read_only) {
             break;
         }
     }
@@ -128,6 +134,19 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
         cx.notify(Notice::StorageDamaged {
             damaged: storage.damaged,
             server_problem: storage.server_problem,
+        });
+    }
+    let q = cx.with(|s| s.status.quota);
+    let first = cx.with_mut(|s| {
+        let over = q.soft > 0 && q.used >= q.soft;
+        let first = over && !s.quota_soft_notified;
+        s.quota_soft_notified = over;
+        first
+    });
+    if first {
+        cx.notify(Notice::QuotaSoft {
+            used: q.used,
+            soft: q.soft,
         });
     }
     if read_only && pending > 0 && !cx.with(|s| s.read_only_notified) {

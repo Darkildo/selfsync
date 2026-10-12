@@ -308,6 +308,7 @@ export default class SelfsyncPlugin extends Plugin {
     if (s?.state === "syncing" && s.total > 0) parts.push(`${s.done}/${s.total}`);
     else if (s && s.pending > 0) parts.push(t(s.readOnly ? "status.readOnlyPending" : "status.pending", { n: s.pending }));
     if (s && s.conflicts > 0) parts.push(t("status.conflicts", { n: s.conflicts }));
+    if (s?.quota && s.quota.held > 0) parts.push(t("status.quotaFull", { n: s.quota.held }));
     this.statusEl.setText(parts.join(" · "));
     let tip = t("status.tooltip", { state: stateText(s) });
     if (s && s.lastSync > 0) tip += `\n${t("status.lastSync", { time: new Date(s.lastSync).toLocaleTimeString() })}`;

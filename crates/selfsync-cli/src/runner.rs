@@ -10,8 +10,8 @@ use std::time::Duration;
 use notify::event::{ModifyKind, RenameMode};
 use notify::{EventKind, RecursiveMode, Watcher};
 use selfsync_core::engine::{
-    Action, ConflictChoice, Engine, EngineConfig, Event, LogLevel, Notice, StorageHealth,
-    SyncState, SyncStatus, UiCommand, UiResult,
+    Action, ConflictChoice, Engine, EngineConfig, Event, LogLevel, Notice, QuotaStatus,
+    StorageHealth, SyncState, SyncStatus, UiCommand, UiResult,
 };
 use tokio::sync::mpsc;
 
@@ -126,12 +126,16 @@ impl Loop {
                         let _ = std::fs::remove_file(&marker);
                     }
                 }
-                if status.storage != self.status.storage {
-                    // Для `status` без сети: итог проверки хранилища знает только сервер.
-                    let marker = self.key_path.with_file_name(STORAGE_MARKER);
-                    if status.storage == StorageHealth::default() {
+                if status.storage != self.status.storage || status.quota != self.status.quota {
+                    // Для `status` без сети: хранилище и квоту знает только сервер.
+                    let marker = self.key_path.with_file_name(SERVER_MARKER);
+                    let state = ServerState {
+                        storage: status.storage,
+                        quota: status.quota,
+                    };
+                    if state == ServerState::default() {
                         let _ = std::fs::remove_file(&marker);
-                    } else if let Ok(b) = serde_json::to_vec(&status.storage) {
+                    } else if let Ok(b) = serde_json::to_vec(&state) {
                         let _ = std::fs::write(&marker, b);
                     }
                 }
@@ -244,8 +248,17 @@ pub async fn folder_command(dir: &Path, cfg: &Config, cmd: UiCommand) -> anyhow:
 
 /// Файл в `.selfsync/`: последний синк прошёл в режиме «только чтение».
 pub const READ_ONLY_MARKER: &str = "read-only";
-/// Файл в `.selfsync/`: состояние хранилища на сервере (JSON [`StorageHealth`]).
-pub const STORAGE_MARKER: &str = "storage.json";
+/// Файл в `.selfsync/`: последнее известное состояние сервера (JSON [`ServerState`]).
+pub const SERVER_MARKER: &str = "server.json";
+
+/// Что `status` показывает о сервере без сети.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct ServerState {
+    #[serde(default)]
+    pub storage: StorageHealth,
+    #[serde(default)]
+    pub quota: QuotaStatus,
+}
 
 fn notify_user(n: &Notice) {
     match n {
@@ -270,6 +283,13 @@ fn notify_user(n: &Notice) {
         Notice::NonPortableName { path } => {
             tracing::warn!("{path}: имя недопустимо на Windows и Android — туда файл не попадёт")
         }
+        Notice::QuotaFull { held } => tracing::warn!(
+            "место vault'а на сервере закончилось: файлов ждут отправки — {held}; освободите \
+             место (selfsync-cli purge, purge-history) или попросите админа поднять квоту"
+        ),
+        Notice::QuotaSoft { used, soft } => tracing::warn!(
+            "на сервере занято {used} байт — больше порога предупреждения ({soft} байт)"
+        ),
         Notice::StorageDamaged {
             damaged,
             server_problem,

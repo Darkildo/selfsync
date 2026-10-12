@@ -2,7 +2,7 @@
 //! настройки vault'а) и решения пользователя по конфликтам.
 
 use selfsync_proto::v1 as pb;
-use selfsync_proto::{MINOR_READ_ONLY, MINOR_REKEY};
+use selfsync_proto::{MINOR_QUOTA, MINOR_READ_ONLY, MINOR_REKEY};
 
 use super::api;
 use super::ctx::{Ctx, SMALL_BLOB, SyncError, SyncResult};
@@ -28,6 +28,7 @@ fn error_result(e: &SyncError) -> UiResult {
         SyncError::RateLimited { .. } => "rate_limited",
         SyncError::ServerOutdated(_) => "server_outdated",
         SyncError::ReadOnly => "read_only",
+        SyncError::QuotaExceeded(_) => "quota_exceeded",
         SyncError::Paused(r) | SyncError::Blocked(r) => r.as_str(),
         SyncError::Http { code, .. } | SyncError::Server { code, .. } => code.as_str(),
         _ => "error",
@@ -173,6 +174,7 @@ fn writes(cmd: &UiCommand) -> bool {
         cmd,
         UiCommand::RestoreDeleted { .. }
             | UiCommand::PurgeDeleted { .. }
+            | UiCommand::PurgeHistory { .. }
             | UiCommand::RestoreRevision { .. }
             | UiCommand::RevokeDevice { .. }
             | UiCommand::CreateJoin { .. }
@@ -273,6 +275,25 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                 sp.push(cx.with(|s| s.encode_path(&v))?);
             }
             let r = api::purge_deleted(cx, sp).await?;
+            // Место освободилось: файлы, ждущие его, — в ближайший цикл.
+            cx.with_mut(|s| s.sync_due = Some(s.now));
+            Ok(UiResult::Restored {
+                count: u32::try_from(r.purged).unwrap_or(u32::MAX),
+            })
+        }
+        UiCommand::Diagnose => Ok(UiResult::Diagnosis {
+            checks: super::diagnose::diagnose(cx).await,
+        }),
+        UiCommand::PurgeHistory { path, before_rev } => {
+            if server_minor(cx).await? < MINOR_QUOTA {
+                return Err(SyncError::ServerOutdated(
+                    "сервер не умеет стирать историю: обновите его до 0.4.0 или новее".into(),
+                ));
+            }
+            let v = vp(&path)?;
+            let sp = cx.with(|s| s.encode_path(&v))?;
+            let r = api::purge_history(cx, sp, before_rev).await?;
+            cx.with_mut(|s| s.sync_due = Some(s.now));
             Ok(UiResult::Restored {
                 count: u32::try_from(r.purged).unwrap_or(u32::MAX),
             })

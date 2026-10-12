@@ -3,8 +3,10 @@
 
 import { type App, Modal, Notice, Setting } from "obsidian";
 
+import { quotaMinor } from "../../pkg/selfsync_wasm.js";
 import { formatBytes, t } from "../i18n.ts";
 import type SelfsyncPlugin from "../main.ts";
+import { confirm } from "./confirm.ts";
 
 export class HistoryModal extends Modal {
   constructor(
@@ -33,6 +35,27 @@ export class HistoryModal extends Modal {
     if (r.revisions.length === 0) {
       contentEl.createEl("p", { text: t("history.none") });
       return;
+    }
+    // Старые версии стираются на сервере 0.4.0+ и не с устройства только для чтения;
+    // текущая и последняя живая (её восстанавливают из корзины) остаются.
+    const status = runner.status();
+    const lastLive = r.revisions.find((x) => !x.deleted)?.rev;
+    const old = r.revisions.filter((x, i) => i > 0 && x.rev !== lastLive).length;
+    if (old > 0 && !status.readOnly && (status.serverMinor ?? 0) >= quotaMinor()) {
+      new Setting(contentEl)
+        .setName(t("history.purge"))
+        .setDesc(t("history.purgeDesc"))
+        .addButton((b) =>
+          b
+            .setButtonText(t("history.purge"))
+            .setWarning()
+            .onClick(async () => {
+              if (!(await confirm(this.app, t("history.purgeConfirm", { n: old, path: this.path }), t("history.purge")))) return;
+              const res = await runner.command({ type: "purgeHistory", path: this.path, beforeRev: r.revisions[0]?.rev ?? 0 });
+              new Notice(res.type === "error" ? res.message : res.type === "restored" ? t("history.purged", { n: res.count }) : res.type);
+              await this.render();
+            }),
+        );
     }
     r.revisions.forEach((rev, i) => {
       const what = rev.deleted ? t("history.deleted") : rev.renamedFrom ? t("history.renamed", { from: rev.renamedFrom }) : formatBytes(rev.size);
