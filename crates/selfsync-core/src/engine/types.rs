@@ -361,6 +361,10 @@ pub enum Event {
     EnableEncryption {
         password: String,
         remember: bool,
+        /// Создать и фразу восстановления (запись формата 2: клиенты 0.1.x её не
+        /// откроют). Фраза приходит один раз — `Notice::RecoveryPhrase`.
+        #[serde(default)]
+        recovery: bool,
     },
     /// Сменить пароль (мастер-ключ прежний).
     ChangePassword {
@@ -427,6 +431,8 @@ pub struct SyncStatus {
     /// Устройство только для чтения: свои правки не отправляются (`pending` — сколько
     /// их накопилось).
     pub read_only: bool,
+    /// У записи ключа есть фраза восстановления.
+    pub recovery: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -492,6 +498,10 @@ pub enum Notice {
     Synced {
         pulled: Vec<String>,
         pushed: Vec<String>,
+    },
+    /// Шифрование включено вместе с фразой восстановления: показать её один раз.
+    RecoveryPhrase {
+        words: Phrase,
     },
     /// Устройство только для чтения, а локальные правки есть: на сервер они не
     /// уйдут. Один раз за сессию.
@@ -587,6 +597,34 @@ pub enum UiCommand {
     PasswordStrength {
         password: String,
     },
+    /// Создать фразу восстановления (или новую вместо прежней — та перестаёт
+    /// работать). Ответ — `RecoveryPhrase`, один раз.
+    CreateRecovery {
+        password: String,
+    },
+    /// Убрать фразу восстановления.
+    RemoveRecovery {
+        password: String,
+    },
+    /// Забыли пароль: раскрыть ключ фразой и задать новый пароль. Фраза остаётся
+    /// действительной.
+    Recover {
+        phrase: String,
+        new_password: String,
+        remember: bool,
+    },
+}
+
+/// 24 слова фразы восстановления. `Debug` их не печатает: фраза не должна попасть
+/// в журнал ни на одном устройстве.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Phrase(pub Vec<String>);
+
+impl std::fmt::Debug for Phrase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Phrase({} слов, скрыто)", self.0.len())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -631,6 +669,10 @@ pub struct DeviceView {
 )]
 pub enum UiResult {
     Ok,
+    /// Фраза восстановления — показать один раз и забыть.
+    RecoveryPhrase {
+        words: Phrase,
+    },
     Error {
         code: String,
         message: String,

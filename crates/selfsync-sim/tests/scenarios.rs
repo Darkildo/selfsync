@@ -455,6 +455,7 @@ fn encryption_enabled_during_active_sync() {
         Event::EnableEncryption {
             password: PASSWORD.into(),
             remember: true,
+            recovery: false,
         },
     );
     // Пока c0 перезаливает vault, c1 продолжает править и синхронизироваться.
@@ -503,6 +504,7 @@ fn migration_interrupted_halfway() {
         Event::EnableEncryption {
             password: PASSWORD.into(),
             remember: false,
+            recovery: false,
         },
     );
     w.deliver(0, Event::SyncNow);
@@ -917,6 +919,7 @@ fn synced_notice_lists_cycle_changes() {
         Event::EnableEncryption {
             password: PASSWORD.into(),
             remember: true,
+            recovery: false,
         },
     );
     w.drain(0);
@@ -1201,5 +1204,200 @@ fn regular_files_still_merge_next_to_no_merge_ones() {
         text.contains(&a) && text.contains(&b),
         "заметки сливаются как раньше: {text}"
     );
+    finish(&mut w);
+}
+
+fn ui_result(
+    w: &mut World,
+    c: usize,
+    req: u64,
+    command: selfsync_core::engine::UiCommand,
+) -> selfsync_core::engine::UiResult {
+    w.deliver(c, Event::Command { req, command });
+    w.drain(c);
+    w.clients[c]
+        .ui_results
+        .iter()
+        .rev()
+        .find(|(r, _)| *r == req)
+        .map(|(_, x)| x.clone())
+        .expect("ответ команды")
+}
+
+#[test]
+fn recovery_phrase_restores_access_with_new_password() {
+    use selfsync_core::engine::{SyncState, UiCommand, UiResult};
+    const NEW: &str = "new password after recovery";
+    let mut w = World::new(quiet(3));
+    let t = base_note(&mut w, 0, "a.md");
+    for c in 0..3 {
+        w.sync(c);
+    }
+    // A включает шифрование с фразой — фраза приходит один раз
+    w.encrypted_password = Some(PASSWORD.to_owned());
+    w.deliver(
+        0,
+        Event::EnableEncryption {
+            password: PASSWORD.into(),
+            remember: true,
+            recovery: true,
+        },
+    );
+    w.drain(0);
+    let phrases: Vec<Vec<String>> = w.clients[0]
+        .notices
+        .iter()
+        .filter_map(|n| match n {
+            Notice::RecoveryPhrase { words } => Some(words.0.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(phrases.len(), 1);
+    let phrase = phrases[0].join(" ");
+    assert!(w.clients[0].status.as_ref().unwrap().recovery);
+    // B — с запомненным ключом, C — без
+    w.sync(1);
+    w.deliver(
+        2,
+        Event::Password {
+            password: PASSWORD.into(),
+            remember: false,
+        },
+    );
+    w.sync(2);
+    assert!(w.clients[1].remembered_key.is_some());
+    assert!(w.clients[2].remembered_key.is_none());
+    // фраза не попала ни в индекс, ни в журнал
+    for c in 0..3 {
+        let idx = w.clients[c].saved_index.clone().unwrap_or_default();
+        assert!(!String::from_utf8_lossy(&idx).contains(&phrases[0][0..3].join(" ")));
+    }
+    assert!(
+        !w.dump_trace().contains(&phrases[0][0..3].join(" ")),
+        "фраза в журнале"
+    );
+    // A забыл пароль: вход по фразе с новым паролем
+    w.kill(0);
+    w.clients[0].remembered_key = None;
+    w.start_client(0);
+    w.drain(0);
+    let wrong = phrase.replace(
+        &phrases[0][0],
+        if phrases[0][0] == "zoo" {
+            "abandon"
+        } else {
+            "zoo"
+        },
+    );
+    let r = ui_result(
+        &mut w,
+        0,
+        1,
+        UiCommand::Recover {
+            phrase: wrong,
+            new_password: NEW.into(),
+            remember: true,
+        },
+    );
+    assert!(
+        matches!(&r, UiResult::Error { code, .. } if code == "bad_phrase" || code == "wrong_phrase"),
+        "{r:?}"
+    );
+    let r = ui_result(
+        &mut w,
+        0,
+        2,
+        UiCommand::Recover {
+            phrase: phrase.clone(),
+            new_password: NEW.into(),
+            remember: true,
+        },
+    );
+    assert_eq!(r, UiResult::Ok);
+    w.encrypted_password = Some(NEW.to_owned());
+    let t2 = edit_line(&mut w, 0, "a.md", 2);
+    w.sync(0);
+    // B с запомненным ключом продолжает без пароля
+    w.kill(1);
+    let n1 = w.clients[1].notices.len();
+    w.sync(1);
+    assert!(
+        !w.clients[1].notices[n1..]
+            .iter()
+            .any(|n| matches!(n, Notice::NeedPassword)),
+        "B не просит пароль"
+    );
+    let text = String::from_utf8(w.clients[1].fs.read_file("a.md").cloned().unwrap()).unwrap();
+    assert!(text.contains(&t2) && text.contains(&t), "{text}");
+    // C без запомненного ключа: старый пароль не подходит, новый — да
+    w.kill(2);
+    w.deliver(2, Event::SyncNow);
+    w.drain(2);
+    assert_eq!(
+        w.clients[2].status.as_ref().unwrap().state,
+        SyncState::NeedPassword
+    );
+    w.deliver(
+        2,
+        Event::Password {
+            password: PASSWORD.into(),
+            remember: true,
+        },
+    );
+    w.drain(2);
+    assert!(
+        w.clients[2]
+            .notices
+            .iter()
+            .any(|n| matches!(n, Notice::WrongPassword))
+    );
+    w.deliver(
+        2,
+        Event::Password {
+            password: NEW.into(),
+            remember: true,
+        },
+    );
+    w.sync(2);
+    let text = String::from_utf8(w.clients[2].fs.read_file("a.md").cloned().unwrap()).unwrap();
+    assert!(text.contains(&t2), "{text}");
+    // фраза по-прежнему действует; «создать новую» её отменяет, «удалить» убирает
+    let r = ui_result(
+        &mut w,
+        0,
+        3,
+        UiCommand::CreateRecovery {
+            password: NEW.into(),
+        },
+    );
+    let UiResult::RecoveryPhrase { words } = r else {
+        panic!("{r:?}")
+    };
+    assert_ne!(words.0.join(" "), phrase);
+    let r = ui_result(
+        &mut w,
+        0,
+        4,
+        UiCommand::Recover {
+            phrase: phrase.clone(),
+            new_password: "x".into(),
+            remember: true,
+        },
+    );
+    assert!(
+        matches!(&r, UiResult::Error { code, .. } if code == "wrong_phrase"),
+        "{r:?}"
+    );
+    let r = ui_result(
+        &mut w,
+        0,
+        5,
+        UiCommand::RemoveRecovery {
+            password: NEW.into(),
+        },
+    );
+    assert_eq!(r, UiResult::Ok);
+    w.sync(0);
+    assert!(!w.clients[0].status.as_ref().unwrap().recovery);
     finish(&mut w);
 }

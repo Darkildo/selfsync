@@ -19,7 +19,7 @@ export class PasswordModal extends Modal {
 
   constructor(
     app: App,
-    private opts: { title: string; desc: string; submit: string; showStrength: boolean },
+    private opts: { title: string; desc: string; submit: string; showStrength: boolean; onForgot?: () => void },
     private onSubmit: (r: PasswordResult) => void,
   ) {
     super(app);
@@ -46,6 +46,14 @@ export class PasswordModal extends Modal {
       .setName(t("password.remember"))
       .setDesc(t("password.rememberDesc"))
       .addToggle((x) => x.setValue(this.remember).onChange((v) => (this.remember = v)));
+    const forgot = this.opts.onForgot;
+    if (forgot) {
+      contentEl.createEl("a", { text: t("recovery.forgot"), href: "#" }).addEventListener("click", (e) => {
+        e.preventDefault();
+        this.close();
+        forgot();
+      });
+    }
     new Setting(contentEl)
       .addButton((b) => b.setButtonText(t("common.cancel")).onClick(() => this.close()))
       .addButton((b) => b.setButtonText(this.opts.submit).setCta().onClick(() => this.submit()));

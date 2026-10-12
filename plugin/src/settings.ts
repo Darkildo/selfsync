@@ -10,6 +10,7 @@ import { ConnectModal } from "./ui/connect.ts";
 import { JoinModal } from "./ui/join.ts";
 import { confirm } from "./ui/confirm.ts";
 import { ChangePasswordModal, PasswordModal } from "./ui/password.ts";
+import { PhraseModal } from "./ui/recovery.ts";
 
 export interface Settings {
   /** Базовый адрес сервера без завершающего «/». */
@@ -43,7 +44,9 @@ export const DEFAULT_SETTINGS: Settings = {
 
 /** Текст ошибки команды: известные коды — локализованно. */
 function errorText(r: { code: string; message: string }): string {
-  return r.code === "read_only" ? t("readOnly.error") : r.message;
+  if (r.code === "read_only") return t("readOnly.error");
+  if (r.code === "wrong_password") return t("recovery.wrongPassword");
+  return r.message;
 }
 
 export function normalizeServer(url: string): string {
@@ -119,7 +122,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
       { heading: t("settings.connection"), rows: this.connectionRows() },
       { heading: t("settings.sync"), rows: this.syncRows() },
       { heading: t("configSync.heading"), rows: this.configSyncRows() },
-      { heading: t("encryption.heading"), rows: [this.encryptionRow()], needsRunner: true },
+      { heading: t("encryption.heading"), rows: [this.encryptionRow(), this.recoveryRow()], needsRunner: true },
       {
         heading: t("devices.heading"),
         rows: [this.readOnlyRow(), this.retentionRow(), this.joinRow(), this.joinReadOnlyRow(), this.devicesRow()],
@@ -318,7 +321,8 @@ export class SelfsyncSettingTab extends PluginSettingTab {
                   this.app,
                   { title: t("encryption.enable"), desc: t("encryption.enableDesc"), submit: t("encryption.enable"), showStrength: true },
                   (r) => {
-                    runner.send({ type: "enableEncryption", password: r.password, remember: r.remember });
+                    // Фраза восстановления создаётся сразу и приходит уведомлением.
+                    runner.send({ type: "enableEncryption", password: r.password, remember: r.remember, recovery: true });
                     runner.send({ type: "syncNow" });
                   },
                 ).open(),
@@ -329,6 +333,51 @@ export class SelfsyncSettingTab extends PluginSettingTab {
             b.setButtonText(t("encryption.change")).onClick(() =>
               new ChangePasswordModal(this.app, (old, next) => runner.send({ type: "changePassword", old, new: next })).open(),
             ),
+          );
+        }
+      },
+    };
+  }
+
+  /** Фраза восстановления: есть/нет, создать (новую) или удалить — через пароль. */
+  private recoveryRow(): Row {
+    return {
+      name: t("recovery.title"),
+      build: (row) => {
+        const runner = this.plugin.runner;
+        if (!runner || !runner.status().encrypted || this.readOnly()) {
+          row.settingEl.hide();
+          return;
+        }
+        const has = runner.status().recovery;
+        row.setName(t("recovery.status", { state: has ? t("recovery.on") : t("recovery.off") })).setDesc(t("recovery.createDesc"));
+        const ask = (desc: string, submit: string, then: (password: string) => Promise<void>): void =>
+          new PasswordModal(this.app, { title: t("recovery.title"), desc, submit, showStrength: false }, (r) => void then(r.password)).open();
+        row.addButton((b) =>
+          b
+            .setButtonText(has ? t("recovery.createNew") : t("recovery.create"))
+            .setCta()
+            .onClick(() =>
+              ask(t("recovery.createDesc"), has ? t("recovery.createNew") : t("recovery.create"), async (password) => {
+                const r = await runner.command({ type: "createRecovery", password });
+                if (r.type === "recoveryPhrase") new PhraseModal(this.app, r.words).open();
+                else new Notice(r.type === "error" ? errorText(r) : r.type);
+                this.refresh();
+              }),
+            ),
+        );
+        if (has) {
+          row.addButton((b) =>
+            b
+              .setButtonText(t("recovery.remove"))
+              .setWarning()
+              .onClick(() =>
+                ask(t("recovery.removeDesc"), t("recovery.remove"), async (password) => {
+                  const r = await runner.command({ type: "removeRecovery", password });
+                  new Notice(r.type === "ok" ? t("recovery.removed") : r.type === "error" ? errorText(r) : r.type);
+                  this.refresh();
+                }),
+              ),
           );
         }
       },

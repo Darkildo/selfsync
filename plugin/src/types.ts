@@ -55,6 +55,8 @@ export interface SyncStatus {
   retryAt: number;
   /** Устройство только для чтения: `pending` правок на сервер не уйдут. */
   readOnly: boolean;
+  /** У записи ключа есть фраза восстановления. */
+  recovery: boolean;
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -69,6 +71,7 @@ export type Notice =
   | { kind: "caseCollision"; path: string; existing: string }
   | { kind: "tooLarge"; path: string; size: number }
   | { kind: "synced"; pulled: string[]; pushed: string[] }
+  | { kind: "recoveryPhrase"; words: string[] }
   | { kind: "readOnly"; pending: number }
   | { kind: "unsupportedName"; path: string }
   | { kind: "nonPortableName"; path: string }
@@ -141,7 +144,8 @@ export type UiResult =
     }
   | { type: "conflicts"; items: ConflictRecord[] }
   | { type: "strength"; bits: number }
-  | { type: "restored"; count: number };
+  | { type: "restored"; count: number }
+  | { type: "recoveryPhrase"; words: string[] };
 
 export type UiCommand =
   | { type: "listDeleted" }
@@ -157,7 +161,10 @@ export type UiCommand =
   | { type: "setRetention"; days: number }
   | { type: "stats" }
   | { type: "conflicts" }
-  | { type: "passwordStrength"; password: string };
+  | { type: "passwordStrength"; password: string }
+  | { type: "createRecovery"; password: string }
+  | { type: "removeRecovery"; password: string }
+  | { type: "recover"; phrase: string; newPassword: string; remember: boolean };
 
 export type ConflictChoice = "keepBoth" | "keepMine" | "keepServer";
 
@@ -211,7 +218,7 @@ export type EngineEvent =
   | { type: "hidden" }
   | { type: "done"; id: number; result: IoResult }
   | { type: "password"; password: string; remember: boolean }
-  | { type: "enableEncryption"; password: string; remember: boolean }
+  | { type: "enableEncryption"; password: string; remember: boolean; recovery?: boolean }
   | { type: "changePassword"; old: string; new: string }
   | { type: "resolve"; id: number; choice: ConflictChoice }
   | { type: "command"; req: number; command: UiCommand }

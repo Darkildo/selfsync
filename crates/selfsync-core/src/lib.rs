@@ -5,6 +5,7 @@
 //! плагином (через WASM), CLI-клиентом и симуляцией. Сервер берёт отсюда валидацию
 //! путей и формат блоба (для `import`).
 
+pub mod bip39;
 pub mod blob;
 pub mod crypto;
 pub mod engine;

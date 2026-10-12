@@ -72,6 +72,25 @@ enum Cmd {
         /// Файл с паролем (или переменная SELFSYNC_PASSWORD).
         #[arg(long)]
         password_file: Option<PathBuf>,
+        /// Создать и фразу восстановления (24 слова в stdout, один раз). Запись ключа
+        /// станет формата 2: плагин и CLI 0.1.x её не откроют — обновите все устройства.
+        #[arg(long)]
+        recovery: bool,
+    },
+    /// Фраза восстановления зашифрованного vault'а.
+    #[command(subcommand)]
+    Recovery(RecoveryCmd),
+    /// Забыли пароль: раскрыть vault фразой восстановления и задать новый пароль.
+    Recover {
+        /// Файл с 24 словами (иначе — ввод с терминала).
+        #[arg(long)]
+        phrase_file: Option<PathBuf>,
+        /// Файл с новым паролем (иначе — ввод с терминала).
+        #[arg(long)]
+        new_password_file: Option<PathBuf>,
+        /// Не запоминать ключ в .selfsync/key.
+        #[arg(long)]
+        no_remember: bool,
     },
     /// Состояние: подключение, очередь, конфликты.
     Status,
@@ -416,10 +435,94 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 remember_key: !no_remember,
                 enable_encryption: false,
                 hook,
+                recovery: false,
             };
             return Ok(outcome(runner::run(&dir, &cfg, opts).await?));
         }
-        Cmd::Encrypt { password_file } => {
+        Cmd::Recovery(rc) => {
+            let (password_file, create) = match rc {
+                RecoveryCmd::Create { password_file } => (password_file, true),
+                RecoveryCmd::Remove { password_file } => (password_file, false),
+            };
+            let password = read_password(password_file)?
+                .context("нужен пароль: --password-file или SELFSYNC_PASSWORD")?;
+            let cmd = if create {
+                UiCommand::CreateRecovery {
+                    password: password.clone(),
+                }
+            } else {
+                UiCommand::RemoveRecovery {
+                    password: password.clone(),
+                }
+            };
+            // Пароль нужен и синку перед командой, если ключ ещё не запомнен.
+            let cfg = Config::load(&dir)?;
+            let (o, r) =
+                runner::with_vault(&dir, &cfg, Some(password), true, VaultCommand::Ui(cmd)).await?;
+            return match r {
+                Some(UiResult::RecoveryPhrase { words }) => {
+                    runner::print_phrase(&words);
+                    eprintln!(
+                        "Запись ключа теперь формата 2: устройствам нужен плагин или CLI с \
+                         поддержкой фразы восстановления."
+                    );
+                    Ok(outcome(o))
+                }
+                Some(UiResult::Ok) => {
+                    println!("фраза восстановления удалена");
+                    Ok(outcome(o))
+                }
+                Some(UiResult::Error { message, .. }) => {
+                    eprintln!("ошибка: {message}");
+                    Ok(ExitCode::from(1))
+                }
+                Some(other) => anyhow::bail!("неожиданный ответ: {other:?}"),
+                None => Ok(outcome(o)),
+            };
+        }
+        Cmd::Recover {
+            phrase_file,
+            new_password_file,
+            no_remember,
+        } => {
+            let cfg = Config::load(&dir)?;
+            let phrase = read_secret(phrase_file, "фраза восстановления (24 слова)")?;
+            // Проверка до сети: номер неверного слова сразу.
+            if let Err(e) = selfsync_core::crypto::RecoveryEntropy::from_phrase(&phrase) {
+                anyhow::bail!("фраза: {e}");
+            }
+            let new_password = read_secret(new_password_file, "новый пароль")?;
+            anyhow::ensure!(!new_password.is_empty(), "пустой пароль");
+            let r = runner::folder_command(
+                &dir,
+                &cfg,
+                UiCommand::Recover {
+                    phrase,
+                    new_password: new_password.clone(),
+                    remember: !no_remember,
+                },
+            )
+            .await?;
+            if let UiResult::Error { message, .. } = r {
+                eprintln!("ошибка: {message}");
+                return Ok(ExitCode::from(1));
+            }
+            eprintln!("доступ восстановлен, пароль заменён; синхронизация…");
+            let opts = Options {
+                once: true,
+                watch: false,
+                password: Some(new_password),
+                remember_key: !no_remember,
+                enable_encryption: false,
+                hook: None,
+                recovery: false,
+            };
+            return Ok(outcome(runner::run(&dir, &cfg, opts).await?));
+        }
+        Cmd::Encrypt {
+            password_file,
+            recovery,
+        } => {
             let cfg = Config::load(&dir)?;
             let password = read_password(password_file)?
                 .context("нужен пароль: --password-file или SELFSYNC_PASSWORD")?;
@@ -430,6 +533,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 remember_key: true,
                 enable_encryption: true,
                 hook: None,
+                recovery,
             };
             let code = outcome(runner::run(&dir, &cfg, opts).await?);
             if code == ExitCode::SUCCESS {
@@ -492,6 +596,80 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+#[derive(Subcommand)]
+enum RecoveryCmd {
+    /// Создать фразу (или новую вместо прежней: та перестанет работать).
+    Create {
+        /// Файл с паролем (или переменная SELFSYNC_PASSWORD).
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+    },
+    /// Удалить фразу восстановления.
+    Remove {
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+    },
+}
+
+/// Секрет из файла или с терминала (без эха).
+fn read_secret(file: Option<PathBuf>, prompt: &str) -> anyhow::Result<String> {
+    if let Some(p) = file {
+        return Ok(std::fs::read_to_string(&p)
+            .with_context(|| format!("{}", p.display()))?
+            .trim()
+            .to_owned());
+    }
+    use std::io::{BufRead, IsTerminal, Write};
+    let stdin = std::io::stdin();
+    anyhow::ensure!(
+        stdin.is_terminal(),
+        "нет терминала: передайте файл ({prompt})"
+    );
+    eprint!("{prompt}: ");
+    std::io::stderr().flush()?;
+    let _echo = EchoOff::new();
+    let mut line = String::new();
+    stdin.lock().read_line(&mut line)?;
+    eprintln!();
+    Ok(line.trim().to_owned())
+}
+
+/// Выключенное эхо терминала на время ввода секрета.
+struct EchoOff(#[cfg(unix)] Option<libc::termios>);
+
+impl EchoOff {
+    fn new() -> EchoOff {
+        #[cfg(unix)]
+        {
+            // SAFETY: tcgetattr/tcsetattr над stdin; структура заполняется ОС.
+            unsafe {
+                let mut t: libc::termios = std::mem::zeroed();
+                if libc::tcgetattr(0, &mut t) == 0 {
+                    let old = t;
+                    t.c_lflag &= !libc::ECHO;
+                    libc::tcsetattr(0, libc::TCSANOW, &t);
+                    return EchoOff(Some(old));
+                }
+            }
+            EchoOff(None)
+        }
+        #[cfg(not(unix))]
+        EchoOff()
+    }
+}
+
+impl Drop for EchoOff {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(t) = self.0 {
+            // SAFETY: восстановление сохранённых атрибутов терминала.
+            unsafe {
+                libc::tcsetattr(0, libc::TCSANOW, &t);
+            }
+        }
+    }
 }
 
 /// Общее у команд корзины и истории.

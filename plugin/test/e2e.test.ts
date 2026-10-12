@@ -297,6 +297,54 @@ describe("настройки", () => {
     await c.stop();
   });
 
+  test("фраза восстановления: при включении, вход по фразе, удаление", async () => {
+    const PW = "correct horse battery staple";
+    const [a, b] = await pair("ui-recovery");
+    await a.write("secret.md", "top secret\n");
+    await a.sync();
+    a.runner.send({ type: "enableEncryption", password: PW, remember: true, recovery: true });
+    await a.sync();
+    const shown = a.notices.filter((n) => n.kind === "recoveryPhrase");
+    assert.equal(shown.length, 1, "фраза показана ровно один раз");
+    const words = shown[0]?.kind === "recoveryPhrase" ? shown[0].words : [];
+    assert.equal(words.length, 24);
+    assert.equal(a.status?.recovery, true);
+    // фраза не попала ни в журнал, ни в хранилище плагина (индекс, кэш)
+    const sample = words.slice(0, 4).join(" ");
+    assert.ok(!a.logs.some((l) => l.includes(sample)), "фраза в журнале");
+    for (const f of await fsp.readdir(a.store, { recursive: true })) {
+      const st = await fsp.stat(join(a.store, f));
+      if (!st.isFile()) continue;
+      const text = (await fsp.readFile(join(a.store, f))).toString("latin1");
+      assert.ok(!text.includes(sample), `фраза в ${f}`);
+    }
+    // устройство без пароля входит фразой с новым паролем
+    await b.sync();
+    assert.equal(b.status?.state, "needPassword");
+    const bad = await b.runner.command({ type: "recover", phrase: [...words.slice(1), words[0]].join(" "), newPassword: "x", remember: true });
+    assert.equal(bad.type, "error");
+    const ok = await b.runner.command({ type: "recover", phrase: words.join(" "), newPassword: "the new password", remember: true });
+    assert.equal(ok.type, "ok", JSON.stringify(ok));
+    await b.sync();
+    assert.equal(await b.read("secret.md"), "top secret\n");
+    // a с запомненным ключом продолжает работать
+    await b.write("after.md", "after recovery\n");
+    await b.sync();
+    await a.sync();
+    assert.equal(await a.read("after.md"), "after recovery\n");
+    // новая фраза отменяет старую, удаление убирает
+    const created = await a.runner.command({ type: "createRecovery", password: "the new password" });
+    assert.equal(created.type, "recoveryPhrase");
+    const old = await b.runner.command({ type: "recover", phrase: words.join(" "), newPassword: "y", remember: true });
+    assert.ok(old.type === "error" && old.code === "wrong_phrase", JSON.stringify(old));
+    const removed = await a.runner.command({ type: "removeRecovery", password: "the new password" });
+    assert.equal(removed.type, "ok");
+    await a.sync();
+    assert.equal(a.status?.recovery, false);
+    await a.stop();
+    await b.stop();
+  });
+
   test("устройства: список и отзыв; окно хранения; ссылка подключения и QR", async () => {
     const [a, b] = await pair("ui-devices");
     await a.sync();

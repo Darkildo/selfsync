@@ -174,8 +174,12 @@ impl Engine {
                     });
                 }
             }
-            Event::EnableEncryption { password, remember } => cx.with_mut(|s| {
-                s.enable = Some((password, remember));
+            Event::EnableEncryption {
+                password,
+                remember,
+                recovery,
+            } => cx.with_mut(|s| {
+                s.enable = Some((password, remember, recovery));
                 s.sync_due = Some(now);
             }),
             Event::ChangePassword { .. } if cx.with(|s| s.read_only) => {

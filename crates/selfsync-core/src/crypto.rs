@@ -18,12 +18,17 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::hash::Hash;
 
-/// Версия формата записи ключа.
+/// Версия формата записи ключа: только пароль.
 pub const KEY_RECORD_FORMAT: u32 = 1;
+/// Пароль и фраза восстановления. Клиенты 0.1.x такую запись не откроют, поэтому
+/// она появляется только по явному действию пользователя.
+pub const KEY_RECORD_FORMAT_RECOVERY: u32 = 2;
 /// Argon2id v0x13.
 pub const KDF_ARGON2ID: u32 = 1;
 
 const WRAP_AAD: &[u8] = b"selfsync/v1/vault-key";
+const RECOVERY_AAD: &[u8] = b"selfsync/v1/recovery";
+const INFO_RECOVERY: &[u8] = b"selfsync/v1/recovery-kek";
 const INFO_CONTENT: &[u8] = b"selfsync/v1/content";
 const INFO_NONCE: &[u8] = b"selfsync/v1/nonce";
 const INFO_NAMES: &[u8] = b"selfsync/v1/names";
@@ -44,6 +49,10 @@ pub enum CryptoError {
     Decrypt,
     #[error("нет источника случайности")]
     Random,
+    #[error("неверная фраза восстановления")]
+    WrongPhrase,
+    #[error("у записи ключа нет фразы восстановления")]
+    NoRecovery,
 }
 
 /// Параметры Argon2id.
@@ -268,20 +277,155 @@ fn wrap_aad(r: &pb::VaultKeyRecord) -> Vec<u8> {
         aad.extend_from_slice(&v.to_le_bytes());
     }
     aad.extend_from_slice(&r.salt);
+    // Формат 2: обёртка восстановления целиком. Вырезать её (вернуть формат 1) или
+    // подменить незаметно для парольной обёртки нельзя.
+    if r.format == KEY_RECORD_FORMAT_RECOVERY {
+        for part in [&r.recovery_nonce, &r.recovery_wrapped_key] {
+            aad.extend_from_slice(&u32::try_from(part.len()).unwrap_or(u32::MAX).to_le_bytes());
+            aad.extend_from_slice(part);
+        }
+        aad.extend_from_slice(&r.recovery_created_at.to_le_bytes());
+    }
     aad
 }
 
-/// Создаёт запись ключа: мастер-ключ, обёрнутый KEK из пароля.
+/// AAD обёртки восстановления. Не зависит от парольной части: смена пароля её
+/// не трогает (фразы при смене пароля у нас нет).
+fn recovery_aad(created_at: i64) -> Vec<u8> {
+    let mut aad = RECOVERY_AAD.to_vec();
+    aad.extend_from_slice(&KEY_RECORD_FORMAT_RECOVERY.to_le_bytes());
+    aad.extend_from_slice(&created_at.to_le_bytes());
+    aad
+}
+
+/// Ключ обёртки из фразы. Argon2 не нужен: в фразе 256 бит случайности, подбирать
+/// нечего.
+fn recovery_kek(entropy: &RecoveryEntropy) -> [u8; 32] {
+    let hk = Hkdf::<Sha256>::new(None, &entropy.0);
+    let mut out = [0u8; 32];
+    hk.expand(INFO_RECOVERY, &mut out)
+        .unwrap_or_else(|_| unreachable!());
+    out
+}
+
+/// Обёртка восстановления как она лежит в записи.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RecoveryWrap {
+    nonce: Vec<u8>,
+    wrapped: Vec<u8>,
+    created_at: i64,
+}
+
+impl RecoveryWrap {
+    fn new(
+        master: &MasterKey,
+        entropy: &RecoveryEntropy,
+        created_at: i64,
+    ) -> Result<Self, CryptoError> {
+        let nonce: [u8; 12] = random_bytes()?;
+        let mut kek = recovery_kek(entropy);
+        let cipher = Aes256GcmSiv::new_from_slice(&kek).unwrap_or_else(|_| unreachable!());
+        kek.zeroize();
+        let aad = recovery_aad(created_at);
+        let wrapped = cipher
+            .encrypt(
+                &nonce.into(),
+                Payload {
+                    msg: master.as_bytes(),
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| CryptoError::BadRecord)?;
+        Ok(RecoveryWrap {
+            nonce: nonce.to_vec(),
+            wrapped,
+            created_at,
+        })
+    }
+
+    fn of(r: &pb::VaultKeyRecord) -> Option<RecoveryWrap> {
+        (r.format == KEY_RECORD_FORMAT_RECOVERY).then(|| RecoveryWrap {
+            nonce: r.recovery_nonce.clone(),
+            wrapped: r.recovery_wrapped_key.clone(),
+            created_at: r.recovery_created_at,
+        })
+    }
+}
+
+/// Энтропия фразы восстановления (32 байта); затирается при освобождении.
+#[derive(Clone, Zeroize, ZeroizeOnDrop, PartialEq, Eq)]
+pub struct RecoveryEntropy([u8; 32]);
+
+impl RecoveryEntropy {
+    pub fn generate() -> Result<RecoveryEntropy, CryptoError> {
+        Ok(RecoveryEntropy(random_bytes()?))
+    }
+
+    pub fn from_bytes(b: [u8; 32]) -> RecoveryEntropy {
+        RecoveryEntropy(b)
+    }
+
+    /// 24 слова BIP-39.
+    pub fn words(&self) -> Vec<String> {
+        crate::bip39::encode(&self.0)
+    }
+
+    /// Разбор фразы: слова через пробелы или переводы строк, регистр не важен.
+    pub fn from_phrase(phrase: &str) -> Result<RecoveryEntropy, crate::bip39::PhraseError> {
+        crate::bip39::decode(phrase).map(RecoveryEntropy)
+    }
+}
+
+impl std::fmt::Debug for RecoveryEntropy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RecoveryEntropy(…)")
+    }
+}
+
+/// Создаёт запись ключа формата 1: мастер-ключ, обёрнутый KEK из пароля.
 pub fn seal_master_key(
     master: &MasterKey,
     password: &str,
     params: KdfParams,
     created_at: i64,
 ) -> Result<Vec<u8>, CryptoError> {
+    seal(master, password, params, created_at, None)
+}
+
+/// Запись формата 2: обёртка паролем и обёртка фразой восстановления.
+pub fn seal_master_key_with_recovery(
+    master: &MasterKey,
+    password: &str,
+    params: KdfParams,
+    created_at: i64,
+    entropy: &RecoveryEntropy,
+) -> Result<Vec<u8>, CryptoError> {
+    let rw = RecoveryWrap::new(master, entropy, created_at)?;
+    seal(master, password, params, created_at, Some(rw))
+}
+
+fn seal(
+    master: &MasterKey,
+    password: &str,
+    params: KdfParams,
+    created_at: i64,
+    recovery: Option<RecoveryWrap>,
+) -> Result<Vec<u8>, CryptoError> {
     let salt: [u8; 16] = random_bytes()?;
     let nonce: [u8; 12] = random_bytes()?;
+    let (format, rw) = match recovery {
+        Some(rw) => (KEY_RECORD_FORMAT_RECOVERY, rw),
+        None => (
+            KEY_RECORD_FORMAT,
+            RecoveryWrap {
+                nonce: Vec::new(),
+                wrapped: Vec::new(),
+                created_at: 0,
+            },
+        ),
+    };
     let mut record = pb::VaultKeyRecord {
-        format: KEY_RECORD_FORMAT,
+        format,
         kdf: KDF_ARGON2ID,
         m_cost_kib: params.m_cost_kib,
         t_cost: params.t_cost,
@@ -291,6 +435,9 @@ pub fn seal_master_key(
         wrapped_key: Vec::new(),
         created_at,
         key_check: master.check_value().to_vec(),
+        recovery_nonce: rw.nonce,
+        recovery_wrapped_key: rw.wrapped,
+        recovery_created_at: rw.created_at,
     };
     let mut kek = derive_kek(password, &salt, params)?;
     let cipher = Aes256GcmSiv::new_from_slice(&kek).unwrap_or_else(|_| unreachable!());
@@ -311,13 +458,102 @@ pub fn seal_master_key(
 /// Разбирает запись ключа (без пароля): параметры и версия формата.
 pub fn parse_record(bytes: &[u8]) -> Result<pb::VaultKeyRecord, CryptoError> {
     let r = pb::VaultKeyRecord::decode(bytes).map_err(|_| CryptoError::BadRecord)?;
-    if r.format != KEY_RECORD_FORMAT {
+    if r.format != KEY_RECORD_FORMAT && r.format != KEY_RECORD_FORMAT_RECOVERY {
         return Err(CryptoError::UnsupportedFormat(r.format));
     }
     if r.kdf != KDF_ARGON2ID || r.salt.len() < 16 || r.nonce.len() != 12 {
         return Err(CryptoError::BadRecord);
     }
+    if r.format == KEY_RECORD_FORMAT_RECOVERY
+        && (r.recovery_nonce.len() != 12 || r.recovery_wrapped_key.is_empty())
+    {
+        return Err(CryptoError::BadRecord);
+    }
     Ok(r)
+}
+
+/// Есть ли в записи фраза восстановления.
+pub fn has_recovery(bytes: &[u8]) -> bool {
+    parse_record(bytes).is_ok_and(|r| r.format == KEY_RECORD_FORMAT_RECOVERY)
+}
+
+/// Раскрывает мастер-ключ фразой восстановления.
+pub fn open_master_key_with_phrase(
+    bytes: &[u8],
+    entropy: &RecoveryEntropy,
+) -> Result<MasterKey, CryptoError> {
+    let r = parse_record(bytes)?;
+    let rw = RecoveryWrap::of(&r).ok_or(CryptoError::NoRecovery)?;
+    let nonce: [u8; 12] = rw
+        .nonce
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::BadRecord)?;
+    let mut kek = recovery_kek(entropy);
+    let cipher = Aes256GcmSiv::new_from_slice(&kek).unwrap_or_else(|_| unreachable!());
+    kek.zeroize();
+    let aad = recovery_aad(rw.created_at);
+    let mut pt = cipher
+        .decrypt(
+            &nonce.into(),
+            Payload {
+                msg: &rw.wrapped,
+                aad: &aad,
+            },
+        )
+        .map_err(|_| CryptoError::WrongPhrase)?;
+    let key: [u8; 32] = pt
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::BadRecord)?;
+    pt.zeroize();
+    let master = MasterKey(key);
+    // Обёртка сходится с записью (key_check): подставленная обёртка чужого ключа
+    // не пройдёт.
+    if !verify_master(bytes, &master)? {
+        return Err(CryptoError::BadRecord);
+    }
+    Ok(master)
+}
+
+/// Добавить (или заменить) фразу восстановления: открыть паролем, новая энтропия.
+/// Прежняя фраза перестаёт работать. Возвращает новую запись и энтропию.
+pub fn add_recovery(
+    bytes: &[u8],
+    password: &str,
+    params: KdfParams,
+    now: i64,
+) -> Result<(Vec<u8>, RecoveryEntropy), CryptoError> {
+    let master = open_master_key(bytes, password)?;
+    let entropy = RecoveryEntropy::generate()?;
+    let record = seal_master_key_with_recovery(&master, password, params, now, &entropy)?;
+    Ok((record, entropy))
+}
+
+/// Убрать фразу восстановления: запись снова формата 1.
+pub fn remove_recovery(
+    bytes: &[u8],
+    password: &str,
+    params: KdfParams,
+    now: i64,
+) -> Result<Vec<u8>, CryptoError> {
+    let master = open_master_key(bytes, password)?;
+    seal(&master, password, params, now, None)
+}
+
+/// Вход по фразе: новый пароль, фраза остаётся действительной. Возвращает новую
+/// запись и мастер-ключ.
+pub fn recover(
+    bytes: &[u8],
+    entropy: &RecoveryEntropy,
+    new_password: &str,
+    params: KdfParams,
+    now: i64,
+) -> Result<(Vec<u8>, MasterKey), CryptoError> {
+    let master = open_master_key_with_phrase(bytes, entropy)?;
+    let r = parse_record(bytes)?;
+    let record = seal(&master, new_password, params, now, RecoveryWrap::of(&r))?;
+    Ok((record, master))
 }
 
 /// Раскрывает мастер-ключ паролем. Неверный пароль — [`CryptoError::WrongPassword`].
@@ -375,7 +611,9 @@ pub fn change_password(
     now: i64,
 ) -> Result<Vec<u8>, CryptoError> {
     let master = open_master_key(bytes, old_password)?;
-    seal_master_key(&master, new_password, params, now)
+    // Фраза восстановления переживает смену пароля: её обёртка от пароля не зависит.
+    let r = parse_record(bytes)?;
+    seal(&master, new_password, params, now, RecoveryWrap::of(&r))
 }
 
 /// Грубая оценка стойкости пароля в битах — совет пользователю, а не запрет.
@@ -553,5 +791,136 @@ mod tests {
         assert!(password_strength_bits("123") < 20);
         assert!(password_strength_bits("correct horse battery staple") > 60);
         assert!(password_strength_bits("aaaaaaaaaaaaaaaaaaaa") < 20);
+    }
+
+    fn record(bytes: &[u8]) -> pb::VaultKeyRecord {
+        pb::VaultKeyRecord::decode(bytes).unwrap()
+    }
+
+    #[test]
+    fn recovery_roundtrip() {
+        let master = MasterKey::generate().unwrap();
+        let e = RecoveryEntropy::generate().unwrap();
+        let rec = seal_master_key_with_recovery(&master, "pw", KdfParams::TEST, 5, &e).unwrap();
+        assert_eq!(record(&rec).format, KEY_RECORD_FORMAT_RECOVERY);
+        assert!(has_recovery(&rec));
+        assert_eq!(
+            open_master_key(&rec, "pw").unwrap().as_bytes(),
+            master.as_bytes()
+        );
+        let words = e.words();
+        assert_eq!(words.len(), 24);
+        let back = RecoveryEntropy::from_phrase(&words.join(" ")).unwrap();
+        let opened = open_master_key_with_phrase(&rec, &back).unwrap();
+        assert_eq!(opened.as_bytes(), master.as_bytes());
+        let other = RecoveryEntropy::generate().unwrap();
+        assert_eq!(
+            open_master_key_with_phrase(&rec, &other).unwrap_err(),
+            CryptoError::WrongPhrase
+        );
+        assert!(verify_master(&rec, &master).unwrap());
+        assert!(
+            !format!("{e:?}").contains(&words[0]),
+            "Debug не печатает фразу"
+        );
+    }
+
+    #[test]
+    fn format_1_record_still_opens() {
+        let master = MasterKey::generate().unwrap();
+        let rec = seal_master_key(&master, "pw", KdfParams::TEST, 1).unwrap();
+        assert_eq!(record(&rec).format, KEY_RECORD_FORMAT);
+        assert!(!has_recovery(&rec));
+        assert_eq!(
+            open_master_key(&rec, "pw").unwrap().as_bytes(),
+            master.as_bytes()
+        );
+        let e = RecoveryEntropy::generate().unwrap();
+        assert_eq!(
+            open_master_key_with_phrase(&rec, &e).unwrap_err(),
+            CryptoError::NoRecovery
+        );
+    }
+
+    #[test]
+    fn recovery_wrap_is_bound_to_password_wrap() {
+        let master = MasterKey::generate().unwrap();
+        let e = RecoveryEntropy::generate().unwrap();
+        let rec = seal_master_key_with_recovery(&master, "pw", KdfParams::TEST, 5, &e).unwrap();
+        // вырезать обёртку восстановления (вернуть формат 1) — пароль не откроет
+        let mut cut = record(&rec);
+        cut.format = KEY_RECORD_FORMAT;
+        cut.recovery_nonce.clear();
+        cut.recovery_wrapped_key.clear();
+        cut.recovery_created_at = 0;
+        assert_eq!(
+            open_master_key(&cut.encode_to_vec(), "pw").unwrap_err(),
+            CryptoError::WrongPassword
+        );
+        // подменить обёртку своей (другая фраза, тот же ключ знать нельзя — но
+        // даже правильная обёртка с другой фразой) — пароль не откроет
+        let foreign = seal_master_key_with_recovery(
+            &master,
+            "pw",
+            KdfParams::TEST,
+            5,
+            &RecoveryEntropy::generate().unwrap(),
+        )
+        .unwrap();
+        let mut swapped = record(&rec);
+        let f = record(&foreign);
+        swapped.recovery_nonce = f.recovery_nonce;
+        swapped.recovery_wrapped_key = f.recovery_wrapped_key;
+        assert_eq!(
+            open_master_key(&swapped.encode_to_vec(), "pw").unwrap_err(),
+            CryptoError::WrongPassword
+        );
+        let mut later = record(&rec);
+        later.recovery_created_at += 1;
+        assert!(open_master_key(&later.encode_to_vec(), "pw").is_err());
+        assert!(open_master_key_with_phrase(&later.encode_to_vec(), &e).is_err());
+    }
+
+    #[test]
+    fn recovery_lifecycle() {
+        let master = MasterKey::generate().unwrap();
+        let rec = seal_master_key(&master, "pw", KdfParams::TEST, 1).unwrap();
+        // создать
+        let (rec2, e1) = add_recovery(&rec, "pw", KdfParams::TEST, 2).unwrap();
+        assert!(add_recovery(&rec, "wrong", KdfParams::TEST, 2).is_err());
+        // смена пароля фразу не отменяет
+        let rec3 = change_password(&rec2, "pw", "pw2", KdfParams::TEST, 3).unwrap();
+        assert_eq!(
+            open_master_key_with_phrase(&rec3, &e1).unwrap().as_bytes(),
+            master.as_bytes()
+        );
+        // вход по фразе: новый пароль, фраза остаётся
+        let (rec4, m) = recover(&rec3, &e1, "pw3", KdfParams::TEST, 4).unwrap();
+        assert_eq!(m.as_bytes(), master.as_bytes());
+        assert!(open_master_key(&rec4, "pw2").is_err());
+        assert_eq!(
+            open_master_key(&rec4, "pw3").unwrap().as_bytes(),
+            master.as_bytes()
+        );
+        assert!(open_master_key_with_phrase(&rec4, &e1).is_ok());
+        // создать новую — старая фраза перестаёт работать
+        let (rec5, e2) = add_recovery(&rec4, "pw3", KdfParams::TEST, 5).unwrap();
+        assert_eq!(
+            open_master_key_with_phrase(&rec5, &e1).unwrap_err(),
+            CryptoError::WrongPhrase
+        );
+        assert!(open_master_key_with_phrase(&rec5, &e2).is_ok());
+        // удалить
+        let rec6 = remove_recovery(&rec5, "pw3", KdfParams::TEST, 6).unwrap();
+        assert!(!has_recovery(&rec6));
+        assert_eq!(record(&rec6).format, KEY_RECORD_FORMAT);
+        assert_eq!(
+            open_master_key(&rec6, "pw3").unwrap().as_bytes(),
+            master.as_bytes()
+        );
+        assert_eq!(
+            open_master_key_with_phrase(&rec6, &e2).unwrap_err(),
+            CryptoError::NoRecovery
+        );
     }
 }

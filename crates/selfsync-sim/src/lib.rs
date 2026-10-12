@@ -913,6 +913,7 @@ impl World {
                 Event::EnableEncryption {
                     password: PASSWORD.into(),
                     remember,
+                    recovery: false,
                 },
             );
         }

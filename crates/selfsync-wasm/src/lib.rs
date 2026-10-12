@@ -105,3 +105,17 @@ pub fn qr_modules(text: &str) -> Result<Vec<u8>, JsError> {
     );
     Ok(out)
 }
+
+/// Проверка фразы восстановления до отправки: `undefined` — в порядке, иначе
+/// `count:N` (слов не 24), `word:I` (слово I, с единицы, не из словаря) или
+/// `checksum`. Текст сообщения формирует интерфейс.
+#[wasm_bindgen(js_name = checkPhrase)]
+pub fn check_phrase(phrase: &str) -> Option<String> {
+    use selfsync_core::bip39::PhraseError;
+    match selfsync_core::bip39::decode(phrase) {
+        Ok(_) => None,
+        Err(PhraseError::WordCount(n)) => Some(format!("count:{n}")),
+        Err(PhraseError::UnknownWord { index, .. }) => Some(format!("word:{index}")),
+        Err(PhraseError::Checksum) => Some("checksum".to_owned()),
+    }
+}

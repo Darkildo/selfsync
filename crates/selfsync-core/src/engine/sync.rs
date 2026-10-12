@@ -98,11 +98,11 @@ async fn one_pass(cx: &Ctx) -> SyncResult<bool> {
     }
     let (read_only, pending) = cx.with(|s| (s.read_only, s.index.pending_count()));
     // Включение шифрования — на актуальном vault'е.
-    if let Some((password, remember)) = cx.with_mut(|s| s.enable.take()) {
+    if let Some((password, remember, recovery)) = cx.with_mut(|s| s.enable.take()) {
         if read_only {
             cx.notify(read_only_error());
         } else {
-            crypto_flow::enable(cx, password, remember).await?;
+            crypto_flow::enable(cx, password, remember, recovery).await?;
         }
     }
     if read_only && pending > 0 && !cx.with(|s| s.read_only_notified) {

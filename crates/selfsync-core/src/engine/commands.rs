@@ -50,6 +50,9 @@ fn writes(cmd: &UiCommand) -> bool {
             | UiCommand::RevokeDevice { .. }
             | UiCommand::CreateJoin { .. }
             | UiCommand::SetRetention { .. }
+            | UiCommand::CreateRecovery { .. }
+            | UiCommand::RemoveRecovery { .. }
+            | UiCommand::Recover { .. }
     )
 }
 
@@ -230,6 +233,17 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
         UiCommand::PasswordStrength { password } => Ok(UiResult::Strength {
             bits: crate::crypto::password_strength_bits(&password),
         }),
+        UiCommand::CreateRecovery { password } => {
+            super::crypto_flow::create_recovery(cx, password).await
+        }
+        UiCommand::RemoveRecovery { password } => {
+            super::crypto_flow::remove_recovery(cx, password).await
+        }
+        UiCommand::Recover {
+            phrase,
+            new_password,
+            remember,
+        } => super::crypto_flow::recover(cx, phrase, new_password, remember).await,
     }
 }
 

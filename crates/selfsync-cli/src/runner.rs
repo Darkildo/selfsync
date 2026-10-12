@@ -32,6 +32,8 @@ pub struct Options {
     pub enable_encryption: bool,
     /// Команда после каждого цикла, который что-то изменил (`run --exec`).
     pub hook: Option<HookConfig>,
+    /// С `enable_encryption`: создать и фразу восстановления (печатается в stdout).
+    pub recovery: bool,
 }
 
 /// Чем закончился запуск.
@@ -137,6 +139,9 @@ impl Loop {
                         paths: pulled.iter().chain(pushed).cloned().collect(),
                     });
                 }
+                if let Notice::RecoveryPhrase { words } = &notice {
+                    print_phrase(words);
+                }
                 notify_user(&notice);
             }
             Action::Log { level, message } => match level {
@@ -180,11 +185,50 @@ impl Loop {
     }
 }
 
+/// Фраза восстановления — в stdout (её можно перенаправить в файл), предупреждение
+/// — в stderr. Больше нигде она не появляется.
+pub fn print_phrase(words: &selfsync_core::engine::Phrase) {
+    eprintln!(
+        "Фраза восстановления (показывается один раз; запишите её и храните отдельно от \
+         пароля — она раскрывает vault так же, как пароль):"
+    );
+    for (i, w) in words.0.iter().enumerate() {
+        println!("{:2}. {w}", i + 1);
+    }
+}
+
+/// Команда на движке папки без цикла синка: индекс и ключ загружены (запись
+/// индекса и ключа идёт как обычно), сеть — только для самой команды. Для входа
+/// по фразе: обычная команда сначала синхронизирует, а без пароля синк не начнётся.
+pub async fn folder_command(dir: &Path, cfg: &Config, cmd: UiCommand) -> anyhow::Result<UiResult> {
+    let exec = Arc::new(Exec::new(dir, &cfg.server, Some(cfg.token.clone()))?);
+    let index = std::fs::read(exec.index_path()).ok();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut lp = Loop::new(cfg.engine(), index.as_deref(), exec, tx);
+    lp.feed(Event::Command {
+        req: 1,
+        command: cmd,
+    });
+    loop {
+        if lp.inflight == 0
+            && let Some(r) = lp.ui.remove(&1)
+        {
+            return Ok(r);
+        }
+        match tokio::time::timeout(Duration::from_secs(300), rx.recv()).await {
+            Ok(Some(ev)) => lp.feed(ev),
+            _ => anyhow::bail!("сервер не ответил"),
+        }
+    }
+}
+
 /// Файл в `.selfsync/`: последний синк прошёл в режиме «только чтение».
 pub const READ_ONLY_MARKER: &str = "read-only";
 
 fn notify_user(n: &Notice) {
     match n {
+        // Фраза уже напечатана в stdout; в журнал — только факт.
+        Notice::RecoveryPhrase { .. } => tracing::info!("создана фраза восстановления"),
         Notice::Synced { pulled, pushed } => {
             tracing::info!("синк: пришло {}, отправлено {}", pulled.len(), pushed.len())
         }
@@ -305,6 +349,7 @@ pub async fn with_vault(
         remember_key,
         enable_encryption: false,
         hook: None,
+        recovery: false,
     };
     let end = run_loop(dir, cfg, opts, None, Some(cmd)).await?;
     Ok((end.outcome, end.result))
@@ -368,6 +413,7 @@ async fn run_loop(
         lp.feed(Event::EnableEncryption {
             password,
             remember: opts.remember_key,
+            recovery: opts.recovery,
         });
     }
     let mut password_sent = opts.enable_encryption;

@@ -296,4 +296,9 @@ message VaultKeyRecord {
   bytes wrapped_key = 8;     // AES-256-GCM-SIV(KEK, master_key) с тегом
   int64 created_at = 9;
   bytes key_check = 10;      // 16 байт HMAC от производного ключа: проверка запомненного ключа без пароля
+  // Формат 2: вторая обёртка того же мастер-ключа ключом из фразы восстановления
+  // (24 слова BIP-39). Поля входят в AAD парольной обёртки.
+  bytes recovery_nonce = 11;        // 12 байт
+  bytes recovery_wrapped_key = 12;  // AES-256-GCM-SIV(HKDF(фраза), master_key) с тегом
+  int64 recovery_created_at = 13;
 }

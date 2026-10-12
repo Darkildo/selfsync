@@ -68,6 +68,7 @@ fn once(password: Option<&str>) -> Options {
         remember_key: true,
         enable_encryption: false,
         hook: None,
+        recovery: false,
     }
 }
 
@@ -162,6 +163,7 @@ async fn encrypt_then_password_on_other_device() {
     let enable = Options {
         enable_encryption: true,
         hook: None,
+        recovery: false,
         ..once(Some(PW))
     };
     assert_eq!(
@@ -683,4 +685,95 @@ async fn excludes_with_reinclude_from_config() {
     cb.save(b.path()).unwrap();
     assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
     assert!(b.path().join(".obsidian/app.json").exists());
+}
+
+fn server_has_recovery(srv: &Server, vault: &str) -> bool {
+    let v = srv.state.vault(vault).unwrap();
+    let c = v.pool.get().unwrap();
+    let rec = selfsync_server::db::vault::meta_blob(&c, "vault_key")
+        .unwrap()
+        .unwrap_or_default();
+    selfsync_core::crypto::has_recovery(&rec)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recover_with_phrase_sets_new_password() {
+    const PW: &str = "correct horse battery staple";
+    const NEW: &str = "a brand new password";
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "recov", "a");
+    std::fs::write(a.path().join("s.md"), "secret\n").unwrap();
+    // encrypt --recovery: запись сразу формата 2
+    let enable = Options {
+        enable_encryption: true,
+        recovery: true,
+        ..once(Some(PW))
+    };
+    assert_eq!(
+        runner::run(a.path(), &ca, enable).await.unwrap(),
+        Outcome::Synced
+    );
+    assert!(server_has_recovery(&srv, "recov"));
+    // recovery create: новая фраза вместо прежней
+    let (o, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::CreateRecovery {
+            password: PW.into(),
+        }),
+    )
+    .await;
+    assert_eq!(o, Outcome::Synced);
+    let Some(UiResult::RecoveryPhrase { words }) = r else {
+        panic!("{r:?}")
+    };
+    assert_eq!(words.0.len(), 24);
+    // новое устройство без ключа и пароля: вход по фразе
+    let (b, cb) = folder(&srv, "recov", "b");
+    assert_eq!(sync(b.path(), &cb).await, Outcome::NeedPassword);
+    let r = runner::folder_command(
+        b.path(),
+        &cb,
+        UiCommand::Recover {
+            phrase: words.0.join(" "),
+            new_password: NEW.into(),
+            remember: true,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(r, UiResult::Ok);
+    assert!(b.path().join(".selfsync/key").exists(), "ключ запомнен");
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    assert_eq!(
+        std::fs::read_to_string(b.path().join("s.md")).unwrap(),
+        "secret\n"
+    );
+    // старый пароль больше не открывает, новый — открывает
+    let (c, cc) = folder(&srv, "recov", "c");
+    assert_eq!(
+        runner::run(c.path(), &cc, once(Some(PW))).await.unwrap(),
+        Outcome::Blocked("wrong_password".into())
+    );
+    let (d, cd) = folder(&srv, "recov", "d");
+    assert_eq!(
+        runner::run(d.path(), &cd, once(Some(NEW))).await.unwrap(),
+        Outcome::Synced
+    );
+    // a с запомненным ключом продолжает без пароля; фраза жива
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert!(server_has_recovery(&srv, "recov"));
+    // recovery remove
+    let (_, r) = vault_cmd(
+        a.path(),
+        &ca,
+        None,
+        VaultCommand::Ui(UiCommand::RemoveRecovery {
+            password: NEW.into(),
+        }),
+    )
+    .await;
+    assert_eq!(r, Some(UiResult::Ok));
+    assert!(!server_has_recovery(&srv, "recov"));
 }

@@ -9,8 +9,8 @@ use selfsync_proto::v1 as pb;
 use super::api;
 use super::ctx::{Ctx, SMALL_BLOB, SyncError, SyncResult};
 use super::transfer::{Src, download_temp, fetch_small, prepare_big, prepare_small, upload_big};
-use super::types::{Action, LogLevel, Notice, SyncState};
-use crate::crypto::{self, CryptoError, MasterKey};
+use super::types::{Action, LogLevel, Notice, Phrase, SyncState, UiResult};
+use crate::crypto::{self, CryptoError, MasterKey, RecoveryEntropy};
 use crate::hash::Hash;
 use crate::index::{MigrationState, VaultMode};
 use crate::path::VaultPath;
@@ -152,6 +152,8 @@ pub(crate) async fn verify_keys(cx: &Ctx) -> SyncResult<()> {
     if vk.record.is_empty() {
         return Ok(());
     }
+    let recovery = crypto::has_recovery(&vk.record);
+    cx.set_status(|st| st.recovery = recovery);
     let ok = cx.with(|s| {
         s.master
             .as_ref()
@@ -280,8 +282,116 @@ pub(crate) async fn change_password(cx: &Ctx, old: String, new: String) -> SyncR
     ))
 }
 
+fn crypto_err(e: CryptoError) -> SyncError {
+    let code = match e {
+        CryptoError::WrongPassword => "wrong_password",
+        CryptoError::WrongPhrase => "wrong_phrase",
+        CryptoError::NoRecovery => "no_recovery",
+        _ => "bad_vault_key",
+    };
+    SyncError::Http {
+        status: 400,
+        code: code.into(),
+        message: e.to_string(),
+    }
+}
+
+/// Перевыпуск записи ключа с проверкой версии (как смена пароля): `make` строит
+/// новую запись из текущей. Возвращает результат `make` для успешной записи.
+async fn rewrite_vault_key<T>(
+    cx: &Ctx,
+    mut make: impl FnMut(&[u8]) -> Result<(Vec<u8>, T), CryptoError>,
+) -> SyncResult<T> {
+    for _ in 0..3 {
+        let vk = api::get_vault_key(cx).await?;
+        if vk.record.is_empty() {
+            return Err(SyncError::Http {
+                status: 400,
+                code: "no_vault_key".into(),
+                message: "vault не зашифрован".into(),
+            });
+        }
+        let (record, out) = make(&vk.record).map_err(crypto_err)?;
+        let recovery = crypto::has_recovery(&record);
+        if let Some(resp) = api::put_vault_key(cx, record, vk.version).await? {
+            cx.with_mut(|s| {
+                if let VaultMode::Encrypted { .. } = s.index.mode {
+                    s.index.mode = VaultMode::Encrypted {
+                        key_version: resp.version,
+                    };
+                }
+            });
+            cx.save().await?;
+            cx.set_status(|st| st.recovery = recovery);
+            return Ok(out);
+        }
+    }
+    Err(SyncError::Protocol(
+        "запись ключа постоянно меняется".into(),
+    ))
+}
+
+/// Создать фразу восстановления (новая заменяет прежнюю).
+pub(crate) async fn create_recovery(cx: &Ctx, password: String) -> SyncResult<UiResult> {
+    let kdf = cx.with(|s| s.cfg.kdf);
+    let now = cx.now();
+    let entropy =
+        rewrite_vault_key(cx, |rec| crypto::add_recovery(rec, &password, kdf, now)).await?;
+    cx.log(LogLevel::Info, "создана фраза восстановления");
+    Ok(UiResult::RecoveryPhrase {
+        words: Phrase(entropy.words()),
+    })
+}
+
+/// Убрать фразу восстановления.
+pub(crate) async fn remove_recovery(cx: &Ctx, password: String) -> SyncResult<UiResult> {
+    let kdf = cx.with(|s| s.cfg.kdf);
+    let now = cx.now();
+    rewrite_vault_key(cx, |rec| {
+        crypto::remove_recovery(rec, &password, kdf, now).map(|r| (r, ()))
+    })
+    .await?;
+    cx.log(LogLevel::Info, "фраза восстановления удалена");
+    Ok(UiResult::Ok)
+}
+
+/// Вход по фразе: новый пароль, ключ раскрыт на этом устройстве. Остальные
+/// устройства с запомненным ключом продолжают работать (мастер тот же), без
+/// него — попросят новый пароль.
+pub(crate) async fn recover(
+    cx: &Ctx,
+    phrase: String,
+    new_password: String,
+    remember: bool,
+) -> SyncResult<UiResult> {
+    let entropy = RecoveryEntropy::from_phrase(&phrase).map_err(|e| SyncError::Http {
+        status: 400,
+        code: "bad_phrase".into(),
+        message: e.to_string(),
+    })?;
+    let kdf = cx.with(|s| s.cfg.kdf);
+    let now = cx.now();
+    let master = rewrite_vault_key(cx, |rec| {
+        crypto::recover(rec, &entropy, &new_password, kdf, now)
+    })
+    .await?;
+    set_master(cx, master, remember, true);
+    cx.log(
+        LogLevel::Info,
+        "доступ восстановлен фразой: задан новый пароль",
+    );
+    cx.notify(Notice::PasswordChanged);
+    cx.with_mut(|s| s.sync_due = Some(s.now));
+    Ok(UiResult::Ok)
+}
+
 /// Включение шифрования (вызывается из цикла после полной синхронизации).
-pub(crate) async fn enable(cx: &Ctx, password: String, remember: bool) -> SyncResult<()> {
+pub(crate) async fn enable(
+    cx: &Ctx,
+    password: String,
+    remember: bool,
+    recovery: bool,
+) -> SyncResult<()> {
     if cx.with(|s| s.encrypted() || s.index.migration.is_some()) {
         return Ok(());
     }
@@ -292,12 +402,27 @@ pub(crate) async fn enable(cx: &Ctx, password: String, remember: bool) -> SyncRe
     }
     let master = MasterKey::generate().map_err(|e| SyncError::Io(e.to_string()))?;
     let kdf = cx.with(|s| s.cfg.kdf);
-    let record = crypto::seal_master_key(&master, &password, kdf, cx.now())
-        .map_err(|e| SyncError::Io(e.to_string()))?;
+    let entropy = if recovery {
+        Some(RecoveryEntropy::generate().map_err(|e| SyncError::Io(e.to_string()))?)
+    } else {
+        None
+    };
+    let record = match &entropy {
+        Some(e) => crypto::seal_master_key_with_recovery(&master, &password, kdf, cx.now(), e),
+        None => crypto::seal_master_key(&master, &password, kdf, cx.now()),
+    }
+    .map_err(|e| SyncError::Io(e.to_string()))?;
     let Some(resp) = api::put_vault_key(cx, record, 0).await? else {
         return unlock(cx, password, remember).await;
     };
     set_master(cx, master, remember, true);
+    if let Some(e) = entropy {
+        // Ровно один раз: ни в индекс, ни в журнал фраза не попадает.
+        cx.set_status(|st| st.recovery = true);
+        cx.notify(Notice::RecoveryPhrase {
+            words: Phrase(e.words()),
+        });
+    }
     cx.with_mut(|s| {
         s.index.migration = Some(MigrationState {
             key_version: resp.version,

@@ -19,6 +19,7 @@ import { ConnectModal } from "./ui/connect.ts";
 import { DeletedModal } from "./ui/deleted.ts";
 import { HistoryModal } from "./ui/history.ts";
 import { PasswordModal } from "./ui/password.ts";
+import { PhraseModal, RecoverModal } from "./ui/recovery.ts";
 
 const KEY_STORAGE = "selfsync-master-key";
 const LOG_LINES = 500;
@@ -237,9 +238,27 @@ export default class SelfsyncPlugin extends Plugin {
   askPassword(): void {
     new PasswordModal(
       this.app,
-      { title: t("password.title"), desc: t("password.unlockDesc"), submit: t("password.submit"), showStrength: false },
+      {
+        title: t("password.title"),
+        desc: t("password.unlockDesc"),
+        submit: t("password.submit"),
+        showStrength: false,
+        onForgot: () => this.recover(),
+      },
       (r) => this.runner?.send({ type: "password", password: r.password, remember: r.remember }),
     ).open();
+  }
+
+  /** Забыли пароль: вход фразой восстановления с новым паролем. */
+  recover(): void {
+    new RecoverModal(this.app, async (r) => {
+      const res = await this.runner?.command({ type: "recover", phrase: r.phrase, newPassword: r.newPassword, remember: r.remember });
+      if (!res) return t("status.notConfigured");
+      if (res.type === "error") return res.code === "wrong_phrase" ? t("recovery.wrongPhrase") : res.message;
+      new Notice(t("recovery.restored"));
+      this.runner?.send({ type: "syncNow" });
+      return null;
+    }).open();
   }
 
   private renderStatus(): void {
@@ -270,6 +289,12 @@ export default class SelfsyncPlugin extends Plugin {
   }
 
   private showNotice(n: EngineNotice): void {
+    if (n.kind === "recoveryPhrase") {
+      // Фраза — только в окно: ни в журнал, ни в настройки.
+      this.addLog("info", "notice recoveryPhrase");
+      new PhraseModal(this.app, n.words).open();
+      return;
+    }
     if (n.kind === "synced") {
       // Список путей может быть длинным: в журнал — сводка и начало списка.
       const paths = [...n.pulled, ...n.pushed];

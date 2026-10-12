@@ -111,7 +111,8 @@ pub(crate) struct State {
     pub server_state: Option<pb::VaultState>,
 
     // Запросы пользователя к задаче синка.
-    pub enable: Option<(String, bool)>,
+    /// Включить шифрование: пароль, запомнить ключ, создать фразу восстановления.
+    pub enable: Option<(String, bool, bool)>,
 
     /// Id устройства (из /v1/devices; для отличения своего эха не обязателен).
     pub device_id: u32,
