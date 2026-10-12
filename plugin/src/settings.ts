@@ -368,7 +368,19 @@ export class SelfsyncSettingTab extends PluginSettingTab {
       build: (row) => {
         const runner = this.plugin.runner;
         if (!runner) return;
-        const encrypted = runner.status().encrypted;
+        const st = runner.status();
+        // Ключ на сервере есть, а у этого устройства его нет: индекс ещё в открытом
+        // режиме (`encrypted` ложно), но предлагать «Включить» здесь — неправда.
+        if (st.state === "needPassword") {
+          row.setName("").setDesc(t("encryption.locked"));
+          row.addButton((b) => b.setButtonText(t("encryption.unlock")).setCta().onClick(() => this.plugin.askPassword()));
+          return;
+        }
+        if (st.reason === "encryption_started") {
+          row.setName("").setDesc(t("encryption.starting"));
+          return;
+        }
+        const encrypted = st.encrypted;
         row.setName("").setDesc(encrypted ? t("encryption.on") : t("encryption.off"));
         if (this.readOnly()) return;
         if (!encrypted) {
@@ -407,7 +419,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
       name: t("recovery.title"),
       build: (row) => {
         const runner = this.plugin.runner;
-        if (!runner || !runner.status().encrypted || this.readOnly()) {
+        if (!runner || !runner.status().encrypted || runner.status().state === "needPassword" || this.readOnly()) {
           row.settingEl.hide();
           return;
         }

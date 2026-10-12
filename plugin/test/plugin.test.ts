@@ -40,7 +40,7 @@ interface LoadedPlugin {
   runner?: {
     idle(): Promise<void>;
     send(e: unknown): void;
-    status(): { serverMinor?: number | null };
+    status(): { serverMinor?: number | null; state?: string; encrypted?: boolean };
     command(c: unknown): Promise<{ type: string; code?: string }>;
   };
   statusBar: { text: string };
@@ -196,4 +196,43 @@ test("main.js: пришли настройки Obsidian — одно уведо�
   plugin.onunload();
   await other.stop();
   await fsp.rm(vault, { recursive: true, force: true });
+});
+
+test("main.js: шифрование включили на другом устройстве — в настройках ввод пароля", async () => {
+  const PW = "correct horse battery staple";
+  const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-lock-"));
+  await fsp.writeFile(join(vault, "note.md"), "phone\n");
+  const phone = await loadPlugin(vault, server.token("lockplugin", "phone"));
+  const pc = await TestClient.create(server, { name: "pc", token: server.token("lockplugin", "pc") });
+  try {
+    await pc.sync();
+    pc.runner.send({ type: "enableEncryption", password: PW, remember: true });
+    await pc.sync();
+    assert.equal(pc.status?.encrypted, true);
+
+    const before = obsidian.shown.length;
+    phone.runner?.send({ type: "syncNow" });
+    await phone.runner?.idle();
+    assert.equal(phone.runner?.status().state, "needPassword");
+    assert.ok(obsidian.shown.slice(before).some((m) => m.includes("ввести пароль")), obsidian.shown.join("\n"));
+    const buttons = (rows: obsidian.Setting[]): string[] => rows.flatMap((r) => r.buttons);
+    const locked = await renderSettings(phone);
+    assert.ok(buttons(locked).includes("Ввести пароль"), `${buttons(locked)}`);
+    assert.ok(!buttons(locked).includes("Включить шифрование"), `${buttons(locked)}`);
+    assert.ok(locked.some((r) => r.desc.includes("Введите пароль")), "пояснение");
+    assert.ok(!locked.some((r) => r.desc.startsWith("Выключено")), "не «выключено»");
+
+    phone.runner?.send({ type: "password", password: PW, remember: true });
+    await phone.runner?.idle();
+    phone.runner?.send({ type: "syncNow" });
+    await phone.runner?.idle();
+    assert.equal(phone.runner?.status().encrypted, true);
+    const open = await renderSettings(phone);
+    assert.ok(buttons(open).includes("Сменить пароль"), `${buttons(open)}`);
+    assert.ok(!buttons(open).includes("Ввести пароль"), `${buttons(open)}`);
+  } finally {
+    phone.onunload();
+    await pc.stop();
+    await fsp.rm(vault, { recursive: true, force: true });
+  }
 });

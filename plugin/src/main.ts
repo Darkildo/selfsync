@@ -218,12 +218,15 @@ export default class SelfsyncPlugin extends Plugin {
       status: (s) => {
         const wasEncrypted = this.status?.encrypted;
         const wasReadOnly = this.status?.readOnly ?? false;
+        const wasLock = encryptionLock(this.status);
         this.status = s;
         this.renderStatus();
         // Шифрование включили (здесь или на другом устройстве) — иначе в открытых
         // настройках так и висела бы кнопка «Включить».
         if (wasEncrypted !== undefined && wasEncrypted !== s.encrypted) this.settingTab?.refresh();
         if (wasReadOnly !== s.readOnly) this.settingTab?.refresh();
+        // Нужен пароль / пароль введён: строка шифрования меняет кнопку.
+        if (wasLock !== encryptionLock(s)) this.settingTab?.refresh();
       },
       notice: (n) => this.showNotice(n),
       log: (level, m) => this.addLog(level, m),
@@ -381,6 +384,8 @@ export default class SelfsyncPlugin extends Plugin {
     }
     const shown = new Notice(text, n.kind === "conflict" || n.kind === "wrongPassword" ? 0 : 8000);
     if (n.kind === "conflict") shown.messageEl.onClickEvent(() => new ConflictsModal(this.app, this).open());
+    // На телефоне нет строки состояния: пароль вводят отсюда или из настроек.
+    if (n.kind === "needPassword") shown.messageEl.onClickEvent(() => this.askPassword());
   }
 
   private addLog(level: LogLevel, message: string): void {
@@ -395,6 +400,12 @@ export default class SelfsyncPlugin extends Plugin {
     void navigator.clipboard?.writeText(this.log.join("\n"));
     new Notice(text, 15000);
   }
+}
+
+/** Чем занято шифрование на этом устройстве (для перерисовки настроек). */
+function encryptionLock(s: SyncStatus | null): string {
+  if (s?.state === "needPassword") return "password";
+  return s?.reason === "encryption_started" ? "starting" : "";
 }
 
 /** Каких имён не создать на этой платформе (`?` и т.п. — на Windows и в хранилище Android). */
