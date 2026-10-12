@@ -781,6 +781,7 @@ fn revision(r: &rusqlite::Row<'_>) -> rusqlite::Result<pb::Revision> {
         deleted: r.get::<_, i64>(6)? != 0,
         folder: r.get::<_, i64>(7)? != 0,
         renamed_from: rf.as_deref().map(decode_path),
+        plain_size: None,
     })
 }
 

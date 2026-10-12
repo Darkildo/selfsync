@@ -74,6 +74,19 @@ impl BlobStore {
         std::fs::metadata(self.path_of(h)).ok().map(|m| m.len())
     }
 
+    /// Длина открытого текста из заголовка блоба (он не шифруется).
+    pub fn plain_len(&self, h: &Hash) -> Option<u64> {
+        use std::io::Read;
+        let mut b = [0u8; selfsync_core::blob::HEADER_LEN];
+        std::fs::File::open(self.path_of(h))
+            .ok()?
+            .read_exact(&mut b)
+            .ok()?;
+        selfsync_core::blob::BlobHeader::parse(&b)
+            .ok()
+            .map(|hd| hd.plaintext_len)
+    }
+
     /// Битые блобы, вынутые `verify --repair-from` (`gc` их не трогает).
     pub fn quarantine_dir(&self) -> PathBuf {
         self.root.join("quarantine")

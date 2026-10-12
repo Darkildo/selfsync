@@ -458,6 +458,8 @@ async fn history_and_revert() {
     };
     let revs: Vec<u64> = revisions.iter().map(|x| x.rev).collect();
     assert_eq!(revs, [2, 1]);
+    // размер файла, а не блоба (у блоба ещё заголовок)
+    assert!(revisions.iter().all(|x| x.size == 3), "{revisions:?}");
     // откат дожидается цикла синка: второе устройство сразу видит v1
     let (o, r) = vault_cmd(
         a.path(),
@@ -519,6 +521,7 @@ async fn trash_restore_and_purge() {
     let mut paths: Vec<&str> = items.iter().map(|x| x.path.as_str()).collect();
     paths.sort_unstable();
     assert_eq!(paths, ["y.md", "z.md"]);
+    assert!(items.iter().all(|x| x.size == 8), "{items:?}");
     let (o, r) = vault_cmd(
         a.path(),
         &ca,
@@ -635,6 +638,13 @@ async fn encrypted_vault_commands_need_key() {
         panic!("{r:?}")
     };
     assert!(revisions.len() >= 2, "{revisions:?}");
+    // зашифрованный блоб больше файла на заголовок, content_id, nonce и тег
+    let sizes: Vec<u64> = revisions
+        .iter()
+        .filter(|x| !x.deleted)
+        .map(|x| x.size)
+        .collect();
+    assert!(sizes.iter().all(|&n| n == 10), "{revisions:?}");
     // ключ запомнен: дальше без пароля
     let (o, _) = vault_cmd(c.path(), &cc, None, hist()).await;
     assert_eq!(o, Outcome::Synced);

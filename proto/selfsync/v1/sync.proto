@@ -182,6 +182,9 @@ message Revision {
   bool deleted = 7;
   bool folder = 8;
   Path renamed_from = 9;
+  // Размер файла (длина открытого текста из заголовка блоба); `size` — размер
+  // хранимого блоба. Нет — старый сервер или блоб не читается. Протокол 1.3.
+  optional uint64 plain_size = 10;
 }
 
 message HistoryResponse {

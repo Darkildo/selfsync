@@ -78,7 +78,7 @@ Long-poll: сервер отвечает, как только голова ло�
 
 ## История и корзина
 
-- `GET /v1/history?path=<base64url(Path)>` → `HistoryResponse` — ревизии пути от новых к старым. Вернуть старую ревизию — это `Put` её хэша поверх текущей.
+- `GET /v1/history?path=<base64url(Path)>` → `HistoryResponse` — ревизии пути от новых к старым. Вернуть старую ревизию — это `Put` её хэша поверх текущей. У ревизии `size` — размер блоба, `plain_size` (1.3, необязательное) — размер файла из заголовка блоба; его нет, если блоб не читается. То же в `last_live` ответа `/v1/deleted`.
 - `GET /v1/deleted` → `DeletedResponse` — tombstone'ы в окне хранения, у каждого `last_live` (что восстанавливать) и `expires_at`.
 - `DELETE /v1/deleted` (`PathList`) → `PurgeResult` — стереть окончательно: историю и блобы, на которые больше никто не ссылается.
 - `GET|PUT /v1/retention` (`Retention { days }`) — окно хранения удалённого.

@@ -202,6 +202,11 @@ pub(crate) async fn run(cx: &Ctx, req: u64, cmd: UiCommand) {
     cx.hub.emit(Action::UiResult { req, result });
 }
 
+/// Размер файла ревизии; сервер старше 1.3 его не присылает — тогда размер блоба.
+fn file_size(r: &pb::Revision) -> u64 {
+    r.plain_size.unwrap_or(r.size)
+}
+
 async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
     match cmd {
         UiCommand::ListDeleted => {
@@ -216,7 +221,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                     path: path.as_str().to_owned(),
                     deleted_at: e.deleted_at,
                     expires_at: it.expires_at,
-                    size: it.last_live.as_ref().map_or(0, |l| l.size),
+                    size: it.last_live.as_ref().map_or(0, file_size),
                     device: e.updated_by,
                 });
             }
@@ -281,7 +286,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                 .into_iter()
                 .map(|r| RevisionView {
                     rev: r.rev,
-                    size: r.size,
+                    size: file_size(&r),
                     mtime: r.mtime,
                     seq: r.seq,
                     device: r.updated_by,

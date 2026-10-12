@@ -534,6 +534,57 @@ async fn history_endpoint() {
     assert_eq!(r.status, StatusCode::BAD_REQUEST);
 }
 
+/// История и корзина отдают размер файла из заголовка блоба: блоб больше файла на
+/// заголовок, а зашифрованный — ещё на nonce и тег каждого чанка или меньше из-за
+/// сжатия.
+#[tokio::test]
+async fn history_and_trash_report_file_size() {
+    use selfsync_core::blob;
+    use selfsync_core::crypto::MasterKey;
+    let s = TestServer::new();
+    let t = s.token("notes", "a");
+    let keys = MasterKey::from_bytes([7; 32]).derive();
+    let text = "строка заметки\n".repeat(200).into_bytes();
+    let big: Vec<u8> = (0..(blob::DEFAULT_CHUNK_SIZE as usize + 5))
+        .map(|i| (i % 251) as u8)
+        .collect();
+    let versions = [
+        (b"plain".to_vec(), blob::encode(b"plain", None)),
+        (text.clone(), blob::encode(&text, Some(&keys))),
+        (big.clone(), blob::encode(&big, Some(&keys))),
+        (Vec::new(), blob::encode(b"", Some(&keys))),
+    ];
+    for (i, (_, b)) in versions.iter().enumerate() {
+        let (h, r) = s.put_blob(&t, b).await;
+        assert!(r.status.is_success());
+        let res = s
+            .ops(&t, vec![put_op("f.bin", i as u64, h, b.len() as u64)])
+            .await;
+        applied(&res.results[0]);
+    }
+    // Блоб, который не разбирается как блоб selfsync: размера файла нет.
+    let (h, _) = s.put_blob(&t, b"not a blob").await;
+    s.ops(&t, vec![put_op("f.bin", 4, h, 10)]).await;
+
+    let q = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(p("f.bin").encode_to_vec());
+    let hist: pb::HistoryResponse = s.get(&format!("/v1/history?path={q}"), &t).await.proto();
+    let got: Vec<_> = hist.revisions.iter().map(|r| r.plain_size).collect();
+    let mut want = vec![None];
+    want.extend(versions.iter().rev().map(|(f, _)| Some(f.len() as u64)));
+    assert_eq!(got, want);
+    for (r, (f, b)) in hist.revisions[1..].iter().zip(versions.iter().rev()) {
+        assert_eq!(r.size, b.len() as u64, "size — по-прежнему размер блоба");
+        if !f.is_empty() {
+            assert_ne!(r.size, f.len() as u64);
+        }
+    }
+
+    s.write_file(&t, "gone.md", 0, b"bye").await;
+    s.ops(&t, vec![del_op("gone.md", 1)]).await;
+    let d: pb::DeletedResponse = s.get("/v1/deleted", &t).await.proto();
+    assert_eq!(d.items[0].last_live.as_ref().unwrap().plain_size, Some(3));
+}
+
 #[tokio::test]
 async fn retention_setting() {
     let s = TestServer::new();

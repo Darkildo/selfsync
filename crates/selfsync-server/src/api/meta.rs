@@ -7,11 +7,13 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use prost::Message;
+use selfsync_core::hash::Hash;
 use selfsync_core::path::{canonical_encode, validate_proto_path};
 use selfsync_proto::v1 as pb;
 use serde::Deserialize;
 
 use super::{AuthCtx, Proto};
+use crate::blobs::BlobStore;
 use crate::db::now_ms;
 use crate::db::vault::{self, PurgeOutcome};
 use crate::error::{ApiError, ApiResult};
@@ -39,7 +41,16 @@ pub async fn history(
 ) -> ApiResult<Proto<pb::HistoryResponse>> {
     let p = decode_path_param(&q.path)?;
     let key = canonical_encode(&p);
-    let revisions = a.vault.db(move |c, _| Ok(vault::history(c, &key)?)).await?;
+    let revisions = a
+        .vault
+        .db(move |c, v| {
+            let mut revs = vault::history(c, &key)?;
+            for r in &mut revs {
+                set_plain_size(&v.blobs, r);
+            }
+            Ok(revs)
+        })
+        .await?;
     Ok(Proto(pb::HistoryResponse {
         path: Some(p),
         revisions,
@@ -47,8 +58,25 @@ pub async fn history(
 }
 
 pub async fn deleted(Extension(a): Extension<AuthCtx>) -> ApiResult<Proto<pb::DeletedResponse>> {
-    let items = a.vault.db(|c, _| Ok(vault::deleted(c, now_ms())?)).await?;
+    let items = a
+        .vault
+        .db(|c, v| {
+            let mut items = vault::deleted(c, now_ms())?;
+            for r in items.iter_mut().filter_map(|it| it.last_live.as_mut()) {
+                set_plain_size(&v.blobs, r);
+            }
+            Ok(items)
+        })
+        .await?;
     Ok(Proto(pb::DeletedResponse { items }))
+}
+
+/// Размер файла для интерфейса: `size` ревизии — размер блоба, который больше файла
+/// на заголовок (и на nonce с тегом каждого чанка, если vault зашифрован).
+fn set_plain_size(blobs: &BlobStore, r: &mut pb::Revision) {
+    if let Some(h) = Hash::from_slice(&r.hash) {
+        r.plain_size = blobs.plain_len(&h);
+    }
 }
 
 /// Окончательно стереть выбранные удалённые файлы (вместе с историей и блобами).
