@@ -199,6 +199,7 @@ pub fn open_vault(config: &Config, name: &str, pool_size: u32) -> anyhow::Result
     let seq = {
         let mut c = pool.get()?;
         db::vault::migrate_vault(&mut c)?;
+        crate::quota::init_usage(&c, &blobs)?;
         db::vault::current_seq(&c)?
     };
     let (notify, _) = watch::channel(seq);

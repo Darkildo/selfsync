@@ -11,6 +11,7 @@ pub mod db;
 pub mod error;
 pub mod gc;
 pub mod modes;
+pub mod quota;
 pub mod state;
 pub mod sweep;
 pub mod throttle;

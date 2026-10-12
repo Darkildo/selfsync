@@ -170,17 +170,20 @@ pub fn valid_vault_name(v: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-/// Создаёт устройство и возвращает (id, токен).
+/// Создаёт устройство и возвращает (id, токен). `max_devices` — лимит активных
+/// устройств vault'а (`0` — без лимита).
 pub fn add_device(
     c: &Connection,
     vault: &str,
     name: &str,
     read_only: bool,
+    max_devices: u32,
 ) -> anyhow::Result<(u32, String)> {
     anyhow::ensure!(
         valid_vault_name(vault),
         "имя vault'а должно быть [a-z0-9-]{{1,64}}"
     );
+    check_device_limit(c, vault, max_devices)?;
     let name = name.trim();
     anyhow::ensure!(
         !name.is_empty() && name.len() <= 128,
@@ -320,6 +323,14 @@ pub fn count_devices(c: &Connection, vault: &str) -> rusqlite::Result<u32> {
     )
 }
 
+/// Лимит активных устройств vault'а не исчерпан (`0` — без лимита).
+pub fn check_device_limit(c: &Connection, vault: &str, max_devices: u32) -> anyhow::Result<()> {
+    if max_devices > 0 && count_devices(c, vault)? >= max_devices {
+        return Err(crate::quota::DeviceLimit(max_devices).into());
+    }
+    Ok(())
+}
+
 /// Создаёт одноразовый код подключения. Возвращает (код, истекает_в).
 pub fn create_join_code(
     c: &Connection,
@@ -396,6 +407,7 @@ pub fn redeem_join_code(
     c: &mut Connection,
     code: &str,
     name: &str,
+    max_devices: &dyn Fn(&str) -> anyhow::Result<u32>,
 ) -> anyhow::Result<Option<(u32, String, String, String)>> {
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let now = now_ms();
@@ -415,7 +427,7 @@ pub fn redeem_join_code(
     } else {
         name.trim().to_owned()
     };
-    let (id, token) = add_device(&tx, &vault, &name, read_only)?;
+    let (id, token) = add_device(&tx, &vault, &name, read_only, max_devices(&vault)?)?;
     tx.execute(
         "UPDATE join_codes SET used_at = ?1, used_by = ?2 WHERE code_hash = ?3",
         params![now, id, hash_secret(code)],
@@ -438,7 +450,7 @@ mod tests {
     #[test]
     fn tokens_lifecycle() {
         let c = db();
-        let (id, token) = add_device(&c, "notes", "laptop", false).unwrap();
+        let (id, token) = add_device(&c, "notes", "laptop", false, 0).unwrap();
         assert!(token.starts_with("ns_"));
         let a = authenticate(&c, &token).unwrap().unwrap();
         assert_eq!(
@@ -466,7 +478,7 @@ mod tests {
         assert!(!valid_vault_name(""));
         assert!(!valid_vault_name(&"a".repeat(65)));
         let c = db();
-        assert!(add_device(&c, "Bad", "x", false).is_err());
+        assert!(add_device(&c, "Bad", "x", false, 0).is_err());
     }
 
     #[test]
@@ -476,22 +488,30 @@ mod tests {
         assert_eq!(code.len(), 16);
         assert!(exp > now_ms());
         assert!(peek_join_code(&c, &code).unwrap().is_some());
-        let (id, token, vault, name) = redeem_join_code(&mut c, &code, "").unwrap().unwrap();
+        let (id, token, vault, name) = redeem_join_code(&mut c, &code, "", &|_| Ok(0))
+            .unwrap()
+            .unwrap();
         assert_eq!((vault.as_str(), name.as_str()), ("notes", "phone"));
         let a = authenticate(&c, &token).unwrap().unwrap();
         assert_eq!((a.id, a.read_only), (id, false));
-        assert!(redeem_join_code(&mut c, &code, "again").unwrap().is_none());
+        assert!(
+            redeem_join_code(&mut c, &code, "again", &|_| Ok(0))
+                .unwrap()
+                .is_none()
+        );
         assert!(peek_join_code(&c, &code).unwrap().is_none());
     }
 
     #[test]
     fn read_only_flag_travels_from_code_to_device() {
         let mut c = db();
-        let (_, t) = add_device(&c, "notes", "nas", true).unwrap();
+        let (_, t) = add_device(&c, "notes", "nas", true, 0).unwrap();
         assert!(authenticate(&c, &t).unwrap().unwrap().read_only);
         let (code, _) = create_join_code(&c, "notes", "tablet", None, true).unwrap();
         assert!(peek_join_code(&c, &code).unwrap().unwrap().read_only);
-        let (id, token, _, _) = redeem_join_code(&mut c, &code, "").unwrap().unwrap();
+        let (id, token, _, _) = redeem_join_code(&mut c, &code, "", &|_| Ok(0))
+            .unwrap()
+            .unwrap();
         assert!(authenticate(&c, &token).unwrap().unwrap().read_only);
         let rows = list_devices(&c, Some("notes")).unwrap();
         assert!(rows.iter().all(|d| d.read_only));
@@ -504,6 +524,10 @@ mod tests {
         let (code, _) = create_join_code(&c, "notes", "phone", None, false).unwrap();
         c.execute("UPDATE join_codes SET expires_at = 1", [])
             .unwrap();
-        assert!(redeem_join_code(&mut c, &code, "").unwrap().is_none());
+        assert!(
+            redeem_join_code(&mut c, &code, "", &|_| Ok(0))
+                .unwrap()
+                .is_none()
+        );
     }
 }

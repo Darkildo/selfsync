@@ -14,6 +14,7 @@ use super::{AuthCtx, Proto};
 use crate::db::now_ms;
 use crate::db::vault::{self, MAX_OPS, OpsCtx};
 use crate::error::{ApiError, ApiResult};
+use crate::quota;
 use crate::state::{AppState, Mode};
 
 /// Единственный JSON-ответ: для людей и мониторинга. БД не трогает.
@@ -58,6 +59,7 @@ pub const DEFAULT_LIMIT: usize = 500;
 pub const MAX_LIMIT: usize = 5000;
 
 pub async fn changes(
+    State(st): State<AppState>,
     Extension(a): Extension<AuthCtx>,
     Query(q): Query<ChangesQuery>,
 ) -> ApiResult<Proto<pb::ChangesResponse>> {
@@ -72,6 +74,7 @@ pub async fn changes(
             let (entries, has_more) = vault::changes(&tx, since, limit)?;
             let mut state = vault::vault_state(&tx)?;
             state.read_only = read_only;
+            quota::fill_state(&tx, &st.config, &mut state)?;
             tx.commit()?;
             let next_seq = entries.last().map_or(since, |e| e.seq);
             Ok(pb::ChangesResponse {
@@ -105,9 +108,11 @@ pub async fn wait(
     let timeout = Duration::from_secs(q.timeout.unwrap_or(25)).min(MAX_WAIT);
     let read_only = a.read_only;
     let read = || {
+        let st = st.clone();
         a.vault.db(move |c, _| {
             let mut s = vault::vault_state(c)?;
             s.read_only = read_only;
+            quota::fill_state(c, &st.config, &mut s)?;
             Ok(s)
         })
     };
@@ -145,19 +150,22 @@ pub async fn ops(
         )));
     }
     let device = a.device_id;
-    let max_blob_size = st.config.max_blob_size;
+    let st2 = st.clone();
     let out = a
         .vault
         .db(move |c, v| {
             let blobs = v.blobs.clone();
             let exists = move |h: &Hash| blobs.exists(h);
+            let l = quota::limits(c, &st2.config.quota.defaults)?;
             let ctx = OpsCtx {
                 device,
                 now: now_ms(),
-                max_blob_size,
+                max_blob_size: quota::max_file(&l, &st2.config),
                 blob_exists: &exists,
             };
-            Ok(vault::apply_ops(c, &ctx, &req.ops)?)
+            let mut out = vault::apply_ops(c, &ctx, &req.ops)?;
+            quota::fill_state(c, &st2.config, &mut out.state)?;
+            Ok(out)
         })
         .await?;
     if out.changed {

@@ -140,8 +140,8 @@ impl Loop {
                     && m < selfsync_core::proto::PROTO_MINOR
                 {
                     tracing::warn!(
-                        "сервер старее клиента (протокол {}.{m}, у клиента {}): обновите \
-                         сервер до 0.2.1 или новее",
+                        "сервер старее клиента (протокол {}.{m}, у клиента {}): часть \
+                         возможностей недоступна, обновите сервер",
                         selfsync_core::proto::PROTO_VERSION,
                         selfsync_core::proto::proto_header()
                     );

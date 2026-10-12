@@ -132,6 +132,11 @@ docker compose run --rm selfsync token add --vault notes --name laptop
 | `SELFSYNC_RATE_AUTH_ATTEMPTS` | `30` | отвергнутых токенов (401) с одного адреса за окно |
 | `SELFSYNC_RATE_AUTH_WINDOW` | `1m` | окно подсчёта для токенов |
 | `SELFSYNC_RATE_AUTH_BLOCK` | `1m` | блокировка адреса после порога |
+| `SELFSYNC_QUOTA_SOFT` | — | по умолчанию для vault'а: размер хранилища, после которого — предупреждение (`5GiB`) |
+| `SELFSYNC_QUOTA_HARD` | — | по умолчанию для vault'а: размер хранилища, после которого новые файлы не принимаются |
+| `SELFSYNC_QUOTA_DEVICES` | — | по умолчанию для vault'а: активных устройств |
+| `SELFSYNC_QUOTA_MAX_FILE` | — | по умолчанию для vault'а: наибольший файл (не больше `SELFSYNC_MAX_BLOB_SIZE`) |
+| `SELFSYNC_QUOTA_SERVER` | — | все vault'ы вместе: размер, после которого новые файлы не принимаются |
 
 В TOML лимиты задаются в секции `[rate]` теми же именами в нижнем регистре без префикса (`redeem_attempts = 10`, `auth_window = "1m"`), `trusted_proxy = true` — ключ верхнего уровня. Порог `0` отключает соответствующий лимит; окно и блокировка — не меньше секунды, иначе сервер не стартует.
 
@@ -152,6 +157,18 @@ scrape_configs:
 
 Каждый опрос перечисляет каталог блобов, так что интервала в минуту и больше достаточно. Устройство молчит неделю: `time() - selfsync_device_last_seen_timestamp_seconds > 7*86400`.
 
+**Квоты.** По умолчанию выключены. Хранилище vault'а — всё, что сервер для него держит: текущие версии, история и корзина. Лимиты задаются для vault'а командой `selfsync vault quota`; переменные `SELFSYNC_QUOTA_*` (или секция `[quota]` с ключами `soft`, `hard`, `devices`, `max_file`, `server`) — умолчания для vault'ов без своих. `0` — без ограничения.
+- После мягкого порога устройства показывают предупреждение.
+- На жёстком пороге (или общем `SELFSYNC_QUOTA_SERVER`) сервер не принимает новые файлы. Проходят правки, которым не нужна новая загрузка: удаления, переименования, возврат версии, которая уже есть на сервере. Скачивание работает, восстановление с устройств тоже. Устройства держат непринятые файлы у себя и отправляют, когда место появится.
+- Место освобождают очистка корзины и стирание старых версий в истории файла (плагин и `selfsync-cli` 0.4.0+, не с устройств только для чтения), более короткий срок хранения удалённого или повышение лимита.
+- На лимите устройств новые ссылки подключения и токены не выдаются; отзыв устройства освобождает место.
+
+```sh
+selfsync vault quota --vault notes                          # занято и лимиты
+selfsync vault quota --vault notes --soft 4GiB --hard 5GiB --devices 5 --max-file 100MiB
+selfsync vault quota --vault notes --hard default           # снова как у сервера по умолчанию
+```
+
 ### Служебные команды
 
 ```sh
@@ -159,7 +176,8 @@ selfsync token add --vault notes --name laptop   # токен устройств
 selfsync link --vault notes --name phone         # одноразовая ссылка + QR в терминале
 selfsync token add --vault notes --name nas --read-only   # получает изменения, отправлять не может
 selfsync token list | revoke --name phone      # в списке — клиент устройства (plugin/0.3.0)
-selfsync vault list
+selfsync vault list                               # занято и лимиты каждого vault'а
+selfsync vault quota --vault notes --hard 5GiB    # см. «Квоты»
 selfsync import --vault notes --from ~/Notes     # залить существующую папку
 selfsync backup /backups/selfsync-$(date +%F)    # консистентная копия на ходу
 selfsync gc --vault notes                         # план сборки мусора; --yes — выполнить

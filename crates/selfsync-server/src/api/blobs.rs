@@ -19,6 +19,7 @@ use crate::blobs::{AppendOutcome, BlobStore, StreamError, WriteOutcome};
 use crate::config::SINGLE_PUT_LIMIT;
 use crate::db::{i, now_ms, u};
 use crate::error::{ApiError, ApiResult};
+use crate::quota;
 use crate::state::AppState;
 
 fn parse_hash(s: &str) -> ApiResult<Hash> {
@@ -59,6 +60,16 @@ pub async fn wanted(Extension(a): Extension<AuthCtx>) -> ApiResult<Proto<pb::Has
     }))
 }
 
+/// Новый блоб сохранён: учесть его в занятом месте vault'а.
+async fn count_stored(a: &AuthCtx, h: Hash) -> ApiResult<()> {
+    a.vault
+        .db(move |c, v| {
+            let n = v.blobs.size_of(&h).unwrap_or(0);
+            Ok(quota::add_usage(c, i64::try_from(n).unwrap_or(i64::MAX))?)
+        })
+        .await
+}
+
 /// Блоб на месте: если его просили у устройств, запрос снят.
 async fn settle_wanted(a: &AuthCtx, h: Hash) -> ApiResult<()> {
     if a.vault
@@ -90,20 +101,27 @@ pub async fn put_blob(
         settle_wanted(&a, h).await?;
         return Ok(StatusCode::OK.into_response());
     }
-    if content_length(req.headers()).is_some_and(|n| n > limit) {
+    let declared = content_length(req.headers());
+    if declared.is_some_and(|n| n > limit) {
         return Err(ApiError::too_large(
             "больше 8 МиБ — используйте /v1/uploads",
         ));
     }
+    // Без Content-Length размер узнаём по ходу записи: квота и лимит файла — её предел.
+    let room = quota::check_new_blob(&st, &a.vault, h, declared.unwrap_or(0)).await?;
+    let file_limit = limit.min(room.max_file);
     let body = req.into_body().into_data_stream();
     match a
         .vault
         .blobs
-        .put_stream(&h, body, limit)
+        .put_stream(&h, body, file_limit.min(room.quota))
         .await
         .map_err(stream_error)?
     {
         WriteOutcome::Stored { created } => {
+            if created {
+                count_stored(&a, h).await?;
+            }
             settle_wanted(&a, h).await?;
             Ok(if created {
                 StatusCode::CREATED
@@ -116,6 +134,10 @@ pub async fn put_blob(
             "hash_mismatch",
             "содержимое не совпадает с хэшем",
         )),
+        WriteOutcome::TooLarge if room.quota < file_limit => Err(quota::vault_full()),
+        WriteOutcome::TooLarge if file_limit < limit => {
+            Err(ApiError::too_large("файл больше лимита vault'а"))
+        }
         WriteOutcome::TooLarge => Err(ApiError::too_large(
             "больше 8 МиБ — используйте /v1/uploads",
         )),
@@ -272,6 +294,19 @@ pub async fn upload_start(
         }));
     }
     let size = req.size;
+    // Начатую загрузку квота не останавливает: её размер учли при начале.
+    let resuming = a
+        .vault
+        .db(move |c, _| {
+            Ok(
+                c.prepare_cached("SELECT 1 FROM uploads WHERE hash = ?1 AND size = ?2")?
+                    .exists(params![h.to_vec(), i(size)])?,
+            )
+        })
+        .await?;
+    if !resuming {
+        quota::check_new_blob(&st, &a.vault, h, size).await?;
+    }
     let state = a
         .vault
         .db(move |c, v| {
@@ -460,7 +495,9 @@ pub async fn upload_commit(
         ));
     }
     let store = a.vault.blobs.clone();
-    tokio::task::spawn_blocking(move || store.finalize(&path, &h)).await??;
+    if tokio::task::spawn_blocking(move || store.finalize(&path, &h)).await?? {
+        count_stored(&a, h).await?;
+    }
     remove_row(&a, id).await?;
     settle_wanted(&a, h).await?;
     Ok(Proto(pb::UploadState {

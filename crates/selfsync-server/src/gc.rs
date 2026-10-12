@@ -268,8 +268,10 @@ pub fn remove_unreferenced(
                     continue;
                 }
             }
+            let size = store.size_of(&hh).unwrap_or(0);
             if store.remove(&hh).unwrap_or(false) {
                 removed += 1;
+                crate::quota::add_usage(&tx, -i64::try_from(size).unwrap_or(i64::MAX))?;
             }
         }
         tx.commit()?;

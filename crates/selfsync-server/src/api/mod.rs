@@ -63,6 +63,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/v1/uploads/{id}/commit", post(blobs::upload_commit))
         .route("/v1/history", get(meta::history))
+        .route("/v1/history/purge", post(meta::purge_history))
         .route(
             "/v1/deleted",
             get(meta::deleted).delete(meta::purge_deleted),

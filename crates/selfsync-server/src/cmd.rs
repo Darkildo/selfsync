@@ -78,16 +78,113 @@ pub fn vault_list(config: &Config) -> anyhow::Result<()> {
         let v = open_vault(config, &name, 1)?;
         let vc = v.pool.get()?;
         let s = vault::stats(&vc)?;
-        let (bytes, _) = v.blobs.total_size()?;
+        let used = crate::quota::usage(&vc)?;
+        let l = crate::quota::limits(&vc, &config.quota.defaults)?;
         let devices = server::count_devices(&c, &name)?;
         println!(
-            "{name}\tseq={}\tфайлов={}\tустройств={devices}\tна диске={}",
+            "{name}\tseq={}\tфайлов={}\tустройств={devices}{}\tзанято={}{}",
             s.seq,
             s.files,
-            fmt_bytes(bytes)
+            if l.devices > 0 {
+                format!("/{}", l.devices)
+            } else {
+                String::new()
+            },
+            fmt_bytes(used),
+            if l.hard > 0 {
+                format!("/{}", fmt_bytes(l.hard))
+            } else {
+                String::new()
+            }
         );
     }
     Ok(())
+}
+
+/// Новые значения квоты из командной строки: `None` — не менять, `"default"` — как в
+/// конфигурации, `"0"` — без ограничения.
+#[derive(Debug, Default)]
+pub struct QuotaPatch {
+    pub soft: Option<String>,
+    pub hard: Option<String>,
+    pub devices: Option<String>,
+    pub max_file: Option<String>,
+}
+
+fn patch_size(cur: Option<u64>, v: Option<&str>) -> anyhow::Result<Option<u64>> {
+    Ok(match v.map(str::trim) {
+        None => cur,
+        Some("default") => None,
+        Some(s) => Some(crate::config::parse_size(s)?),
+    })
+}
+
+pub fn vault_quota(config: &Config, vault_name: &str, p: &QuotaPatch) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        server::valid_vault_name(vault_name),
+        "имя vault'а должно быть [a-z0-9-]{{1,64}}"
+    );
+    let v = open_vault(config, vault_name, 1)?;
+    let c = v.pool.get()?;
+    let mut own = crate::quota::own(&c)?;
+    own.soft = patch_size(own.soft, p.soft.as_deref())?;
+    own.hard = patch_size(own.hard, p.hard.as_deref())?;
+    own.max_file = patch_size(own.max_file, p.max_file.as_deref())?;
+    own.devices = match p.devices.as_deref().map(str::trim) {
+        None => own.devices,
+        Some("default") => None,
+        Some(s) => Some(
+            s.parse()
+                .with_context(|| format!("--devices: нужно целое число ≥ 0, получено «{s}»"))?,
+        ),
+    };
+    let d = config.quota.defaults;
+    let (soft, hard) = (own.soft.unwrap_or(d.soft), own.hard.unwrap_or(d.hard));
+    if soft > 0 && hard > 0 && soft > hard {
+        bail!(
+            "мягкий порог ({}) больше жёсткого ({})",
+            fmt_bytes(soft),
+            fmt_bytes(hard)
+        );
+    }
+    crate::quota::set_own(&c, &own)?;
+    let l = crate::quota::limits(&c, &d)?;
+    let used = crate::quota::usage(&c)?;
+    let sc = server_conn(config)?;
+    let devices = server::count_devices(&sc, vault_name)?;
+    let show = |n: u64, own: Option<u64>, f: &dyn Fn(u64) -> String| {
+        let v = if n == 0 { "нет".to_owned() } else { f(n) };
+        if own.is_some() {
+            v
+        } else {
+            format!("{v} (по умолчанию)")
+        }
+    };
+    println!("vault «{vault_name}»");
+    println!("занято:         {}", fmt_bytes(used));
+    println!("мягкий порог:   {}", show(l.soft, own.soft, &fmt_bytes));
+    println!("жёсткий порог:  {}", show(l.hard, own.hard, &fmt_bytes));
+    println!(
+        "устройств:      {devices} из {}",
+        show(u64::from(l.devices), own.devices.map(u64::from), &|n| n
+            .to_string())
+    );
+    println!(
+        "наибольший файл: {}",
+        fmt_bytes(crate::quota::max_file(&l, config))
+    );
+    Ok(())
+}
+
+/// Лимит устройств vault'а (открывает и при надобности создаёт vault).
+fn vault_device_limit(config: &Config, vault_name: &str) -> anyhow::Result<u32> {
+    anyhow::ensure!(
+        server::valid_vault_name(vault_name),
+        "имя vault'а должно быть [a-z0-9-]{{1,64}}"
+    );
+    let v = open_vault(config, vault_name, 1)?;
+    let c = v.pool.get()?;
+    Ok(crate::quota::limits(&c, &config.quota.defaults)?.devices)
 }
 
 pub fn token_add(
@@ -97,8 +194,8 @@ pub fn token_add(
     read_only: bool,
 ) -> anyhow::Result<()> {
     let c = server_conn(config)?;
-    let (id, token) = server::add_device(&c, vault_name, name, read_only)?;
-    open_vault(config, vault_name, 1)?;
+    let limit = vault_device_limit(config, vault_name)?;
+    let (id, token) = server::add_device(&c, vault_name, name, read_only, limit)?;
     println!("Устройство #{id} «{name}» добавлено в vault «{vault_name}».");
     if read_only {
         println!(
@@ -200,7 +297,7 @@ pub fn link(
         .context("нужен внешний адрес: --url https://notes.example.com или SELFSYNC_PUBLIC_URL")?;
     let base = base.trim_end_matches('/');
     let c = server_conn(config)?;
-    open_vault(config, vault_name, 1)?;
+    server::check_device_limit(&c, vault_name, vault_device_limit(config, vault_name)?)?;
     let (code, expires) = server::create_join_code(&c, vault_name, name, None, read_only)?;
     let link = format!("{base}/join/{code}");
     println!(
@@ -375,6 +472,7 @@ pub fn import(
         }
     }
     flush(&mut c, &mut ops, &mut report)?;
+    crate::quota::set_usage(&c, v.blobs.total_size()?.0)?;
     Ok(report)
 }
 

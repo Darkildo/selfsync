@@ -93,6 +93,9 @@ impl From<std::io::Error> for ApiError {
 
 impl From<anyhow::Error> for ApiError {
     fn from(e: anyhow::Error) -> Self {
+        if let Some(d) = e.downcast_ref::<crate::quota::DeviceLimit>() {
+            return ApiError::conflict("device_limit", d.to_string());
+        }
         ApiError::internal(e)
     }
 }

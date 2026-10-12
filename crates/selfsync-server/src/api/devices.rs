@@ -9,6 +9,7 @@ use selfsync_proto::v1 as pb;
 use super::{AuthCtx, Proto, check_proto, client_outdated_for_read_only, public_base};
 use crate::db::server;
 use crate::error::{ApiError, ApiResult};
+use crate::quota;
 use crate::state::AppState;
 use crate::throttle;
 
@@ -72,8 +73,15 @@ pub async fn join_create(
     let vault = a.vault.name.clone();
     let by = a.device_id;
     let read_only = req.read_only;
+    let defaults = st.config.quota.defaults;
+    let limit = a
+        .vault
+        .db(move |c, _| Ok(quota::limits(c, &defaults)?.devices))
+        .await?;
     let (code, expires_at) = st
         .server_db(move |c| {
+            // Ссылка, по которой подключиться не выйдет, никому не нужна.
+            server::check_device_limit(c, &vault, limit)?;
             Ok(server::create_join_code(
                 c,
                 &vault,
@@ -106,6 +114,7 @@ pub async fn join_redeem(
         .map_err(|_| ApiError::bad_request("bad_protobuf", "тело не разбирается"))?;
     let code = r.code.trim().to_ascii_lowercase();
     let name = r.name.chars().take(128).collect::<String>();
+    let st2 = st.clone();
     let res = st
         .server_db(move |c| {
             if let Some(secs) = throttle::check_now(c, &keys)? {
@@ -120,7 +129,7 @@ pub async fn join_redeem(
                 return Err(e);
             }
             let res = if code.len() == 16 {
-                server::redeem_join_code(c, &code, &name)?
+                server::redeem_join_code(c, &code, &name, &|v| quota::device_limit(&st2, v))?
             } else {
                 None
             };

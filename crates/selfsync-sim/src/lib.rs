@@ -334,7 +334,7 @@ impl World {
         let token = {
             let pool = self.state.server_pool().expect("server db");
             let c = pool.get().expect("conn");
-            selfsync_server::db::server::add_device(&c, "sim", &name, false)
+            selfsync_server::db::server::add_device(&c, "sim", &name, false, 0)
                 .expect("device")
                 .1
         };

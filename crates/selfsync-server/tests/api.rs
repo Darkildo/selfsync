@@ -1225,7 +1225,7 @@ async fn read_only_token_rejects_writes() {
     let ro = {
         let pool = s.state.server_pool().unwrap();
         let c = pool.get().unwrap();
-        selfsync_server::db::server::add_device(&c, "notes", "mirror", true)
+        selfsync_server::db::server::add_device(&c, "notes", "mirror", true, 0)
             .unwrap()
             .1
     };
@@ -1652,8 +1652,9 @@ async fn metrics_need_token_and_describe_server() {
     let text = String::from_utf8(r.body.to_vec()).unwrap();
     for want in [
         &format!(
-            "selfsync_build_info{{version=\"{}\",proto=\"1.2\"}} 1",
-            env!("CARGO_PKG_VERSION")
+            "selfsync_build_info{{version=\"{}\",proto=\"{}\"}} 1",
+            env!("CARGO_PKG_VERSION"),
+            selfsync_proto::proto_header()
         ) as &str,
         "selfsync_vault_files{vault=\"notes\"} 1",
         "selfsync_vault_blobs_wanted{vault=\"notes\"} 1",

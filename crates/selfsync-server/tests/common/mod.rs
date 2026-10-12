@@ -66,7 +66,7 @@ impl TestServer {
     pub fn token(&self, vault: &str, name: &str) -> String {
         let pool = self.state.server_pool().unwrap();
         let c = pool.get().unwrap();
-        selfsync_server::db::server::add_device(&c, vault, name, false)
+        selfsync_server::db::server::add_device(&c, vault, name, false, 0)
             .unwrap()
             .1
     }
@@ -75,7 +75,7 @@ impl TestServer {
     pub fn token_read_only(&self, vault: &str, name: &str) -> String {
         let pool = self.state.server_pool().unwrap();
         let c = pool.get().unwrap();
-        selfsync_server::db::server::add_device(&c, vault, name, true)
+        selfsync_server::db::server::add_device(&c, vault, name, true, 0)
             .unwrap()
             .1
     }

@@ -132,6 +132,11 @@ Environment variables (or TOML via `--config`; variables take precedence):
 | `SELFSYNC_RATE_AUTH_ATTEMPTS` | `30` | rejected tokens (401) from one address per window |
 | `SELFSYNC_RATE_AUTH_WINDOW` | `1m` | counting window for tokens |
 | `SELFSYNC_RATE_AUTH_BLOCK` | `1m` | how long an address is blocked after the limit |
+| `SELFSYNC_QUOTA_SOFT` | — | default per vault: storage size that triggers a warning (`5GiB`) |
+| `SELFSYNC_QUOTA_HARD` | — | default per vault: storage size past which new files are refused |
+| `SELFSYNC_QUOTA_DEVICES` | — | default per vault: active devices |
+| `SELFSYNC_QUOTA_MAX_FILE` | — | default per vault: largest file (never above `SELFSYNC_MAX_BLOB_SIZE`) |
+| `SELFSYNC_QUOTA_SERVER` | — | all vaults together: storage size past which new files are refused |
 
 In TOML the limits go into a `[rate]` section with the same names in lower case and without the prefix (`redeem_attempts = 10`, `auth_window = "1m"`); `trusted_proxy = true` is a top-level key. A threshold of `0` turns that limit off; windows and blocks must be at least one second, otherwise the server refuses to start.
 
@@ -152,6 +157,18 @@ scrape_configs:
 
 Each scrape lists the blob directory, so an interval of a minute or more is enough. A device silent for a week: `time() - selfsync_device_last_seen_timestamp_seconds > 7*86400`.
 
+**Quotas.** Off by default. A vault's storage is everything the server keeps for it: current versions, history and the trash. Limits are set per vault with `selfsync vault quota`; the `SELFSYNC_QUOTA_*` variables (or a `[quota]` section with `soft`, `hard`, `devices`, `max_file`, `server`) are the defaults for vaults without their own. `0` means no limit.
+- Past the soft limit, devices show a warning.
+- At the hard limit (or the server-wide `SELFSYNC_QUOTA_SERVER`), the server refuses new files. Edits that need no new upload still go through: deletes, renames, restoring a version the server already has. Downloads keep working, and so does repair from devices. Devices keep the refused files and send them once there is room.
+- Room is freed by emptying the trash or erasing old versions from a file's history (plugin and `selfsync-cli` 0.4.0+, not from read-only devices), by a shorter retention period, or by raising the limit.
+- At the device limit, new connect links and tokens are refused; revoking a device frees its place.
+
+```sh
+selfsync vault quota --vault notes                          # show usage and limits
+selfsync vault quota --vault notes --soft 4GiB --hard 5GiB --devices 5 --max-file 100MiB
+selfsync vault quota --vault notes --hard default           # back to the server default
+```
+
 ### Admin commands
 
 ```sh
@@ -159,7 +176,8 @@ selfsync token add --vault notes --name laptop   # device token (the vault is cr
 selfsync link --vault notes --name phone         # one-time link + QR code in the terminal
 selfsync token add --vault notes --name nas --read-only   # receives changes, cannot send any
 selfsync token list | revoke --name phone      # list shows each device's client (plugin/0.3.0)
-selfsync vault list
+selfsync vault list                               # usage and limits of each vault
+selfsync vault quota --vault notes --hard 5GiB    # see "Quotas"
 selfsync import --vault notes --from ~/Notes     # upload an existing folder
 selfsync backup /backups/selfsync-$(date +%F)    # consistent copy while running
 selfsync gc --vault notes                         # garbage collection plan; --yes to run it

@@ -191,6 +191,11 @@ pub fn want_blobs(c: &Connection, hashes: &[Hash], now: i64) -> rusqlite::Result
 }
 
 /// Блоб сохранён или больше не нужен.
+pub fn is_wanted(c: &Connection, h: &Hash) -> rusqlite::Result<bool> {
+    c.prepare_cached("SELECT 1 FROM wanted_blobs WHERE hash = ?1")?
+        .exists(params![h.to_vec()])
+}
+
 pub fn unwant_blob(c: &Connection, h: &Hash) -> rusqlite::Result<bool> {
     Ok(
         c.prepare_cached("DELETE FROM wanted_blobs WHERE hash = ?1")?
@@ -859,6 +864,40 @@ pub fn purge_deleted(
     bump_purged_seq(&tx, max_seq)?;
     tx.commit()?;
     Ok((n, hashes))
+}
+
+/// Стирает ревизии пути старше `before_rev`, кроме текущей и последней живой (её
+/// восстанавливают из корзины). Возвращает (стёрто, хэши для уборки блобов).
+pub fn purge_history(
+    c: &mut Connection,
+    path: &[u8],
+    before_rev: u64,
+) -> rusqlite::Result<(u64, Vec<Vec<u8>>)> {
+    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let Some(row) = get_file(&tx, path)? else {
+        return Ok((0, Vec::new()));
+    };
+    let last_live: Option<i64> = tx.query_row(
+        "SELECT MAX(rev) FROM revisions WHERE path = ?1 AND deleted = 0 AND hash IS NOT NULL",
+        params![path],
+        |r| r.get(0),
+    )?;
+    let keep = [i(row.rev), last_live.unwrap_or(-1)];
+    let before = i(before_rev);
+    let hashes: Vec<Vec<u8>> = {
+        let mut st = tx.prepare(
+            "SELECT DISTINCT hash FROM revisions WHERE path = ?1 AND rev < ?2
+             AND rev NOT IN (?3, ?4) AND hash IS NOT NULL",
+        )?;
+        st.query_map(params![path, before, keep[0], keep[1]], |r| r.get(0))?
+            .collect::<Result<_, _>>()?
+    };
+    let n = tx.execute(
+        "DELETE FROM revisions WHERE path = ?1 AND rev < ?2 AND rev NOT IN (?3, ?4)",
+        params![path, before, keep[0], keep[1]],
+    )?;
+    tx.commit()?;
+    Ok((n as u64, hashes))
 }
 
 fn bump_purged_seq(tx: &Connection, s: u64) -> rusqlite::Result<()> {

@@ -101,6 +101,28 @@ pub async fn purge_deleted(
     Ok(Proto(pb::PurgeResult { purged }))
 }
 
+/// Окончательно стереть старые версии файла (освободить место).
+pub async fn purge_history(
+    Extension(a): Extension<AuthCtx>,
+    Proto(req): Proto<pb::HistoryPurge>,
+) -> ApiResult<Proto<pb::PurgeResult>> {
+    let p = req
+        .path
+        .ok_or_else(|| ApiError::bad_request("bad_path", "нужен путь"))?;
+    validate_proto_path(&p).map_err(|e| ApiError::bad_request("bad_path", e.to_string()))?;
+    let key = canonical_encode(&p);
+    let before = req.before_rev;
+    let purged = a
+        .vault
+        .db(move |c, v| {
+            let (n, hashes) = vault::purge_history(c, &key, before)?;
+            remove_unreferenced(c, &v.blobs, &hashes, None)?;
+            Ok(n)
+        })
+        .await?;
+    Ok(Proto(pb::PurgeResult { purged }))
+}
+
 pub async fn get_retention(Extension(a): Extension<AuthCtx>) -> ApiResult<Proto<pb::Retention>> {
     let days = a.vault.db(|c, _| Ok(vault::retention_days(c)?)).await?;
     Ok(Proto(pb::Retention { days }))

@@ -142,6 +142,24 @@ enum Cmd {
 enum VaultCmd {
     /// Список vault'ов.
     List,
+    /// Квота vault'а: без флагов — показать. Значение `0` — без ограничения,
+    /// `default` — как в конфигурации сервера.
+    Quota {
+        #[arg(long)]
+        vault: String,
+        /// Предупреждение о месте (`5GiB`).
+        #[arg(long)]
+        soft: Option<String>,
+        /// Больше новых файлов не принимается.
+        #[arg(long)]
+        hard: Option<String>,
+        /// Активных устройств.
+        #[arg(long)]
+        devices: Option<String>,
+        /// Наибольший файл (не больше SELFSYNC_MAX_BLOB_SIZE).
+        #[arg(long)]
+        max_file: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -225,6 +243,22 @@ fn run() -> anyhow::Result<ExitCode> {
         }
         Cmd::Migrate { vault } => cmd::migrate(&config, vault.as_deref())?,
         Cmd::Vault(VaultCmd::List) => cmd::vault_list(&config)?,
+        Cmd::Vault(VaultCmd::Quota {
+            vault,
+            soft,
+            hard,
+            devices,
+            max_file,
+        }) => cmd::vault_quota(
+            &config,
+            &vault,
+            &cmd::QuotaPatch {
+                soft,
+                hard,
+                devices,
+                max_file,
+            },
+        )?,
         Cmd::Token(TokenCmd::Add {
             vault,
             name,

@@ -63,6 +63,12 @@ message VaultState {
   // Последняя проверка нашла то, что устройства не исправят: ошибки базы vault'а или
   // запись ключа шифрования не читается. Чинит админ. Протокол 1.3.
   bool storage_problem = 10;
+  // Квота (протокол 1.3; старый сервер не заполняет). Занято блобами vault'а на
+  // сервере — текущие версии, история и корзина.
+  uint64 used_bytes = 11;
+  uint64 quota_soft = 12;    // предупреждение; 0 — без порога
+  uint64 quota_hard = 13;    // новые блобы не принимаются (507 quota_exceeded); 0 — без порога
+  uint64 max_file_size = 14; // наибольший файл; 0 — старый сервер (лимит неизвестен)
 }
 
 message Error {
@@ -210,6 +216,13 @@ message DeletedResponse {
 
 message PathList {
   repeated Path paths = 1;
+}
+
+// Стереть ревизии пути старше `before_rev` (кроме текущей и последней живой).
+// Протокол 1.3.
+message HistoryPurge {
+  Path path = 1;
+  uint64 before_rev = 2;
 }
 
 message PurgeResult {

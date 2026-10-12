@@ -297,6 +297,8 @@ pub fn verify_vault(
         r.missing.push(Missing { hash: h, paths });
     }
     r.elapsed = start.elapsed();
+    // Счётчик места мог разойтись с диском (сбой между записью файла и счётчика).
+    crate::quota::set_usage(&c, v.blobs.total_size()?.0)?;
     save_result(&c, &r)?;
     Ok(r)
 }

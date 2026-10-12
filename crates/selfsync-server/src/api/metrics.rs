@@ -155,8 +155,9 @@ pub async fn metrics(State(st): State<AppState>, req: Request) -> ApiResult<Resp
 
     for name in list_vault_dirs(&st.config) {
         let v = st.vault(&name)?;
-        let (s, vs, verify) = v
-            .db(|c, v| {
+        let cfg = st.config.clone();
+        let (s, vs, verify, devices_limit) = v
+            .db(move |c, v| {
                 let mut s = stats(c)?;
                 let (bytes, n) = v.blobs.total_size()?;
                 s.stored_bytes = bytes;
@@ -170,7 +171,10 @@ pub async fn metrics(State(st): State<AppState>, req: Request) -> ApiResult<Resp
                 ]
                 .map(|k| meta_int(c, k));
                 let verify = verify.into_iter().collect::<Result<Vec<_>, _>>()?;
-                Ok((s, vault_state(c)?, verify))
+                let mut vs = vault_state(c)?;
+                crate::quota::fill_state(c, &cfg, &mut vs)?;
+                let devices = crate::quota::limits(c, &cfg.quota.defaults)?.devices;
+                Ok((s, vs, verify, devices))
             })
             .await?;
         let l = [("vault", name.as_str())];
@@ -214,6 +218,27 @@ pub async fn metrics(State(st): State<AppState>, req: Request) -> ApiResult<Resp
             &l,
             f64::from(u8::from(vs.key_version > 0)),
         );
+        for (metric, help, x) in [
+            (
+                "selfsync_vault_quota_soft_bytes",
+                "Квота: мягкий порог байтов хранилища.",
+                vs.quota_soft,
+            ),
+            (
+                "selfsync_vault_quota_hard_bytes",
+                "Квота: жёсткий порог байтов хранилища.",
+                vs.quota_hard,
+            ),
+            (
+                "selfsync_vault_devices_limit",
+                "Квота: активных устройств.",
+                u64::from(devices_limit),
+            ),
+        ] {
+            if x > 0 {
+                o.gauge(metric, help, &l, n(x));
+            }
+        }
         o.gauge(
             "selfsync_vault_blobs_wanted",
             "Блобы, которые сервер просит у устройств после verify.",

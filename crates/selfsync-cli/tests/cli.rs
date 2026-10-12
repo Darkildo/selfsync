@@ -35,7 +35,7 @@ async fn server() -> Server {
 impl Server {
     fn token(&self, vault: &str, name: &str) -> String {
         let c = self.state.server_pool().unwrap().get().unwrap();
-        selfsync_server::db::server::add_device(&c, vault, name, false)
+        selfsync_server::db::server::add_device(&c, vault, name, false, 0)
             .unwrap()
             .1
     }
@@ -250,7 +250,7 @@ async fn read_only_folder_receives_and_keeps_local_edits() {
         server: srv.url.clone(),
         token: {
             let c = srv.state.server_pool().unwrap().get().unwrap();
-            selfsync_server::db::server::add_device(&c, "ro", "mirror", true)
+            selfsync_server::db::server::add_device(&c, "ro", "mirror", true, 0)
                 .unwrap()
                 .1
         },

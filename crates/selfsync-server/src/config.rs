@@ -26,6 +26,28 @@ pub struct Config {
     pub trusted_proxy: bool,
     /// Bearer-токен для `GET /metrics`; `None` — метрик нет (404).
     pub metrics_token: Option<String>,
+    pub quota: QuotaConfig,
+}
+
+/// Лимиты vault'а; `0` — без ограничения.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Limits {
+    /// Байты хранилища: предупреждение.
+    pub soft: u64,
+    /// Байты хранилища: новые блобы не принимаются.
+    pub hard: u64,
+    /// Активные устройства.
+    pub devices: u32,
+    /// Размер файла (поверх `max_blob_size` сервера).
+    pub max_file: u64,
+}
+
+/// Квоты: умолчания для vault'ов без своих лимитов и потолок сервера.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct QuotaConfig {
+    pub defaults: Limits,
+    /// Байты всех vault'ов вместе; `0` — без потолка.
+    pub server_hard: u64,
 }
 
 /// Токен метрик короче — почти наверняка ошибка (или угадывается).
@@ -81,6 +103,19 @@ struct FileConfig {
     metrics_token: Option<String>,
     #[serde(default)]
     rate: FileRate,
+    #[serde(default)]
+    quota: FileQuota,
+}
+
+/// Секция `[quota]`: те же ключи, что `SELFSYNC_QUOTA_*`, в нижнем регистре.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileQuota {
+    soft: Option<String>,
+    hard: Option<String>,
+    devices: Option<u32>,
+    max_file: Option<String>,
+    server: Option<String>,
 }
 
 /// Секция `[rate]`: те же ключи, что `SELFSYNC_RATE_*`, в нижнем регистре.
@@ -154,6 +189,7 @@ impl Config {
         {
             bail!("SELFSYNC_METRICS_TOKEN: не короче {METRICS_TOKEN_MIN} символов");
         }
+        let quota = load_quota(&env, file.quota)?;
         Ok(Config {
             data_dir,
             public_url,
@@ -164,6 +200,7 @@ impl Config {
             rate,
             trusted_proxy,
             metrics_token,
+            quota,
         })
     }
 
@@ -179,8 +216,41 @@ impl Config {
             rate: RateConfig::default(),
             trusted_proxy: false,
             metrics_token: None,
+            quota: QuotaConfig::default(),
         }
     }
+}
+
+fn load_quota(
+    env: &dyn Fn(&str) -> Option<String>,
+    file: FileQuota,
+) -> anyhow::Result<QuotaConfig> {
+    let size = |name: &str, f: Option<String>| -> anyhow::Result<u64> {
+        match env(name).or(f) {
+            Some(s) => parse_size(&s).with_context(|| name.to_owned()),
+            None => Ok(0),
+        }
+    };
+    let devices = match env("SELFSYNC_QUOTA_DEVICES") {
+        Some(s) => s.trim().parse().with_context(|| {
+            format!("SELFSYNC_QUOTA_DEVICES: нужно целое число ≥ 0, получено «{s}»")
+        })?,
+        None => file.devices.unwrap_or(0),
+    };
+    let q = QuotaConfig {
+        defaults: Limits {
+            soft: size("SELFSYNC_QUOTA_SOFT", file.soft)?,
+            hard: size("SELFSYNC_QUOTA_HARD", file.hard)?,
+            devices,
+            max_file: size("SELFSYNC_QUOTA_MAX_FILE", file.max_file)?,
+        },
+        server_hard: size("SELFSYNC_QUOTA_SERVER", file.server)?,
+    };
+    let d = q.defaults;
+    if d.soft > 0 && d.hard > 0 && d.soft > d.hard {
+        bail!("SELFSYNC_QUOTA_SOFT больше SELFSYNC_QUOTA_HARD");
+    }
+    Ok(q)
 }
 
 fn load_rate(env: &dyn Fn(&str) -> Option<String>, file: FileRate) -> anyhow::Result<RateConfig> {
@@ -300,6 +370,38 @@ mod tests {
         };
         let file: FileConfig = toml::from_str(file).unwrap();
         load_rate(&env, file.rate)
+    }
+
+    #[test]
+    fn quota_settings() {
+        let q = |pairs: &[(&str, &str)], file: &str| {
+            let env = |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| (*v).to_owned())
+            };
+            let file: FileConfig = toml::from_str(file).unwrap();
+            load_quota(&env, file.quota)
+        };
+        assert_eq!(q(&[], "").unwrap(), QuotaConfig::default());
+        let c = q(
+            &[("SELFSYNC_QUOTA_HARD", "2GiB")],
+            "[quota]\nsoft = \"1GiB\"\nhard = \"1MiB\"\ndevices = 3\nserver = \"10GB\"",
+        )
+        .unwrap();
+        assert_eq!(c.defaults.soft, 1 << 30);
+        assert_eq!(c.defaults.hard, 2 << 30, "окружение приоритетнее файла");
+        assert_eq!(c.defaults.devices, 3);
+        assert_eq!(c.server_hard, 10_000_000_000);
+        assert!(
+            q(
+                &[("SELFSYNC_QUOTA_SOFT", "2G"), ("SELFSYNC_QUOTA_HARD", "1G")],
+                ""
+            )
+            .is_err()
+        );
+        assert!(q(&[("SELFSYNC_QUOTA_DEVICES", "-1")], "").is_err());
     }
 
     #[test]
