@@ -51,8 +51,10 @@ impl Report {
 pub struct Options {
     /// Каталог `selfsync backup --rotate` (таймер `selfsync-backup.timer`).
     pub backup_dir: PathBuf,
-    /// Спрашивать systemd о таймерах (если `systemctl` есть).
+    /// Проверять таймеры systemd (если система под systemd).
     pub systemd: bool,
+    /// Корень для файлов systemd (тесты); обычно `/`.
+    pub root: PathBuf,
     /// Запрос к внешнему адресу через `curl` (если он есть).
     pub external: bool,
     pub now_ms: i64,
@@ -63,6 +65,7 @@ impl Options {
         Options {
             backup_dir: PathBuf::from("/var/lib/selfsync-backups"),
             systemd: true,
+            root: PathBuf::from("/"),
             external: true,
             now_ms,
         }
@@ -87,9 +90,10 @@ pub fn doctor(config: &Config, opts: &Options) -> Report {
     if opts.external {
         external(config, &mut r);
     }
-    let systemd = opts.systemd && has_command("systemctl");
+    // Система под systemd: так проверяет и sd_booted().
+    let systemd = opts.systemd && opts.root.join("run/systemd/system").is_dir();
     if systemd {
-        timers(&mut r);
+        timers(&opts.root, &mut r);
     }
     backups(config, opts, systemd, &mut r);
     for name in &vaults {
@@ -314,7 +318,26 @@ fn external(config: &Config, r: &mut Report) {
     }
 }
 
-fn timers(r: &mut Report) {
+/// Состояние таймера по файлам, а не через `systemctl`: от пользователя сервиса
+/// (`selfsync-admin doctor`) шины systemd нет, и `systemctl` только ошибается.
+fn timer_state(root: &Path, unit: &str) -> &'static str {
+    let wants = root
+        .join("etc/systemd/system/timers.target.wants")
+        .join(unit);
+    if std::fs::symlink_metadata(&wants).is_ok() {
+        return "enabled";
+    }
+    let installed = [
+        "etc/systemd/system",
+        "usr/lib/systemd/system",
+        "lib/systemd/system",
+    ]
+    .iter()
+    .any(|d| root.join(d).join(unit).exists());
+    if installed { "disabled" } else { "missing" }
+}
+
+fn timers(root: &Path, r: &mut Report) {
     for (unit, why) in [
         (
             "selfsync-verify.timer",
@@ -326,28 +349,21 @@ fn timers(r: &mut Report) {
             "удалённое не стирается после срока хранения",
         ),
     ] {
-        let state = Command::new("systemctl")
-            .args(["is-enabled", unit])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
-            .unwrap_or_default();
-        if state == "enabled" {
-            r.add(Level::Ok, unit, "включён");
-        } else if state == "not-found" || state.is_empty() {
-            r.add(
+        match timer_state(root, unit) {
+            "enabled" => r.add(Level::Ok, unit, "включён"),
+            "disabled" => r.add(
+                Level::Warn,
+                unit,
+                format!("не включён — {why}; systemctl enable --now {unit}"),
+            ),
+            _ => r.add(
                 Level::Warn,
                 unit,
                 format!(
                     "не установлен — {why}; юниты — в deploy/systemd репозитория, затем \
                      systemctl enable --now {unit}"
                 ),
-            );
-        } else {
-            r.add(
-                Level::Warn,
-                unit,
-                format!("не включён ({state}) — {why}; systemctl enable --now {unit}"),
-            );
+            ),
         }
     }
 }
@@ -502,6 +518,26 @@ fn fmt_bytes(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timer_states() {
+        let root = tempfile::tempdir().unwrap();
+        let etc = root.path().join("etc/systemd/system");
+        std::fs::create_dir_all(etc.join("timers.target.wants")).unwrap();
+        std::fs::write(etc.join("selfsync-verify.timer"), "").unwrap();
+        std::fs::write(etc.join("selfsync-sweep.timer"), "").unwrap();
+        std::os::unix::fs::symlink(
+            "../selfsync-sweep.timer",
+            etc.join("timers.target.wants/selfsync-sweep.timer"),
+        )
+        .unwrap();
+        assert_eq!(timer_state(root.path(), "selfsync-sweep.timer"), "enabled");
+        assert_eq!(
+            timer_state(root.path(), "selfsync-verify.timer"),
+            "disabled"
+        );
+        assert_eq!(timer_state(root.path(), "selfsync-backup.timer"), "missing");
+    }
 
     #[test]
     fn hosts() {

@@ -801,6 +801,7 @@ async fn doctor_reports_setup_problems() {
     let opts = Options {
         backup_dir: backups.path().to_path_buf(),
         systemd: false,
+        root: "/".into(),
         external: false,
         now_ms: now,
     };
