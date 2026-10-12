@@ -1,7 +1,7 @@
 //! Служебные подкоманды. Работают напрямую с БД и файлами (без HTTP), безопасно
 //! параллельно с работающим сервером: те же транзакции и блокировки.
 
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -528,11 +528,36 @@ fn link_or_copy(src: &Path, dst: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Откуда брать блобы в копию.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BlobSource<'a> {
+    /// Копировать, а не делать жёсткие ссылки на хранилище: копия не делит с ним
+    /// inode, и порча байта в хранилище её не затрагивает.
+    pub copy: bool,
+    /// Предыдущая копия: блоб, который в ней есть, берётся оттуда жёсткой ссылкой
+    /// (общий inode только между копиями, не с хранилищем).
+    pub previous: Option<&'a Path>,
+}
+
+impl BlobSource<'_> {
+    fn place(&self, src: &Path, rel: &Path, dst: &Path) -> io::Result<()> {
+        if !self.copy {
+            return link_or_copy(src, dst);
+        }
+        if let Some(prev) = self.previous
+            && std::fs::hard_link(prev.join(rel), dst).is_ok()
+        {
+            return Ok(());
+        }
+        std::fs::copy(src, dst).map(|_| ())
+    }
+}
+
 /// Консистентная копия: `VACUUM INTO` для каждой БД, блобы — жёсткими ссылками
-/// (или копией на другой ФС). Блобы неизменяемы, так что снимок БД, сделанный
-/// раньше копирования блобов, ссылается только на существующие блобы
-/// (не запускайте `gc --yes` одновременно с бэкапом).
-pub fn backup(config: &Config, dest: &Path) -> anyhow::Result<()> {
+/// (или копией на другой ФС; с `copy` — всегда копией). Блобы неизменяемы, так
+/// что снимок БД, сделанный раньше копирования блобов, ссылается только на
+/// существующие блобы (не запускайте `gc --yes` одновременно с бэкапом).
+pub fn backup(config: &Config, dest: &Path, blobs: BlobSource<'_>) -> anyhow::Result<()> {
     if dest.join("server.db").exists() {
         bail!(
             "{} уже содержит бэкап — укажите пустой каталог",
@@ -546,7 +571,8 @@ pub fn backup(config: &Config, dest: &Path) -> anyhow::Result<()> {
     let mut count = 0u64;
     for name in list_vault_dirs(config) {
         let v = open_vault(config, &name, 1)?;
-        let vdest = dest.join("vaults").join(&name);
+        let rel_vault = Path::new("vaults").join(&name);
+        let vdest = dest.join(&rel_vault);
         std::fs::create_dir_all(vdest.join("blobs"))?;
         std::fs::create_dir_all(vdest.join("uploads"))?;
         {
@@ -556,9 +582,12 @@ pub fn backup(config: &Config, dest: &Path) -> anyhow::Result<()> {
         }
         for (h, _, _) in v.blobs.list()? {
             let hex = h.to_hex();
-            let d = vdest.join("blobs").join(&hex[..2]);
-            std::fs::create_dir_all(&d)?;
-            link_or_copy(&v.blobs.path_of(&h), &d.join(&hex))?;
+            let rel = rel_vault.join("blobs").join(&hex[..2]).join(&hex);
+            let d = dest.join(&rel);
+            if let Some(parent) = d.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            blobs.place(&v.blobs.path_of(&h), &rel, &d)?;
             count += 1;
         }
         // Битые оригиналы из `verify --repair-from` — для разбора, если понадобится.
@@ -566,7 +595,8 @@ pub fn backup(config: &Config, dest: &Path) -> anyhow::Result<()> {
             let q = vdest.join("quarantine");
             std::fs::create_dir_all(&q)?;
             for e in rd.flatten() {
-                link_or_copy(&e.path(), &q.join(e.file_name()))?;
+                let rel = rel_vault.join("quarantine").join(e.file_name());
+                blobs.place(&e.path(), &rel, &q.join(e.file_name()))?;
             }
         }
         println!(
@@ -575,6 +605,92 @@ pub fn backup(config: &Config, dest: &Path) -> anyhow::Result<()> {
         );
     }
     println!("бэкап готов: {} (блобов: {count})", dest.display());
+    Ok(())
+}
+
+/// Имя копии в каталоге ротации: время UTC без двоеточий (`2026-10-12T05-16-50Z`) —
+/// сортируется по времени как строка и допустимо на любой ФС.
+fn rotation_name(now: std::time::SystemTime) -> String {
+    humantime::format_rfc3339_seconds(now)
+        .to_string()
+        .replace(':', "-")
+}
+
+/// Имя похоже на [`rotation_name`]: удаляем при ротации только свои каталоги.
+fn is_rotation_name(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 20
+        && b[10] == b'T'
+        && b[19] == b'Z'
+        && s.chars().enumerate().all(|(i, c)| match i {
+            4 | 7 | 13 | 16 => c == '-',
+            10 => c == 'T',
+            19 => c == 'Z',
+            _ => c.is_ascii_digit(),
+        })
+}
+
+/// Целые копии в каталоге ротации (есть `server.db`), от старых к новым.
+pub fn rotation_list(root: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut out: Vec<PathBuf> = match std::fs::read_dir(root) {
+        Ok(rd) => rd
+            .flatten()
+            .filter(|e| e.file_name().to_str().is_some_and(is_rotation_name))
+            .map(|e| e.path())
+            .filter(|p| p.join("server.db").is_file())
+            .collect(),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => return Err(e),
+    };
+    out.sort();
+    Ok(out)
+}
+
+/// Копия в `root/<время>` и удаление лишних старых: остаётся `keep` последних.
+/// Копия пишется в `root/.<время>.partial` и переименовывается в конце, так что
+/// прерванный бэкап не вытесняет целую копию.
+pub fn backup_rotate(config: &Config, root: &Path, keep: usize, copy: bool) -> anyhow::Result<()> {
+    if keep == 0 {
+        bail!("--keep должен быть не меньше 1");
+    }
+    std::fs::create_dir_all(root)
+        .with_context(|| format!("не создаётся каталог {}", root.display()))?;
+    // Недописанные копии прошлых запусков.
+    for e in std::fs::read_dir(root)?.flatten() {
+        let n = e.file_name();
+        let Some(n) = n.to_str() else { continue };
+        if let Some(stem) = n.strip_prefix('.').and_then(|s| s.strip_suffix(".partial"))
+            && is_rotation_name(stem)
+        {
+            std::fs::remove_dir_all(e.path())?;
+        }
+    }
+    let existing = rotation_list(root)?;
+    let mut name = rotation_name(std::time::SystemTime::now());
+    if existing
+        .iter()
+        .any(|p| p.file_name() == Some(name.as_ref()))
+    {
+        // Второй запуск в ту же секунду.
+        std::thread::sleep(Duration::from_millis(1100));
+        name = rotation_name(std::time::SystemTime::now());
+    }
+    let partial = root.join(format!(".{name}.partial"));
+    let source = BlobSource {
+        copy,
+        previous: existing.last().map(PathBuf::as_path),
+    };
+    backup(config, &partial, source)?;
+    let done = root.join(&name);
+    std::fs::rename(&partial, &done)?;
+    let all = rotation_list(root)?;
+    let extra = all.len().saturating_sub(keep);
+    for old in &all[..extra] {
+        std::fs::remove_dir_all(old)
+            .with_context(|| format!("не удаляется старая копия {}", old.display()))?;
+        println!("удалена старая копия {}", old.display());
+    }
+    println!("копия: {}", done.display());
     Ok(())
 }
 

@@ -1,0 +1,33 @@
+# Ежедневная копия данных с ротацией: последние 7, блобы — настоящими копиями
+# (не жёсткими ссылками на хранилище), так что порча байта в хранилище копию не
+# затрагивает. Между копиями блобы общие: место растёт только на изменения.
+#
+# Копии лежат в /var/lib/selfsync-backups (systemd сам выдаёт права динамическому
+# пользователю). Чтобы копия пережила отказ диска, смонтируйте на этот путь другой
+# диск или каталог по сети, например в /etc/fstab:
+#   /dev/disk/by-label/backup  /var/lib/private/selfsync-backups  ext4  defaults  0 2
+# Проверить копию: selfsync --data /var/lib/private/selfsync-backups/<время> verify
+[Unit]
+Description=selfsync: backup with rotation
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/selfsync backup --rotate /var/lib/selfsync-backups --keep 7 --copy
+DynamicUser=yes
+User=selfsync
+Group=selfsync
+StateDirectory=selfsync selfsync-backups
+StateDirectoryMode=0700
+Nice=10
+IOSchedulingClass=idle
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+UMask=0077

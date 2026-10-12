@@ -197,7 +197,7 @@ async fn backup_is_consistent_copy() {
     s.write_file(&t, "a.md", 0, b"backed up").await;
     let dest = tempfile::tempdir().unwrap();
     let target = dest.path().join("bk");
-    cmd::backup(s.config(), &target).unwrap();
+    cmd::backup(s.config(), &target, Default::default()).unwrap();
     assert!(target.join("server.db").is_file());
     let copy = selfsync_server::Config::for_tests(target.clone());
     let v = open_vault(&copy, "notes", 1).unwrap();
@@ -217,7 +217,7 @@ async fn backup_is_consistent_copy() {
             .is_some()
     );
     // повторно в тот же каталог — отказ
-    assert!(cmd::backup(s.config(), &target).is_err());
+    assert!(cmd::backup(s.config(), &target, Default::default()).is_err());
 }
 
 #[test]
@@ -456,7 +456,7 @@ async fn verify_repairs_from_backup() {
     two_files(&s).await;
     let bk = tempfile::tempdir().unwrap();
     let bk = bk.path().join("bk");
-    cmd::backup(s.config(), &bk).unwrap();
+    cmd::backup(s.config(), &bk, Default::default()).unwrap();
     let v = open_vault(s.config(), "notes", 1).unwrap();
     let a = blob_hash(b"first file");
     let b = blob_hash(b"second file");
@@ -494,7 +494,7 @@ async fn verify_repairs_from_backup() {
     cmd::gc(s.config(), None, GcOptions::default(), true).unwrap();
     assert!(q.is_file());
     let bk2 = tempfile::tempdir().unwrap();
-    cmd::backup(s.config(), &bk2.path().join("bk")).unwrap();
+    cmd::backup(s.config(), &bk2.path().join("bk"), Default::default()).unwrap();
     assert!(
         bk2.path()
             .join("bk/vaults/notes/quarantine")
@@ -509,7 +509,7 @@ async fn verify_rejects_bad_backup_blob() {
     two_files(&s).await;
     let bk = tempfile::tempdir().unwrap();
     let bk = bk.path().join("bk");
-    cmd::backup(s.config(), &bk).unwrap();
+    cmd::backup(s.config(), &bk, Default::default()).unwrap();
     let v = open_vault(s.config(), "notes", 1).unwrap();
     let a = blob_hash(b"first file");
     let hex = a.to_hex();
@@ -654,4 +654,83 @@ fn verify_start_errors_exit_2() {
     assert!(out.contains("не найден"), "{out}");
     let (code, _) = run_verify(data.path(), &["--repair-from", "/nonexistent/backup"]);
     assert_eq!(code, 2);
+}
+
+#[cfg(unix)]
+fn inode(p: &std::path::Path) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(p).unwrap().ino()
+}
+
+/// Без `--copy` порча байта в хранилище портит и копию (общий inode); с `--copy` —
+/// нет, и `verify --repair-from` лечит хранилище из неё.
+#[cfg(unix)]
+#[tokio::test]
+async fn backup_copy_survives_bit_rot() {
+    let s = TestServer::new();
+    two_files(&s).await;
+    let v = open_vault(s.config(), "notes", 1).unwrap();
+    let a = blob_hash(b"first file");
+    let hex = a.to_hex();
+    let rel = format!("vaults/notes/blobs/{}/{hex}", &hex[..2]);
+    let dir = tempfile::tempdir().unwrap();
+    let linked = dir.path().join("linked");
+    let copied = dir.path().join("copied");
+    cmd::backup(s.config(), &linked, Default::default()).unwrap();
+    cmd::backup(
+        s.config(),
+        &copied,
+        cmd::BlobSource {
+            copy: true,
+            previous: None,
+        },
+    )
+    .unwrap();
+    let store = v.blobs.path_of(&a);
+    assert_eq!(inode(&store), inode(&linked.join(&rel)));
+    assert_ne!(inode(&store), inode(&copied.join(&rel)));
+    flip_byte(&store);
+    assert_ne!(Hash::of(&std::fs::read(linked.join(&rel)).unwrap()), a);
+    assert_eq!(Hash::of(&std::fs::read(copied.join(&rel)).unwrap()), a);
+    // копию можно проверить как хранилище
+    let (code, out) = run_verify(&copied, &[]);
+    assert_eq!(code, 0, "{out}");
+    let (code, out) = run_verify(
+        &s.config().data_dir,
+        &["--repair-from", copied.to_str().unwrap()],
+    );
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(Hash::of(&std::fs::read(&store).unwrap()), a);
+}
+
+/// Ротация: остаётся `keep` последних, недописанная копия не считается и
+/// убирается, блобы между копиями — общие, с хранилищем — нет.
+#[cfg(unix)]
+#[tokio::test]
+async fn backup_rotation_keeps_last_n() {
+    let s = TestServer::new();
+    two_files(&s).await;
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    // остатки прерванного запуска и чужой каталог
+    std::fs::create_dir_all(root.join(".2020-01-01T00-00-00Z.partial/vaults")).unwrap();
+    std::fs::create_dir_all(root.join("keep-me")).unwrap();
+    for _ in 0..3 {
+        cmd::backup_rotate(s.config(), root, 2, true).unwrap();
+    }
+    let list = cmd::rotation_list(root).unwrap();
+    assert_eq!(list.len(), 2, "{list:?}");
+    assert!(!root.join(".2020-01-01T00-00-00Z.partial").exists());
+    assert!(root.join("keep-me").is_dir());
+    let a = blob_hash(b"first file");
+    let hex = a.to_hex();
+    let rel = format!("vaults/notes/blobs/{}/{hex}", &hex[..2]);
+    let v = open_vault(s.config(), "notes", 1).unwrap();
+    assert_eq!(inode(&list[0].join(&rel)), inode(&list[1].join(&rel)));
+    assert_ne!(inode(&v.blobs.path_of(&a)), inode(&list[1].join(&rel)));
+    for b in &list {
+        let (code, out) = run_verify(b, &[]);
+        assert_eq!(code, 0, "{}: {out}", b.display());
+    }
+    assert!(cmd::backup_rotate(s.config(), root, 0, true).is_err());
 }

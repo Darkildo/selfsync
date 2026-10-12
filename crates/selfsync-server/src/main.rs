@@ -97,7 +97,24 @@ enum Cmd {
     /// Стереть удалённые файлы с истёкшим окном хранения (для systemd-таймера).
     Sweep,
     /// Консистентная копия данных в каталог.
-    Backup { dir: PathBuf },
+    ///
+    /// Без `--copy` блобы — жёсткие ссылки на хранилище (быстро, без места, но порча
+    /// байта на диске затронет и копию). `--rotate ROOT --keep N` — копия в
+    /// `ROOT/<время>`, лишние старые удаляются.
+    Backup {
+        /// Пустой каталог для копии (или `--rotate`).
+        #[arg(required_unless_present = "rotate", conflicts_with = "rotate")]
+        dir: Option<PathBuf>,
+        /// Копировать блобы, не делить inode с хранилищем.
+        #[arg(long)]
+        copy: bool,
+        /// Каталог с копиями по времени (ротация).
+        #[arg(long, value_name = "ROOT")]
+        rotate: Option<PathBuf>,
+        /// Сколько последних копий оставить при ротации.
+        #[arg(long, requires = "rotate", default_value_t = 7)]
+        keep: usize,
+    },
     /// Проверка целостности: базы, хэши блобов, отсутствующие блобы.
     /// Код выхода: 0 — чисто, 1 — найдены проблемы, 2 — ошибка запуска.
     Verify {
@@ -250,7 +267,23 @@ fn run() -> anyhow::Result<ExitCode> {
             yes,
         )?,
         Cmd::Sweep => cmd::sweep(&config)?,
-        Cmd::Backup { dir } => cmd::backup(&config, &dir)?,
+        Cmd::Backup {
+            dir,
+            copy,
+            rotate,
+            keep,
+        } => match (dir, rotate) {
+            (_, Some(root)) => cmd::backup_rotate(&config, &root, keep, copy)?,
+            (Some(dir), None) => cmd::backup(
+                &config,
+                &dir,
+                cmd::BlobSource {
+                    copy,
+                    previous: None,
+                },
+            )?,
+            (None, None) => unreachable!("clap требует DIR или --rotate"),
+        },
         Cmd::Verify {
             vault,
             repair_from,
