@@ -13,10 +13,11 @@ import { ObsidianHttp } from "./io/http.ts";
 import { NodeBackend } from "./io/node.ts";
 import { buildRules, DEFAULT_CONFIG_SYNC, inConfigDir, migrateUserExcludes } from "./configsync.ts";
 import { DEFAULT_SETTINGS, SelfsyncSettingTab, type Settings } from "./settings.ts";
-import type { EngineConfig, LogLevel, NameRules, Notice as EngineNotice, SyncStatus } from "./types.ts";
+import type { DiagCheck, EngineConfig, LogLevel, NameRules, Notice as EngineNotice, SyncStatus } from "./types.ts";
 import { ConflictsModal } from "./ui/conflicts.ts";
 import { ConnectModal } from "./ui/connect.ts";
 import { DeletedModal } from "./ui/deleted.ts";
+import { DiagnoseModal, hasProblems } from "./ui/diagnose.ts";
 import { HistoryModal } from "./ui/history.ts";
 import { PasswordModal } from "./ui/password.ts";
 import { confirm } from "./ui/confirm.ts";
@@ -243,16 +244,17 @@ export default class SelfsyncPlugin extends Plugin {
     else new ConnectModal(this.app, this, this.settings.server, "").open();
   }
 
-  /** Обменять одноразовый код на токен. Возвращает текст ошибки или null. */
-  async redeem(server: string, code: string, device: string): Promise<string | null> {
-    if (!server || !code) return "server/code";
+  /** Обменять одноразовый код на токен. Ошибка: текст и `offline` — сервер не
+   *  ответил (тогда стоит проверить соединение). `null` — подключено. */
+  async redeem(server: string, code: string, device: string): Promise<{ message: string; offline: boolean } | null> {
+    if (!server || !code) return { message: "server/code", offline: false };
     // Временный движок без токена: команда redeem — только HTTP, синк не запускается.
     const tmp = new Runner({ deviceName: device }, null, this.executor(server), { log: (l, m) => this.addLog(l, m) });
     try {
       const r = await tmp.command({ type: "redeem", code, name: device });
-      if (r.type === "error" && r.code === "rate_limited") return t("connect.rateLimited", { n: r.retryAfter ?? 0 });
-      if (r.type === "error") return r.message;
-      if (r.type !== "token") return r.type;
+      if (r.type === "error" && r.code === "rate_limited") return { message: t("connect.rateLimited", { n: r.retryAfter ?? 0 }), offline: false };
+      if (r.type === "error") return { message: r.message, offline: r.code === "offline" || r.code === "error" };
+      if (r.type !== "token") return { message: r.type, offline: false };
       this.settings.server = server;
       this.settings.token = r.token;
       this.settings.vault = r.vault;
@@ -262,6 +264,29 @@ export default class SelfsyncPlugin extends Plugin {
     } finally {
       tmp.stop();
     }
+  }
+
+  /** Проверка соединения подключённого устройства; `null` — не подключено. */
+  async diagnose(): Promise<DiagCheck[] | null> {
+    const r = await this.runner?.command({ type: "diagnose" });
+    return r?.type === "diagnosis" ? r.checks : null;
+  }
+
+  /** Проверка адреса до подключения: только шаги до токена. */
+  async diagnoseServer(server: string): Promise<DiagCheck[]> {
+    const tmp = new Runner({ deviceName: this.settings.deviceName }, null, this.executor(server), { log: (l, m) => this.addLog(l, m) });
+    try {
+      const r = await tmp.command({ type: "diagnose" });
+      return r.type === "diagnosis" ? r.checks.filter((c) => c.step !== "token") : [];
+    } finally {
+      tmp.stop();
+    }
+  }
+
+  /** После подключения: проверить и показать окно, только если есть что сказать. */
+  async checkAfterConnect(): Promise<void> {
+    const checks = await this.diagnose();
+    if (checks && hasProblems(checks)) new DiagnoseModal(this.app, () => this.diagnose(), checks).open();
   }
 
   private onStatusClick(): void {

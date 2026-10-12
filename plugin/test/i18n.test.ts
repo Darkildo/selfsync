@@ -29,3 +29,16 @@ test("место на сервере: строка настроек", async () =
   assert.match(full, /^занято 2.0 КБ из 4.0 КБ, предупреждение с 1.0 КБ\. Места нет: файлов ждут отправки — 3/);
   setLanguage("en");
 });
+
+test("проверка соединения: тексты шагов", async () => {
+  const { diagText } = await import("../src/i18n.ts");
+  setLanguage("ru");
+  assert.equal(diagText({ step: "server", level: "ok", code: "ok", detail: "0.4.0" }), "отвечает, selfsync 0.4.0");
+  assert.match(diagText({ step: "server", level: "fail", code: "tls", detail: "" }), /сертификат/);
+  assert.match(diagText({ step: "body", level: "fail", code: "body_limit", detail: "HTTP 413" }), /client_max_body_size/);
+  assert.match(diagText({ step: "longpoll", level: "warn", code: "no_longpoll", detail: "" }), /Сервер работает постоянно/);
+  assert.equal(diagText({ step: "token", level: "ok", code: "read_only", detail: "" }), "принят, устройство только для чтения");
+  assert.equal(diagText({ step: "proxy", level: "ok", code: "ok", detail: "" }), "в порядке");
+  assert.equal(diagText({ step: "body", level: "warn", code: "new_code", detail: "x" }), "new_code x");
+  setLanguage("en");
+});

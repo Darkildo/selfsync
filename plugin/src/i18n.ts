@@ -1,7 +1,7 @@
 // Строки интерфейса ru/en. Язык — как у Obsidian (moment.locale()). Ядро присылает
 // только коды и данные, весь текст формируется здесь.
 
-import type { Notice, QuotaStatus, StorageHealth, SyncStatus } from "./types.ts";
+import type { DiagCheck, Notice, QuotaStatus, StorageHealth, SyncStatus } from "./types.ts";
 
 const en = {
   "status.idle": "Synced",
@@ -158,6 +158,48 @@ const en = {
 
   "retention.name": "Keep deleted files, days",
   "retention.desc": "How long the server keeps deleted files for restoring (for the whole vault)",
+  "diag.title": "Connection check",
+  "diag.running": "Checking…",
+  "diag.again": "Check again",
+  "diag.button": "Check connection",
+  "diag.buttonDesc": "Address, certificate, proxy, versions, clock, token, large requests, instant updates",
+  "diag.step.server": "Server",
+  "diag.step.proxy": "Proxy",
+  "diag.step.version": "Version",
+  "diag.step.clock": "Clock",
+  "diag.step.token": "Device token",
+  "diag.step.body": "Large files",
+  "diag.step.longpoll": "Instant updates",
+  "diag.serverOk": "responds, selfsync {detail}",
+  "diag.tls": "certificate not accepted: self-signed, expired or issued for another name. The server needs a certificate from a trusted authority (such as Let's Encrypt) for this address.",
+  "diag.dns": "server name not found — check the address",
+  "diag.refused": "connection refused — the server is not running or the port is closed",
+  "diag.timeout": "no answer — the address is unreachable from this network or blocked",
+  "diag.network": "network error: {detail}",
+  "diag.notSelfsync": "this address is not a selfsync server ({detail}) — check the address and the path in the proxy",
+  "diag.headersStripped": "a proxy or CDN removes the x-selfsync-proto header from responses — without it the plugin cannot tell the server version",
+  "diag.protoMajor": "the server speaks another protocol version ({detail}) — update the plugin or the server",
+  "diag.serverOld": "server {detail} is older than the plugin — some features are unavailable, update the server",
+  "diag.versionOk": "match ({detail})",
+  "diag.skew": "this device's clock differs from the server by {detail} s — check the time on this device",
+  "diag.noDate": "the server did not report its time",
+  "diag.tokenOk": "accepted",
+  "diag.tokenReadOnly": "accepted, read-only device",
+  "diag.unauthorized": "not accepted — the device was revoked or the token is wrong; connect again",
+  "diag.clientOld": "the server needs a newer plugin — update it",
+  "diag.rateLimited": "the server is limiting attempts for now — try again later",
+  "diag.bodyOk": "go through",
+  "diag.serverLimit": "go through up to the server's file size limit",
+  "diag.bodyLimit": "a proxy refuses requests over about 1.5 MB — large files will not sync. Raise its limit (nginx: client_max_body_size 32m).",
+  "diag.quota": "not checked — the vault is out of space",
+  "diag.bodyReadOnly": "not checked on a read-only device",
+  "diag.unexpected": "unexpected answer ({detail})",
+  "diag.longpollOk": "work",
+  "diag.longpollOff": "off: changes arrive on a polling schedule",
+  "diag.changed": "not checked — the vault changed during the check",
+  "diag.noLongpoll": "the server answers at once (CGI or a proxy) — turn off \"Server is always running\"",
+  "diag.longpollFailed": "the request was cut ({detail}) — a proxy drops long requests: raise its timeout (nginx: proxy_read_timeout 60s) or turn off \"Server is always running\"",
+  "diag.fine": "fine",
   "quota.name": "Space on the server",
   "quota.desc": "Current versions, history and deleted files of this vault",
   "quota.used": "{used} used",
@@ -406,6 +448,48 @@ const ru: Record<Key, string> = {
 
   "retention.name": "Хранить удалённое, дней",
   "retention.desc": "Сколько сервер хранит удалённые файлы для восстановления (для всего vault'а)",
+  "diag.title": "Проверка соединения",
+  "diag.running": "Проверяю…",
+  "diag.again": "Проверить снова",
+  "diag.button": "Проверить соединение",
+  "diag.buttonDesc": "Адрес, сертификат, прокси, версии, часы, токен, большие запросы, мгновенные изменения",
+  "diag.step.server": "Сервер",
+  "diag.step.proxy": "Прокси",
+  "diag.step.version": "Версия",
+  "diag.step.clock": "Часы",
+  "diag.step.token": "Токен устройства",
+  "diag.step.body": "Большие файлы",
+  "diag.step.longpoll": "Мгновенные изменения",
+  "diag.serverOk": "отвечает, selfsync {detail}",
+  "diag.tls": "сертификат не принят: самоподписанный, истёк или выписан на другое имя. Серверу нужен сертификат доверенного центра (например, Let's Encrypt) на этот адрес.",
+  "diag.dns": "имя сервера не найдено — проверьте адрес",
+  "diag.refused": "соединение отклонено — сервер не запущен или порт закрыт",
+  "diag.timeout": "нет ответа — адрес недоступен из этой сети или блокируется",
+  "diag.network": "ошибка сети: {detail}",
+  "diag.notSelfsync": "по этому адресу не selfsync ({detail}) — проверьте адрес и путь в прокси",
+  "diag.headersStripped": "прокси или CDN убирает заголовок x-selfsync-proto из ответов — без него плагин не узнает версию сервера",
+  "diag.protoMajor": "сервер другой версии протокола ({detail}) — обновите плагин или сервер",
+  "diag.serverOld": "сервер {detail} старее плагина — часть возможностей недоступна, обновите сервер",
+  "diag.versionOk": "совпадает ({detail})",
+  "diag.skew": "часы устройства расходятся с сервером на {detail} с — проверьте время на устройстве",
+  "diag.noDate": "сервер не сообщил время",
+  "diag.tokenOk": "принят",
+  "diag.tokenReadOnly": "принят, устройство только для чтения",
+  "diag.unauthorized": "не принят — устройство отозвано или токен неверный; подключитесь заново",
+  "diag.clientOld": "сервер требует более новый плагин — обновите его",
+  "diag.rateLimited": "сервер временно ограничил попытки — повторите позже",
+  "diag.bodyOk": "проходят",
+  "diag.serverLimit": "проходят до лимита размера файла на сервере",
+  "diag.bodyLimit": "прокси не пропускает запросы больше ~1,5 МБ — большие файлы не синхронизируются. Поднимите лимит (nginx: client_max_body_size 32m).",
+  "diag.quota": "не проверено — место vault'а закончилось",
+  "diag.bodyReadOnly": "не проверяется на устройстве только для чтения",
+  "diag.unexpected": "неожиданный ответ ({detail})",
+  "diag.longpollOk": "работают",
+  "diag.longpollOff": "выключены: изменения приходят по расписанию опроса",
+  "diag.changed": "не проверено — vault изменился во время проверки",
+  "diag.noLongpoll": "сервер отвечает сразу (CGI или прокси) — выключите «Сервер работает постоянно»",
+  "diag.longpollFailed": "запрос оборвался ({detail}) — прокси рвёт долгие запросы: поднимите таймаут (nginx: proxy_read_timeout 60s) или выключите «Сервер работает постоянно»",
+  "diag.fine": "в порядке",
   "quota.name": "Место на сервере",
   "quota.desc": "Текущие версии, история и удалённые файлы этого vault'а",
   "quota.used": "занято {used}",
@@ -517,6 +601,47 @@ export function formatBytes(n: number): string {
     i++;
   }
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+/** Итог шага проверки соединения для людей. */
+export function diagText(c: DiagCheck): string {
+  const detail = c.detail;
+  const byCode: Record<string, Key> = {
+    tls: "diag.tls",
+    dns: "diag.dns",
+    refused: "diag.refused",
+    timeout: "diag.timeout",
+    network: "diag.network",
+    not_selfsync: "diag.notSelfsync",
+    headers_stripped: "diag.headersStripped",
+    proto_major: "diag.protoMajor",
+    server_old: "diag.serverOld",
+    skew: "diag.skew",
+    no_date: "diag.noDate",
+    unauthorized: "diag.unauthorized",
+    client_old: "diag.clientOld",
+    rate_limited: "diag.rateLimited",
+    server_limit: "diag.serverLimit",
+    body_limit: "diag.bodyLimit",
+    quota: "diag.quota",
+    unexpected: "diag.unexpected",
+    off: "diag.longpollOff",
+    changed: "diag.changed",
+    no_longpoll: "diag.noLongpoll",
+    failed: "diag.longpollFailed",
+  };
+  const ok: Partial<Record<DiagCheck["step"], Key>> = {
+    server: "diag.serverOk",
+    version: "diag.versionOk",
+    token: "diag.tokenOk",
+    body: "diag.bodyOk",
+    longpoll: "diag.longpollOk",
+  };
+  if (c.code === "ok") return t(ok[c.step] ?? "diag.fine", { detail });
+  if (c.step === "token" && c.code === "read_only") return t("diag.tokenReadOnly");
+  if (c.step === "body" && c.code === "read_only") return t("diag.bodyReadOnly");
+  const key = byCode[c.code];
+  return key ? t(key, { detail }) : `${c.code} ${detail}`.trim();
 }
 
 /** Строка о месте на сервере; `null` — сервер его не сообщает (старее 0.4.0). */

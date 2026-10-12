@@ -183,6 +183,18 @@ describe("подключение", () => {
     await writer.stop();
   });
 
+  test("проверка соединения: настоящий сервер — всё в порядке", async () => {
+    const [a, b] = await pair("diag");
+    await b.stop();
+    const r = await a.runner.command({ type: "diagnose" });
+    assert.ok(r.type === "diagnosis", JSON.stringify(r));
+    assert.deepEqual(
+      r.checks.map((c) => `${c.step}:${c.code}`),
+      ["server:ok", "proxy:ok", "version:ok", "clock:ok", "token:ok", "body:ok", "longpoll:off"],
+    );
+    await a.stop();
+  });
+
   test("квота: старые версии стираются, без места файл ждёт и уходит потом", async () => {
     const [a, b] = await pair("quota");
     for (const v of ["v1\n", "v2\n", "v3\n"]) {

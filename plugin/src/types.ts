@@ -185,7 +185,16 @@ export type UiResult =
   | { type: "removed"; removed: number; kept: number }
   | { type: "strength"; bits: number }
   | { type: "restored"; count: number }
+  | { type: "diagnosis"; checks: DiagCheck[] }
   | { type: "recoveryPhrase"; words: string[] };
+
+/** Шаг проверки соединения (`diagnose`). */
+export interface DiagCheck {
+  step: "server" | "proxy" | "version" | "clock" | "token" | "body" | "longpoll";
+  level: "ok" | "warn" | "fail" | "skip";
+  code: string;
+  detail: string;
+}
 
 export type UiCommand =
   | { type: "listDeleted" }
@@ -207,6 +216,7 @@ export type UiCommand =
   | { type: "removeRecovery"; password: string }
   | { type: "recover"; phrase: string; newPassword: string; remember: boolean }
   | { type: "rekey"; password: string; remember?: boolean }
+  | { type: "diagnose" }
   | { type: "skipped" }
   | { type: "download"; path: string }
   | { type: "removeLocal"; path: string };

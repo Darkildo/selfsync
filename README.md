@@ -237,6 +237,8 @@ From Obsidian's community plugins (search for "Selfsync"), or by hand: copy `mai
 - **With a code** — the "Connect to server" command.
 - **With a token** — server address and token in the plugin settings.
 
+**Connection check.** After connecting, the plugin checks the connection step by step and opens a window only if something is wrong; "Check connection" in the settings runs it any time. It names the usual setup mistakes and what to do about them: a certificate the device does not trust (self-signed, expired, for another name), a wrong address, a proxy that refuses requests over about 1 MB (nginx's default `client_max_body_size 1m` — large files would never sync) or drops long requests, a proxy or CDN that strips the `x-selfsync-proto` header, a server older than the plugin, a device clock that is far off, a revoked token. If connecting with a code fails because the server does not answer, the same check of the address opens by itself. The command-line client has `selfsync-cli check`.
+
 ### Day to day
 
 - **Status bar:** ✓ synced, ↻ syncing, ⚠ server unreachable, 🔒 password needed, ⛔ sync stopped. Click to sync now (or enter the password, or reconnect).
@@ -295,6 +297,7 @@ selfsync-cli run --dir ~/notes --once     # one cycle (cron); exit codes: 1 netw
 selfsync-cli encrypt --dir ~/notes --password-file ~/.notes-pass
 selfsync-cli rekey --dir ~/notes --password-file ~/.notes-pass
 selfsync-cli status --dir ~/notes
+selfsync-cli check --dir ~/notes                # connection check: address, certificate, proxy, token, …
 ```
 
 History, the server trash and conflicts work without Obsidian too. Each of these commands first runs a sync cycle (it needs the current index and, for an encrypted vault, the key: `--password-file` or `SELFSYNC_PASSWORD`, as for `run`); commands that change something wait for one more cycle, so the result is already on the server when they return. Exit codes are the same as for `run --once`; `--json` prints machine-readable output.

@@ -8,6 +8,7 @@ import { quotaText, storageText, t } from "./i18n.ts";
 import type SelfsyncPlugin from "./main.ts";
 import type { DeviceView } from "./types.ts";
 import { ConnectModal } from "./ui/connect.ts";
+import { DiagnoseModal } from "./ui/diagnose.ts";
 import { JoinModal } from "./ui/join.ts";
 import { confirm } from "./ui/confirm.ts";
 import { ChangePasswordModal, PasswordModal } from "./ui/password.ts";
@@ -198,6 +199,20 @@ export class SelfsyncSettingTab extends PluginSettingTab {
                   await this.plugin.saveSettings({ restart: true });
                   this.refresh();
                 }),
+            ),
+      },
+      {
+        name: t("diag.button"),
+        desc: t("diag.buttonDesc"),
+        build: (row) =>
+          row
+            .setName(t("diag.button"))
+            .setDesc(t("diag.buttonDesc"))
+            .addButton((b) =>
+              b
+                .setButtonText(t("diag.button"))
+                .setDisabled(!this.plugin.runner)
+                .onClick(() => new DiagnoseModal(this.app, () => this.plugin.diagnose()).open()),
             ),
       },
       {
