@@ -1,0 +1,61 @@
+# Быстрый старт: selfsync за Caddy с сертификатом Let's Encrypt.
+#
+#   cp .env.example .env          # домен, почта, версия
+#   mkdir -p data backups && sudo chown 65532:65532 data backups
+#   docker compose up -d
+#   docker compose run --rm selfsync link --vault notes --name phone
+#
+# Домен должен указывать на этот сервер, порты 80 и 443 — открыты (Caddy получает
+# сертификат сам). Данные — в ./data (bind mount, а не именованный volume: тот
+# стирается командой `docker compose down -v` вместе с заметками).
+#
+# Проверка и бэкап (например, из cron хоста):
+#   docker compose run --rm selfsync verify
+#   docker compose run --rm selfsync backup --rotate /backups --keep 7 --copy
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  selfsync:
+    <<: *hardening
+    build:
+      context: .
+      args:
+        VERSION: ${SELFSYNC_VERSION:?задайте SELFSYNC_VERSION в .env}
+    image: selfsync-quickstart:${SELFSYNC_VERSION}
+    restart: unless-stopped
+    tmpfs:
+      - /tmp
+    mem_limit: 256m
+    volumes:
+      - ./data:/data
+      - ./backups:/backups
+    environment:
+      SELFSYNC_PUBLIC_URL: https://${DOMAIN:?задайте DOMAIN в .env}
+      # Адрес клиента — из X-Forwarded-For от Caddy (лимит неудачных попыток).
+      SELFSYNC_TRUSTED_PROXY: "1"
+      SELFSYNC_LOG: info
+
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+      EMAIL: ${EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - selfsync
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -51,6 +51,37 @@
 
 ## Сервер
 
+### Быстрый старт
+
+Оба способа ставят сервер за Caddy, который сам получает сертификат Let's Encrypt. Нужен домен, указывающий на сервер, и открытые порты 80 и 443.
+
+**VPS с systemd** (Debian, Ubuntu, Fedora) — одной командой:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Darkildo/selfsync/main/deploy/install.sh \
+  | sudo sh -s -- --domain notes.example.com
+```
+
+Скрипт:
+1. скачивает последний релиз сервера и сверяет его с `SHA256SUMS`;
+2. ставит юниты systemd: сервер по сокету и таймеры verify, backup и sweep;
+3. ставит Caddy и пишет его конфиг (свой Caddyfile не трогает, а подсказывает строку, которую добавить);
+4. печатает ссылку подключения с QR для первого устройства;
+5. запускает `selfsync doctor`.
+
+Повторный запуск — обновление: данные сначала архивируются в `/root`, прежний бинарь остаётся рядом с новым. С `--no-proxy` скрипт обходится без Caddy — для тех, у кого уже есть свой прокси. Служебные команды потом идут через `selfsync-admin`, который запускает их от имени сервиса: `selfsync-admin token list`, `selfsync-admin link --vault notes --name phone`.
+
+**Docker** — каталог [deploy/quickstart](deploy/quickstart). Он собирает небольшой образ вокруг бинаря из релиза, без исходников и Rust.
+
+```sh
+cp .env.example .env          # домен, почта, версия
+mkdir -p data backups && sudo chown 65532:65532 data backups
+docker compose up -d
+docker compose run --rm selfsync link --vault notes --name phone
+```
+
+Ниже — режимы и настройки подробно.
+
 ### Какой режим выбрать
 
 Сервер — один бинарник `selfsync`, который умеет работать по-разному. Различие в том, сколько он потребляет, когда никто не синхронизируется, и как быстро правка с одного устройства появляется на другом.

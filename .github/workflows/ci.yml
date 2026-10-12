@@ -57,3 +57,41 @@ jobs:
           npm run lint
           npm run build
           npm test
+
+  install:
+    name: Установка — install.sh и quickstart
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: sh -n deploy/install.sh && shellcheck -s sh deploy/install.sh
+      # Без systemd в контейнере: проверяется раскладка файлов, обновление с архивом
+      # данных и то, что чужой Caddyfile не трогается. Бинарь не запускается.
+      - name: install.sh в Debian, Ubuntu, Fedora
+        run: |
+          printf '#!/bin/sh\necho "selfsync 0.0.0"\n' > /tmp/selfsync && chmod +x /tmp/selfsync
+          for image in debian:12 ubuntu:24.04 fedora:41; do
+            docker run --rm -v "$PWD:/src:ro" -v /tmp/selfsync:/tmp/selfsync:ro -w /src "$image" sh -euc '
+              command -v tar >/dev/null || dnf install -y -q tar
+              sh deploy/install.sh --domain notes.example.test --binary /tmp/selfsync --version 0.0.0 --no-start
+              test -x /usr/local/bin/selfsync -a -x /usr/local/bin/selfsync-admin
+              for u in selfsync.socket selfsync.service selfsync-verify.timer selfsync-backup.timer selfsync-sweep.timer; do
+                test -f /etc/systemd/system/$u
+              done
+              grep -q "SELFSYNC_PUBLIC_URL=https://notes.example.test" /etc/systemd/system/selfsync.service.d/install.conf
+              grep -q "^notes.example.test {" /etc/caddy/Caddyfile
+              mkdir -p /var/lib/private/selfsync && echo x > /var/lib/private/selfsync/server.db
+              sh deploy/install.sh --domain notes.example.test --binary /tmp/selfsync --version 0.0.1 --no-start
+              ls /root/selfsync-data-0.0.0-*.tgz && test -x /usr/local/bin/selfsync-0.0.0
+              printf "my.site {\n\treverse_proxy 127.0.0.1:3000\n}\n" > /etc/caddy/Caddyfile
+              sh deploy/install.sh --domain notes.example.test --binary /tmp/selfsync --version 0.0.1 --no-start
+              grep -q my.site /etc/caddy/Caddyfile && test -f /etc/caddy/selfsync.caddy
+            '
+          done
+      - name: quickstart — compose и образ из релиза
+        working-directory: deploy/quickstart
+        run: |
+          cp .env.example .env
+          sed -i "s/^SELFSYNC_VERSION=.*/SELFSYNC_VERSION=0.3.2/" .env
+          docker compose config -q
+          docker compose build selfsync
+          docker run --rm selfsync-quickstart:0.3.2 --version

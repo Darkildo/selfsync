@@ -51,6 +51,37 @@ The sync logic is written once, in the `selfsync-core` crate. The plugin and the
 
 ## Server
 
+### Quick start
+
+Both ways put the server behind Caddy, which gets a Let's Encrypt certificate by itself. You need a domain that points at the server and open ports 80 and 443.
+
+**A VPS with systemd** (Debian, Ubuntu, Fedora), one command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Darkildo/selfsync/main/deploy/install.sh \
+  | sudo sh -s -- --domain notes.example.com
+```
+
+The script:
+1. downloads the latest server release and checks it against `SHA256SUMS`;
+2. installs the systemd units: the server started on demand by its socket, plus the verify, backup and sweep timers;
+3. installs Caddy and writes its config (it leaves a Caddyfile of your own alone and prints the line to add instead);
+4. prints a connect link with a QR code for the first device;
+5. runs `selfsync doctor`.
+
+Run it again to update: the data is archived to `/root` first, and the previous binary stays next to the new one. With `--no-proxy` it skips Caddy, for when you already run your own proxy. Admin commands then go through `selfsync-admin`, which runs them as the service user: `selfsync-admin token list`, `selfsync-admin link --vault notes --name phone`.
+
+**Docker:** take [deploy/quickstart](deploy/quickstart). It builds a small image around the release binary, with no source code or Rust toolchain needed.
+
+```sh
+cp .env.example .env          # domain, email, version
+mkdir -p data backups && sudo chown 65532:65532 data backups
+docker compose up -d
+docker compose run --rm selfsync link --vault notes --name phone
+```
+
+The rest of this section explains the modes and settings in detail.
+
 ### Choosing a mode
 
 The server is a single `selfsync` binary that can run in several ways. They differ in how much they cost while nobody is syncing and how fast an edit on one device shows up on another.
