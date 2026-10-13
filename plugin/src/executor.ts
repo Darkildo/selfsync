@@ -29,6 +29,11 @@ export class Executor {
   async loadIndex(): Promise<Uint8Array | null> {
     return this.fs.storeRead(INDEX_FILE);
   }
+  /** Индекс другого vault'а сюда не подходит: начать с полной сверки. */
+  async deleteIndex(): Promise<void> {
+    await this.fs.storeDelete(INDEX_FILE);
+  }
+
 
   async perform(a: IoAction): Promise<IoResult> {
     try {

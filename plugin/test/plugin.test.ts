@@ -236,3 +236,34 @@ test("main.js: шифрование включили на другом устр�
     await fsp.rm(vault, { recursive: true, force: true });
   }
 });
+
+test("main.js: подключение к другому vault'у — индекс прежнего не мешает", async () => {
+  const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-switch-"));
+  await fsp.writeFile(join(vault, "mine.md"), "local\n");
+  const plugin = await loadPlugin(vault, server.token("switch-a", "stub"));
+  const other = await TestClient.create(server, { name: "other", token: server.token("switch-b", "other") });
+  try {
+    plugin.runner?.send({ type: "syncNow" });
+    await plugin.runner?.idle();
+    // Во втором vault'е журнал длиннее: с seq первого часть файлов пропустилась бы.
+    for (const n of [1, 2, 3, 4]) {
+      await other.write(`b${n}.md`, `b${n}\n`);
+      await other.sync();
+    }
+    const out = server.cli("link", "--vault", "switch-b", "--name", "stub", "--url", server.url);
+    const code = /Код для ручного ввода: (\S+)/.exec(out)?.[1] ?? "";
+    const p = plugin as unknown as { redeem(s: string, c: string, d: string): Promise<unknown>; runner?: LoadedPlugin["runner"] };
+    assert.equal(await p.redeem(server.url, code, "stub"), null);
+    for (let i = 0; i < 100 && !p.runner; i++) await new Promise((r) => setTimeout(r, 10));
+    p.runner?.send({ type: "syncNow" });
+    await p.runner?.idle();
+    for (const n of [1, 2, 3, 4]) assert.equal(await fsp.readFile(join(vault, `b${n}.md`), "utf8"), `b${n}\n`);
+    // Свой файл ушёл в новый vault.
+    await other.sync();
+    assert.equal(await other.read("mine.md"), "local\n");
+  } finally {
+    plugin.onunload();
+    await other.stop();
+    await fsp.rm(vault, { recursive: true, force: true });
+  }
+});

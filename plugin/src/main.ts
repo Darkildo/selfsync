@@ -12,7 +12,7 @@ import type { FileBackend } from "./io/backend.ts";
 import { ObsidianHttp } from "./io/http.ts";
 import { NodeBackend } from "./io/node.ts";
 import { buildRules, DEFAULT_CONFIG_SYNC, inConfigDir, migrateUserExcludes } from "./configsync.ts";
-import { DEFAULT_SETTINGS, SelfsyncSettingTab, type Settings } from "./settings.ts";
+import { DEFAULT_SETTINGS, normalizeServer, SelfsyncSettingTab, type Settings } from "./settings.ts";
 import type { DiagCheck, EngineConfig, LogLevel, NameRules, Notice as EngineNotice, SyncStatus } from "./types.ts";
 import { ConflictsModal } from "./ui/conflicts.ts";
 import { ConnectModal } from "./ui/connect.ts";
@@ -267,6 +267,7 @@ export default class SelfsyncPlugin extends Plugin {
       if (r.type === "error" && r.code === "rate_limited") return { message: t("connect.rateLimited", { n: r.retryAfter ?? 0 }), offline: false };
       if (r.type === "error") return { message: r.message, offline: r.code === "offline" || r.code === "error" };
       if (r.type !== "token") return { message: r.type, offline: false };
+      await this.forgetVault(server, r.vault);
       this.settings.server = server;
       this.settings.token = r.token;
       this.settings.vault = r.vault;
@@ -276,6 +277,19 @@ export default class SelfsyncPlugin extends Plugin {
     } finally {
       tmp.stop();
     }
+  }
+
+  /**
+   * Устройство переходит на другой vault или сервер: индекс и запомненный ключ
+   * прежнего к нему не относятся. С чужим индексом журнал читался бы с чужого
+   * `seq`, и часть файлов нового vault'а так и не пришла бы.
+   */
+  async forgetVault(server: string, vault: string): Promise<void> {
+    if (normalizeServer(server) === normalizeServer(this.settings.server) && vault === this.settings.vault) return;
+    this.runner?.stop();
+    this.runner = undefined;
+    await this.executor(server).deleteIndex();
+    this.app.saveLocalStorage(KEY_STORAGE, null);
   }
 
   /** Проверка соединения подключённого устройства; `null` — не подключено. */
