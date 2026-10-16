@@ -31,7 +31,10 @@ impl WasmEngine {
     /// `config` — объект настроек (`EngineConfig`, поля в camelCase, все необязательны);
     /// `index` — сохранённый снимок индекса или `undefined`.
     #[wasm_bindgen(constructor)]
-    pub fn new(config: JsValue, index: Option<Vec<u8>>) -> Result<WasmEngine, JsError> {
+    pub fn new(
+        #[wasm_bindgen(unchecked_param_type = "unknown")] config: JsValue,
+        index: Option<Vec<u8>>,
+    ) -> Result<WasmEngine, JsError> {
         console_error_panic_hook::set_once();
         let config: EngineConfig = if config.is_undefined() || config.is_null() {
             EngineConfig::default()
@@ -44,7 +47,13 @@ impl WasmEngine {
     }
 
     /// Обрабатывает событие; возвращает массив действий для исполнителя.
-    pub fn handle(&mut self, now: f64, event: JsValue) -> Result<JsValue, JsError> {
+    // В .d.ts — unknown, а не any: типы событий и действий — в plugin/src/types.ts.
+    #[wasm_bindgen(unchecked_return_type = "unknown")]
+    pub fn handle(
+        &mut self,
+        now: f64,
+        #[wasm_bindgen(unchecked_param_type = "unknown")] event: JsValue,
+    ) -> Result<JsValue, JsError> {
         let event: Event = from_js(event, "event")?;
         // Миллисекунды Unix-времени: целые и далеко от пределов i64.
         let actions = self.inner.handle(now as i64, event);
@@ -52,6 +61,7 @@ impl WasmEngine {
     }
 
     /// Текущий статус (то же, что последний `Action::Status`).
+    #[wasm_bindgen(unchecked_return_type = "unknown")]
     pub fn status(&self) -> Result<JsValue, JsError> {
         to_js(&self.inner.status())
     }
