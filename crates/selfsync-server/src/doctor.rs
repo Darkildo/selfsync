@@ -320,20 +320,35 @@ fn external(config: &Config, r: &mut Report) {
 
 /// Состояние таймера по файлам, а не через `systemctl`: от пользователя сервиса
 /// (`selfsync-admin doctor`) шины systemd нет, и `systemctl` только ошибается.
+/// Несколько серверов на одной машине ставят шаблон: `selfsync-verify@имя.timer`
+/// засчитывается за `selfsync-verify.timer`.
 fn timer_state(root: &Path, unit: &str) -> &'static str {
-    let wants = root
-        .join("etc/systemd/system/timers.target.wants")
-        .join(unit);
-    if std::fs::symlink_metadata(&wants).is_ok() {
+    let (stem, ext) = unit.rsplit_once('.').unwrap_or((unit, ""));
+    let instance = |name: &str| {
+        name.strip_prefix(stem)
+            .and_then(|r| r.strip_prefix('@'))
+            .and_then(|r| r.strip_suffix(ext))
+            .is_some_and(|r| r.len() > 1 && r.ends_with('.'))
+    };
+    let wants = root.join("etc/systemd/system/timers.target.wants");
+    if std::fs::symlink_metadata(wants.join(unit)).is_ok() {
         return "enabled";
     }
+    if let Ok(dir) = std::fs::read_dir(&wants)
+        && dir
+            .flatten()
+            .any(|e| instance(&e.file_name().to_string_lossy()))
+    {
+        return "enabled";
+    }
+    let template = format!("{stem}@.{ext}");
     let installed = [
         "etc/systemd/system",
         "usr/lib/systemd/system",
         "lib/systemd/system",
     ]
     .iter()
-    .any(|d| root.join(d).join(unit).exists());
+    .any(|d| root.join(d).join(unit).exists() || root.join(d).join(&template).exists());
     if installed { "disabled" } else { "missing" }
 }
 
@@ -536,6 +551,30 @@ mod tests {
             timer_state(root.path(), "selfsync-verify.timer"),
             "disabled"
         );
+        assert_eq!(timer_state(root.path(), "selfsync-backup.timer"), "missing");
+    }
+
+    #[test]
+    fn timer_instances() {
+        let root = tempfile::tempdir().unwrap();
+        let etc = root.path().join("etc/systemd/system");
+        std::fs::create_dir_all(etc.join("timers.target.wants")).unwrap();
+        // Шаблон установлен, экземпляр verify включён, sweep — нет.
+        std::fs::write(etc.join("selfsync-verify@.timer"), "").unwrap();
+        std::fs::write(etc.join("selfsync-sweep@.timer"), "").unwrap();
+        std::os::unix::fs::symlink(
+            "../selfsync-verify@.timer",
+            etc.join("timers.target.wants/selfsync-verify@eu.timer"),
+        )
+        .unwrap();
+        // Чужой таймер с похожим именем не считается.
+        std::os::unix::fs::symlink(
+            "../x.timer",
+            etc.join("timers.target.wants/selfsync-sweep-old@a.timer"),
+        )
+        .unwrap();
+        assert_eq!(timer_state(root.path(), "selfsync-verify.timer"), "enabled");
+        assert_eq!(timer_state(root.path(), "selfsync-sweep.timer"), "disabled");
         assert_eq!(timer_state(root.path(), "selfsync-backup.timer"), "missing");
     }
 
