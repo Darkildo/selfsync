@@ -1,6 +1,6 @@
 {
   "name": "selfsync-obsidian",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "Плагин Obsidian для self-hosted синхронизации selfsync",
   "private": true,
   "license": "MIT",
