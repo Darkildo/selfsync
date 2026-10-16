@@ -1,6 +1,6 @@
 // Настройки плагина и их вкладка.
 
-import { type App, Notice, PluginSettingTab, requireApiVersion, Setting, type SettingDefinitionItem } from "obsidian";
+import { type App, Notice, PluginSettingTab, Setting, type SettingDefinitionItem } from "obsidian";
 
 import { clientOlderThan, readOnlyMinor } from "../pkg/selfsync_wasm.js";
 import { buildRules, type ConfigSync, DEFAULT_CONFIG_SYNC, type Preset, PRESETS } from "./configsync.ts";
@@ -81,9 +81,8 @@ export interface Section {
 }
 
 /**
- * Вкладка настроек. Строки описаны один раз (`sections`): Obsidian до 1.13
- * рисует их через `display()`, с 1.13 — через `getSettingDefinitions()`, и тогда
- * они находятся поиском по настройкам.
+ * Вкладка настроек. Строки описаны один раз (`sections`), Obsidian рисует их через
+ * `getSettingDefinitions()`, и они находятся поиском по настройкам.
  */
 export class SelfsyncSettingTab extends PluginSettingTab {
   /** Следующая ссылка подключения — для устройства только для чтения. */
@@ -98,9 +97,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
 
   /** Перерисовать, если вкладка сейчас открыта. */
   refresh(): void {
-    if (!this.containerEl.isConnected) return;
-    if (requireApiVersion("1.13.0")) this.update();
-    else this.display();
+    if (this.containerEl.isConnected) this.update();
   }
 
   override getSettingDefinitions(): SettingDefinitionItem[] {
@@ -117,16 +114,6 @@ export class SelfsyncSettingTab extends PluginSettingTab {
         },
       })),
     }));
-  }
-
-  override display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
-    for (const sec of this.sections()) {
-      if (sec.needsRunner && !this.plugin.runner) continue;
-      new Setting(containerEl).setName(sec.heading).setHeading();
-      for (const r of sec.rows) r.build(new Setting(containerEl));
-    }
   }
 
   protected sections(): Section[] {
@@ -387,7 +374,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
           row.addButton((b) =>
             b
               .setButtonText(t("encryption.enable"))
-              .setWarning()
+              .setDestructive()
               .onClick(async () => {
                 if (!(await this.confirmOldDevices(RECOVERY_MIN))) return;
                 new PasswordModal(
@@ -407,7 +394,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
               new ChangePasswordModal(this.app, (old, next) => runner.send({ type: "changePassword", old, new: next })).open(),
             ),
           );
-          row.addButton((b) => b.setButtonText(t("rekey.button")).setWarning().onClick(() => void this.rekey()));
+          row.addButton((b) => b.setButtonText(t("rekey.button")).setDestructive().onClick(() => void this.rekey()));
         }
       },
     };
@@ -446,7 +433,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
           row.addButton((b) =>
             b
               .setButtonText(t("recovery.remove"))
-              .setWarning()
+              .setDestructive()
               .onClick(() =>
                 ask(t("recovery.removeDesc"), t("recovery.remove"), async (password) => {
                   const r = await runner.command({ type: "removeRecovery", password });
@@ -615,7 +602,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     row.addButton((b) =>
       b
         .setButtonText(t("devices.revoke"))
-        .setWarning()
+        .setDestructive()
         .onClick(async () => {
           if (!(await confirm(this.app, t("devices.revokeConfirm", { name: d.name }), t("devices.revoke")))) return;
           const res = await runner.command({ type: "revokeDevice", id: d.id });

@@ -21,6 +21,12 @@ if grep -aq -e "$HOME" -e "$PWD" target/wasm32-unknown-unknown/wasm/selfsync_was
 fi
 wasm-bindgen --target web --out-dir plugin/pkg \
   target/wasm32-unknown-unknown/wasm/selfsync_wasm.wasm
+# Ревью каталога Obsidian не пропускает общий «eslint-disable» без правил и причины,
+# а wasm-bindgen пишет его в начало каждого .d.ts: убрать (типам он не нужен).
+for f in plugin/pkg/*.d.ts; do
+  grep -v -x -e '/\* tslint:disable \*/' -e '/\* eslint-disable \*/' "$f" > "$f.tmp"
+  mv "$f.tmp" "$f"
+done
 wasm-opt -Oz \
   --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
   --enable-mutable-globals --enable-reference-types --enable-multivalue \

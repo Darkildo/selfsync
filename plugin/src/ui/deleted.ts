@@ -41,7 +41,7 @@ export class DeletedModal extends Modal {
     const items = [...r.items].sort((a, b) => b.deletedAt - a.deletedAt);
     const actions = new Setting(contentEl);
     actions.addButton((b) => b.setButtonText(t("deleted.restore")).setCta().onClick(() => this.apply("restore")));
-    actions.addButton((b) => b.setButtonText(t("deleted.purge")).setWarning().onClick(() => this.apply("purge")));
+    actions.addButton((b) => b.setButtonText(t("deleted.purge")).setDestructive().onClick(() => this.apply("purge")));
     for (const d of items) this.item(d);
   }
 

@@ -48,7 +48,7 @@ export class HistoryModal extends Modal {
         .addButton((b) =>
           b
             .setButtonText(t("history.purge"))
-            .setWarning()
+            .setDestructive()
             .onClick(async () => {
               if (!(await confirm(this.app, t("history.purgeConfirm", { n: old, path: this.path }), t("history.purge")))) return;
               const res = await runner.command({ type: "purgeHistory", path: this.path, beforeRev: r.revisions[0]?.rev ?? 0 });

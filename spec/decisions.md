@@ -129,10 +129,10 @@ postcard с заголовком `NSI\0` и номером формата (u32 L
 **По умолчанию исключён каталог настроек** (`vault.configDir`, обычно `.obsidian/`; его можно переименовать, поэтому значение подставляется при загрузке настроек, а не зашито) (настройки и раскладка различаются между устройствами). Жёстко — каталог плагина и `.trash/`.
 
 **Проверка каталога Obsidian.** Автоматическое ревью каталога — это `eslint-plugin-obsidianmd` (набор `recommended`), он же запускается в CI (`npm run lint`). Что из этого следует:
-- `minAppVersion` 1.8.7: `loadLocalStorage`/`saveLocalStorage` и `Notice.messageEl` появились в нём.
+- `minAppVersion` 1.13.0: вкладка настроек — только `getSettingDefinitions` (строки находятся поиском по настройкам), опасные кнопки — `setDestructive`. Устаревшие `display()` и `setWarning()` каталог отмечает, а замены у них есть только с 1.13. До 0.4.4 поддерживался 1.8.7 (`loadLocalStorage`/`saveLocalStorage` и `Notice.messageEl` появились в нём).
+- wasm-bindgen пишет `/* eslint-disable */` в начало каждого `.d.ts`; ревью каталога не пропускает отключение без правил и причины, поэтому `build-wasm.sh` эти строки убирает.
 - Node `fs` на десктопе подгружается `require` внутри `if (Platform.isDesktop …)` — правило `no-nodejs-modules` признаёт только такую защиту; на мобильных тот же код идёт через `vault.adapter`, поэтому `isDesktopOnly: false`.
 - Таймеры — `window.setTimeout` (всплывающие окна), подтверждения — окно Obsidian вместо `window.confirm`.
-- Остаются предупреждения об устаревших `display()` и `setWarning()`: их замены (`getSettingDefinitions`, `setDestructive`) есть только с 1.13, а поддерживаем мы 1.8.7.
 - Тесты (`plugin/test`) — код для Node и в линт не входят.
 - TypeScript 6.0: typescript-eslint пока не поддерживает 7.x.
 - `appendBinary` у адаптера есть только с Obsidian 1.12.3. Линтер этого не видит (адаптер приведён к своему интерфейсу), нашлось в живом Obsidian 1.11.7: без метода докачка переписывает временный файл целиком.

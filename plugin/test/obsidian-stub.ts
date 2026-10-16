@@ -152,7 +152,7 @@ class Control {
   setCta(): this {
     return this;
   }
-  setWarning(): this {
+  setDestructive(): this {
     return this;
   }
   onChange(): this {
