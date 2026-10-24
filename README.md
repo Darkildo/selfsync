@@ -4,6 +4,8 @@
 
 Sync your Obsidian vault through a server you run yourself. One small Rust binary, data in SQLite and plain files, a plugin for Obsidian on desktop and mobile, and a command-line client for servers and NAS boxes.
 
+> **Don't want to run a server?** [Selfsync Cloud](https://community.obsidian.md/plugins/selfsync-cloud) is the same sync engine as a hosted service with a free plan: 1 GB, 3 devices. Setup takes a minute, with no server and no email; end-to-end encryption is always on. It is a separate plugin, so this one stays free of accounts.
+
 The main promise: **no edit is ever lost silently.**
 - Edits to different parts of a file are merged automatically (diff3).
 - When edits overlap, both versions are kept: the server's in place, yours as a copy next to it.
@@ -20,7 +22,7 @@ Also:
 
 ## Before you install the plugin
 
-- **You need your own selfsync server.** The plugin does nothing without one; there is no hosted service, account or subscription. Setup is described below.
+- **You need your own selfsync server.** The plugin does nothing without one and has no account or subscription; setup is described below. It never contacts Selfsync Cloud: that is a separate plugin.
 - **Network use.** The plugin talks only to the server address you enter: it uploads and downloads the files of your vault and their metadata (names, sizes, modification times). Without encryption the server stores your notes as they are; with encryption it stores only ciphertext.
 - **No telemetry.** The plugin sends nothing anywhere else.
 - **Direct file system access on desktop.** Obsidian's review flags this, so here is why. On desktop the plugin reads and writes the files of your vault through Node's `fs` module instead of Obsidian's API: a downloaded file replaces the old one atomically and is flushed to disk (`fsync`), so a crash or power loss never leaves a half-written note, and large attachments are read and hashed in chunks instead of being loaded into memory whole. It only touches paths inside the vault folder (plus Obsidian's trash when a file is deleted). On mobile it uses Obsidian's adapter API.
@@ -155,7 +157,7 @@ Environment variables (or TOML via `--config`; variables take precedence):
 | `SELFSYNC_MAX_BODY_SIZE` | 16 MiB | request body (metadata, upload chunk); keep in line with the proxy |
 | `SELFSYNC_LOG` | `info` | log level (file names never reach the log) |
 | `SELFSYNC_TRUSTED_PROXY` | `0` | `1`: take the client address from `X-Forwarded-For` (rightmost entry) |
-| `SELFSYNC_METRICS_TOKEN` | — | enables `GET /metrics` behind this bearer token (16 characters or more) |
+| `SELFSYNC_METRICS_TOKEN` | - | enables `GET /metrics` behind this bearer token (16 characters or more) |
 | `SELFSYNC_RATE_REDEEM_ATTEMPTS` | `10` | wrong connect codes from one address per window |
 | `SELFSYNC_RATE_REDEEM_WINDOW` | `15m` | counting window for connect codes |
 | `SELFSYNC_RATE_REDEEM_BLOCK` | `15m` | how long an address is blocked after the limit |
@@ -163,17 +165,17 @@ Environment variables (or TOML via `--config`; variables take precedence):
 | `SELFSYNC_RATE_AUTH_ATTEMPTS` | `30` | rejected tokens (401) from one address per window |
 | `SELFSYNC_RATE_AUTH_WINDOW` | `1m` | counting window for tokens |
 | `SELFSYNC_RATE_AUTH_BLOCK` | `1m` | how long an address is blocked after the limit |
-| `SELFSYNC_QUOTA_SOFT` | — | default per vault: storage size that triggers a warning (`5GiB`) |
-| `SELFSYNC_QUOTA_HARD` | — | default per vault: storage size past which new files are refused |
-| `SELFSYNC_QUOTA_DEVICES` | — | default per vault: active devices |
-| `SELFSYNC_QUOTA_MAX_FILE` | — | default per vault: largest file (never above `SELFSYNC_MAX_BLOB_SIZE`) |
-| `SELFSYNC_QUOTA_SERVER` | — | all vaults together: storage size past which new files are refused |
+| `SELFSYNC_QUOTA_SOFT` | - | default per vault: storage size that triggers a warning (`5GiB`) |
+| `SELFSYNC_QUOTA_HARD` | - | default per vault: storage size past which new files are refused |
+| `SELFSYNC_QUOTA_DEVICES` | - | default per vault: active devices |
+| `SELFSYNC_QUOTA_MAX_FILE` | - | default per vault: largest file (never above `SELFSYNC_MAX_BLOB_SIZE`) |
+| `SELFSYNC_QUOTA_SERVER` | - | all vaults together: storage size past which new files are refused |
 
 In TOML the limits go into a `[rate]` section with the same names in lower case and without the prefix (`redeem_attempts = 10`, `auth_window = "1m"`); `trusted_proxy = true` is a top-level key. A threshold of `0` turns that limit off; windows and blocks must be at least one second, otherwise the server refuses to start.
 
-**Failed-attempt limits.** Codes and tokens are far too long to guess, but a scanner should neither load SQLite nor look like normal traffic in the log. The server counts only failures (a wrong connect code, a rejected token) and answers `429` with `Retry-After` once a limit is reached; the plugin and the command-line client wait that long without retrying. Counters live in `server.db`, so they work in CGI mode too; `selfsync sweep` removes those idle for a day. Requests without a token are not counted. The client address is the connection address (in CGI, `REMOTE_ADDR`). Behind a reverse proxy in `serve`/`socket` mode every request comes from the proxy: set `SELFSYNC_TRUSTED_PROXY=1` and let the proxy pass the address (the configs in [deploy/](deploy/) already do). Never enable it without a proxy that overwrites the header — anyone could then pick their own address. Without a known address (Unix socket, no trusted proxy) all clients share one counter.
+**Failed-attempt limits.** Codes and tokens are far too long to guess, but a scanner should neither load SQLite nor look like normal traffic in the log. The server counts only failures (a wrong connect code, a rejected token) and answers `429` with `Retry-After` once a limit is reached; the plugin and the command-line client wait that long without retrying. Counters live in `server.db`, so they work in CGI mode too; `selfsync sweep` removes those idle for a day. Requests without a token are not counted. The client address is the connection address (in CGI, `REMOTE_ADDR`). Behind a reverse proxy in `serve`/`socket` mode every request comes from the proxy: set `SELFSYNC_TRUSTED_PROXY=1` and let the proxy pass the address (the configs in [deploy/](deploy/) already do). Never enable it without a proxy that overwrites the header - anyone could then pick their own address. Without a known address (Unix socket, no trusted proxy) all clients share one counter.
 
-**Metrics.** With `SELFSYNC_METRICS_TOKEN` set, `GET /metrics` returns Prometheus text format; without it the route does not exist (404), with a wrong token it is 401. What it shows: server version and start time; per vault — files, folders, trash, history, current-version bytes, blob count and size, encryption, blobs requested from devices, and the last `selfsync verify` result (time, damaged and missing blobs, database errors, key record problem); per device — last contact time, client version, read-only flag; addresses currently blocked by the limiter; counters of 401, 403, 426, 429 and 5xx answers. Counters are kept in `server.db`, so a server that exits when idle does not lose them, and scraping does not count as activity: it does not keep a socket-activated server running. Device names are visible to whoever holds the token. Example:
+**Metrics.** With `SELFSYNC_METRICS_TOKEN` set, `GET /metrics` returns Prometheus text format; without it the route does not exist (404), with a wrong token it is 401. What it shows: server version and start time; per vault - files, folders, trash, history, current-version bytes, blob count and size, encryption, blobs requested from devices, and the last `selfsync verify` result (time, damaged and missing blobs, database errors, key record problem); per device - last contact time, client version, read-only flag; addresses currently blocked by the limiter; counters of 401, 403, 426, 429 and 5xx answers. Counters are kept in `server.db`, so a server that exits when idle does not lose them, and scraping does not count as activity: it does not keep a socket-activated server running. Device names are visible to whoever holds the token. Example:
 
 ```yaml
 scrape_configs:
@@ -230,7 +232,7 @@ Back up with `backup`: the copy is consistent even while the server is running. 
 
 `--rotate` writes each copy to `ROOT/<UTC time>` (first under a hidden `.partial` name, renamed when done), then removes the oldest beyond `--keep`; it only touches directories with its own naming. The `selfsync-backup.timer` unit does this daily into `/var/lib/selfsync-backups`. Mount another disk there: a copy on the same disk does not survive a failed disk. A backup is checked like the storage itself: `selfsync --data /var/lib/selfsync-backups/<time> verify`.
 
-**Integrity check.** A silently damaged blob would otherwise surface only when some device tries to download it, maybe a year later. `selfsync verify` checks both databases (`PRAGMA integrity_check`), recomputes the SHA-256 of every blob (the name of a blob is the hash of its stored bytes, encrypted ones included, so no key is needed), looks for blobs that records refer to but that are gone, and checks that an encrypted vault still has a readable key record. Blobs nobody refers to and abandoned uploads are only counted, `gc` removes them. Exit code: 0 — clean, 1 — problems found, 2 — could not run. `--quiet` prints only problems. The check is safe on a running server.
+**Integrity check.** A silently damaged blob would otherwise surface only when some device tries to download it, maybe a year later. `selfsync verify` checks both databases (`PRAGMA integrity_check`), recomputes the SHA-256 of every blob (the name of a blob is the hash of its stored bytes, encrypted ones included, so no key is needed), looks for blobs that records refer to but that are gone, and checks that an encrypted vault still has a readable key record. Blobs nobody refers to and abandoned uploads are only counted, `gc` removes them. Exit code: 0 - clean, 1 - problems found, 2 - could not run. `--quiet` prints only problems. The check is safe on a running server.
 
 **Repair from devices.** A damaged or missing blob that `verify` could not take from a backup is requested from the devices: the damaged file is moved to `quarantine/`, and any device (plugin or `selfsync-cli` 0.3.2+, not read-only) whose copy of the file matches the server rebuilds the blob and uploads it on its next sync. The server checks the hash. Blobs that only old versions in the history refer to cannot be rebuilt this way; `verify` lists those still waiting after a day.
 
@@ -257,7 +259,7 @@ selfsync link --vault notes --name tablet --read-only
 
 In the plugin, turn on "Read-only" under "Connect a new device" before creating the link. The rule on the server is a single one: a read-only device may only send `GET` and `HEAD`. So it cannot write files, change the retention period or the encryption key, revoke devices, or create connect links. `token list` and the device list in the plugin mark such devices.
 
-The device receives everything, and its own edits stay on it: the status bar shows "Read-only" and how many local changes will not be sent. If a file edited there also changes on another device, the server version takes its place and the local one is kept as a copy next to it, as in a conflict — nothing is lost silently. The plugin hides the buttons for encryption, retention, revoking and connect links. `selfsync-cli run --once` in such a folder exits with code 0 and prints a warning about local changes; `status` shows the mode. Plugin and CLI older than 0.2.1 do not know this mode: the server refuses them and they ask to be updated. A read-only connect link is not used up by such a client, so it still works after the update. The other way round, a plugin connected to a server older than 0.2.1 does not offer read-only links, because that server would silently give full access.
+The device receives everything, and its own edits stay on it: the status bar shows "Read-only" and how many local changes will not be sent. If a file edited there also changes on another device, the server version takes its place and the local one is kept as a copy next to it, as in a conflict - nothing is lost silently. The plugin hides the buttons for encryption, retention, revoking and connect links. `selfsync-cli run --once` in such a folder exits with code 0 and prints a warning about local changes; `status` shows the mode. Plugin and CLI older than 0.2.1 do not know this mode: the server refuses them and they ask to be updated. A read-only connect link is not used up by such a client, so it still works after the update. The other way round, a plugin connected to a server older than 0.2.1 does not offer read-only links, because that server would silently give full access.
 
 ## Obsidian plugin
 
@@ -268,18 +270,18 @@ From Obsidian's community plugins (search for "Selfsync"), or by hand: copy `mai
 ### Connecting
 
 - **With a link or QR code.** Run `selfsync link …` on the server, or press "Connect a new device" in the settings of an Obsidian that is already connected. Open the link on the new device (a phone camera reads the QR code): the server page opens Obsidian with the fields filled in.
-- **With a code** — the "Connect to server" command.
-- **With a token** — server address and token in the plugin settings.
+- **With a code** - the "Connect to server" command.
+- **With a token** - server address and token in the plugin settings.
 
-**Connection check.** After connecting, the plugin checks the connection step by step and opens a window only if something is wrong; "Check connection" in the settings runs it any time. It names the usual setup mistakes and what to do about them: a certificate the device does not trust (self-signed, expired, for another name), a wrong address, a proxy that refuses requests over about 1 MB (nginx's default `client_max_body_size 1m` — large files would never sync) or drops long requests, a proxy or CDN that strips the `x-selfsync-proto` header, a server older than the plugin, a device clock that is far off, a revoked token. If connecting with a code fails because the server does not answer, the same check of the address opens by itself. The command-line client has `selfsync-cli check`.
+**Connection check.** After connecting, the plugin checks the connection step by step and opens a window only if something is wrong; "Check connection" in the settings runs it any time. It names the usual setup mistakes and what to do about them: a certificate the device does not trust (self-signed, expired, for another name), a wrong address, a proxy that refuses requests over about 1 MB (nginx's default `client_max_body_size 1m` - large files would never sync) or drops long requests, a proxy or CDN that strips the `x-selfsync-proto` header, a server older than the plugin, a device clock that is far off, a revoked token. If connecting with a code fails because the server does not answer, the same check of the address opens by itself. The command-line client has `selfsync-cli check`.
 
 ### Day to day
 
 - **Status bar:** ✓ synced, ↻ syncing, ⚠ server unreachable, 🔒 password needed, ⛔ sync stopped. Click to sync now (or enter the password, or reconnect).
 - **Sync** runs 2–3 seconds after the last edit, on startup, when Obsidian returns to the foreground, and on a polling schedule. When Obsidian goes to the background, pending changes are sent right away.
 - **Conflicts** raise a notice; the "Unresolved conflicts" window lets you keep both versions, yours or the server's.
-- **Deleted files** — the "Restore deleted files" command opens the server's trash.
-- **File history** — from the file context menu or a command. With server 0.4.0+, "Delete old versions" there frees space on the server; the current version stays.
+- **Deleted files** - the "Restore deleted files" command opens the server's trash.
+- **File history** - from the file context menu or a command. With server 0.4.0+, "Delete old versions" there frees space on the server; the current version stays.
 - **Space on the server** (server 0.4.0+): the settings show how much the vault takes and its limits, if the server has [quotas](#configuration). When the vault is out of space, new files wait on the device (the status bar shows how many) and are sent as soon as there is room; everything else keeps syncing.
 
 The vault's configuration folder (`.obsidian/` by default; settings differ between devices) and `.trash/` are not synced by default. Exclusions are configurable: one pattern per line, and `!pattern` brings back something an earlier line excluded (the last matching line wins, as in `.gitignore`).
@@ -349,13 +351,13 @@ selfsync-cli skipped                        # files over max_download_size that 
 selfsync-cli download media/talk.mp4        # download one anyway
 ```
 
-`max_download_size = 50000000` in `.selfsync/config.toml` (bytes, 0 — no limit) works as in the plugin.
+`max_download_size = 50000000` in `.selfsync/config.toml` (bytes, 0 - no limit) works as in the plugin.
 
 Only one process works with a folder at a time (`.selfsync/lock`): while `run` is running as a service, stop it first (`systemctl --user stop selfsync-cli@notes`).
 
 The client keeps its state in `<folder>/.selfsync/` (token and key with mode 0600) and puts deleted files into `<folder>/.trash/`. To run it as a service: [deploy/systemd/user/selfsync-cli@.service](deploy/systemd/user/selfsync-cli@.service), `systemctl --user enable --now selfsync-cli@notes`.
 
-**A command after each sync.** `run --exec CMD` (or `exec = "..."` in `.selfsync/config.toml`) runs `sh -c CMD` in the folder after every cycle that changed something — commit to git, rebuild a Quartz or Hugo site, take a backup:
+**A command after each sync.** `run --exec CMD` (or `exec = "..."` in `.selfsync/config.toml`) runs `sh -c CMD` in the folder after every cycle that changed something - commit to git, rebuild a Quartz or Hugo site, take a backup:
 
 ```sh
 cd ~/notes && git init
@@ -385,7 +387,7 @@ cd plugin && npm ci && npm run lint && npm run build && npm test   # plugin: Obs
 
 A failing simulation run reproduces by seed: `selfsync-sim --seed N --runs 1`; full trace with `SIM_FULL_TRACE=1`.
 
-Releases: `node scripts/version.mjs set X.Y.Z`, commit, then push an annotated tag `X.Y.Z` (no `v` prefix — Obsidian requires the tag to equal the manifest version). The workflow builds everything and creates a draft release; publish it after writing the release notes.
+Releases: `node scripts/version.mjs set X.Y.Z`, commit, then push an annotated tag `X.Y.Z` (no `v` prefix - Obsidian requires the tag to equal the manifest version). The workflow builds everything and creates a draft release; publish it after writing the release notes.
 
 ```
 crates/

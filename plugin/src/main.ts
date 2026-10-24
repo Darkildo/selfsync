@@ -1,7 +1,7 @@
 // Плагин Obsidian: тонкий слой между vault'ом и ядром. Ядро решает, что и когда
 // синхронизировать; здесь — события vault'а, исполнитель, статус-бар и окна.
 
-import { FileSystemAdapter, type Menu, moment, Notice, Platform, Plugin, requestUrl, type TAbstractFile, TFile, TFolder } from "obsidian";
+import { FileSystemAdapter, type Menu, moment, Notice, Platform, Plugin, requestUrl, setIcon, type TAbstractFile, TFile, TFolder } from "obsidian";
 
 import wasmBytes from "selfsync-wasm-bytes";
 import { initWasm, Runner } from "./engine.ts";
@@ -19,6 +19,7 @@ import { ConnectModal } from "./ui/connect.ts";
 import { DeletedModal } from "./ui/deleted.ts";
 import { DiagnoseModal, hasProblems } from "./ui/diagnose.ts";
 import { HistoryModal } from "./ui/history.ts";
+import { registerIcons, type StatusKind, statusIcon } from "./ui/icons.ts";
 import { PasswordModal } from "./ui/password.ts";
 import { confirm } from "./ui/confirm.ts";
 import { PhraseModal, RecoverModal } from "./ui/recovery.ts";
@@ -31,6 +32,8 @@ export default class SelfsyncPlugin extends Plugin {
   runner: Runner | undefined;
   protected settingTab: SelfsyncSettingTab | undefined;
   private statusEl!: HTMLElement;
+  private statusIconEl!: HTMLElement;
+  private statusTextEl!: HTMLElement;
   private status: SyncStatus | null = null;
   private log: string[] = [];
   private migrationNotice: Notice | undefined;
@@ -39,9 +42,12 @@ export default class SelfsyncPlugin extends Plugin {
     setLanguage(moment.locale());
     await this.loadSettings();
     initWasm(wasmBytes);
+    registerIcons();
 
     this.statusEl = this.addStatusBarItem();
     this.statusEl.addClass("selfsync-status", "mod-clickable");
+    this.statusIconEl = this.statusEl.createSpan({ cls: "selfsync-status-icon" });
+    this.statusTextEl = this.statusEl.createSpan();
     this.registerDomEvent(this.statusEl, "click", () => this.onStatusClick());
     this.renderStatus();
 
@@ -350,17 +356,15 @@ export default class SelfsyncPlugin extends Plugin {
 
   private renderStatus(): void {
     const s = this.status;
-    const icon = !s
-      ? "○"
-      : s.readOnly && s.state === "idle"
-        ? "👁"
-        : { idle: "✓", syncing: "↻", offline: "⚠", error: "✗", needPassword: "🔒", blocked: "⛔" }[s.state];
-    const parts = [`${icon} ${stateText(s)}`];
+    const kind: StatusKind = !s ? "none" : s.readOnly && s.state === "idle" ? "readOnly" : s.state;
+    setIcon(this.statusIconEl, statusIcon(kind));
+    this.statusEl.setAttribute("data-state", kind);
+    const parts = [stateText(s)];
     if (s?.state === "syncing" && s.total > 0) parts.push(`${s.done}/${s.total}`);
     else if (s && s.pending > 0) parts.push(t(s.readOnly ? "status.readOnlyPending" : "status.pending", { n: s.pending }));
     if (s && s.conflicts > 0) parts.push(t("status.conflicts", { n: s.conflicts }));
     if (s?.quota && s.quota.held > 0) parts.push(t("status.quotaFull", { n: s.quota.held }));
-    this.statusEl.setText(parts.join(" · "));
+    this.statusTextEl.setText(parts.join(" · "));
     let tip = t("status.tooltip", { state: stateText(s) });
     if (s && s.lastSync > 0) tip += `\n${t("status.lastSync", { time: new Date(s.lastSync).toLocaleTimeString() })}`;
     this.statusEl.setAttribute("aria-label", tip);

@@ -30,3 +30,46 @@
   width: 100%;
   font-family: var(--font-monospace);
 }
+
+/* Статус-бар: фирменное кольцо + текст. Цветом выделяется только иконка. */
+.selfsync-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+}
+
+.selfsync-status-icon {
+  display: inline-flex;
+  --icon-size: var(--icon-s);
+  color: var(--text-faint);
+}
+
+.selfsync-status[data-state="idle"] .selfsync-status-icon,
+.selfsync-status[data-state="syncing"] .selfsync-status-icon {
+  color: var(--text-accent);
+}
+
+.selfsync-status[data-state="readOnly"] .selfsync-status-icon {
+  color: var(--text-muted);
+}
+
+.selfsync-status[data-state="needPassword"] .selfsync-status-icon {
+  color: var(--text-warning);
+}
+
+.selfsync-status[data-state="error"] .selfsync-status-icon,
+.selfsync-status[data-state="blocked"] .selfsync-status-icon {
+  color: var(--text-error);
+}
+
+@keyframes selfsync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .selfsync-status[data-state="syncing"] .selfsync-status-icon svg {
+    animation: selfsync-spin 1.6s linear infinite;
+  }
+}

@@ -30,6 +30,14 @@ export const Platform = {
   isAndroidApp: false,
 };
 
+export const icons = new Map<string, string>();
+export function addIcon(id: string, svg: string): void {
+  icons.set(id, svg);
+}
+export function setIcon(el: El, id: string): void {
+  el.attrs["icon"] = id;
+}
+
 export const moment = { locale: () => "ru" };
 
 /** Заголовки, которые «сервер» не прислал (изобразить сервер 0.1.x). */
@@ -67,11 +75,21 @@ export class FileSystemAdapter {
 }
 
 class El {
-  text = "";
+  own = "";
   attrs: Record<string, string> = {};
+  children: El[] = [];
+  /** Текст элемента вместе с дочерними — как textContent. */
+  get text(): string {
+    return this.own + this.children.map((c) => c.text).join("");
+  }
   addClass(): void {}
+  createSpan(): El {
+    const c = new El();
+    this.children.push(c);
+    return c;
+  }
   setText(t: string): void {
-    this.text = t;
+    this.own = t;
   }
   setAttribute(k: string, v: string): void {
     this.attrs[k] = v;
