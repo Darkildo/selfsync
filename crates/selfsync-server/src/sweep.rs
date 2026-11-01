@@ -28,7 +28,8 @@ pub fn sweep_vault(config: &Config, name: &str, now: i64) -> anyhow::Result<Swee
     Ok(SweepReport { paths, blobs })
 }
 
-/// Счётчики лимитера старше суток (`server.db`). Возвращает число удалённых строк.
+/// Счётчики лимитера старше суток и истёкшие коды подключения с обменами ключом
+/// (`server.db`). Возвращает число удалённых строк.
 pub fn sweep_throttle(config: &Config, now: i64) -> anyhow::Result<usize> {
     let path = config.data_dir.join("server.db");
     if !path.is_file() {
@@ -36,7 +37,7 @@ pub fn sweep_throttle(config: &Config, now: i64) -> anyhow::Result<usize> {
     }
     let mut c = crate::db::open(&path)?;
     crate::db::server::migrate_server(&mut c)?;
-    Ok(crate::throttle::cleanup(&c, now)?)
+    Ok(crate::throttle::cleanup(&c, now)? + crate::db::server::sweep_join_codes(&c, now)?)
 }
 
 /// Все vault'ы на диске.

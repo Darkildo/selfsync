@@ -1251,6 +1251,16 @@ async fn read_only_token_rejects_writes() {
                 _ => uri.clone(),
             };
             let r = s.call(method.clone(), &uri, Some(&ro), vec![], &[]).await;
+            if uri == "/v1/join/handoff" && matches!(*m, "PUT" | "DELETE") {
+                // Единственное исключение: свой обмен ключом при подключении (1.4).
+                let want = if *m == "PUT" {
+                    "bad_handoff_key"
+                } else {
+                    "no_handoff"
+                };
+                assert_eq!(r.error().code, want, "{m} {uri}");
+                continue;
+            }
             if *m == "GET" {
                 reads += 1;
                 assert_ne!(r.status, StatusCode::FORBIDDEN, "{m} {uri}");
@@ -1307,6 +1317,7 @@ async fn read_only_join_code_yields_read_only_device() {
             &pb::JoinCreate {
                 name: "tablet".into(),
                 read_only: true,
+                ..Default::default()
             },
         )
         .await
@@ -1347,6 +1358,7 @@ async fn read_only_join_code_yields_read_only_device() {
             &pb::JoinCreate {
                 name: "x".into(),
                 read_only: true,
+                ..Default::default()
             },
         )
         .await;
@@ -1672,4 +1684,253 @@ async fn metrics_need_token_and_describe_server() {
         text.contains("selfsync_events_total{event=\"unauthorized\"} 3"),
         "{text}"
     );
+}
+
+/// Передача ключа по коду (1.4) через HTTP: источник обязуется ключом, новое
+/// устройство (и только для чтения тоже) присылает свой после commit, обёртка
+/// отдаётся один раз. Сервер только хранит: ключи и обёртка для него непрозрачны.
+#[tokio::test]
+async fn join_handoff_flow() {
+    use selfsync_core::handoff::{self, Ephemeral, Labels};
+    let s = &TestServer::new();
+    let laptop = s.token("notes", "laptop");
+    let other = s.token("notes", "desktop");
+    let a = Ephemeral::generate().unwrap();
+    let b = Ephemeral::generate().unwrap();
+    let r = s
+        .post(
+            "/v1/join",
+            &laptop,
+            &pb::JoinCreate {
+                name: "tablet".into(),
+                read_only: true,
+                commit: vec![1; 31],
+            },
+        )
+        .await;
+    assert_eq!(r.error().code, "bad_commit");
+    let code: pb::JoinCode = s
+        .post(
+            "/v1/join",
+            &laptop,
+            &pb::JoinCreate {
+                name: "tablet".into(),
+                read_only: true,
+                commit: handoff::commit(a.public()).to_vec(),
+            },
+        )
+        .await
+        .proto();
+    let poll = |token: &str, pk: Vec<u8>, wrapped: Vec<u8>| {
+        let m = pb::JoinHandoffSource {
+            code: code.code.clone(),
+            pk,
+            wrapped,
+            cancel: false,
+        };
+        let token = token.to_owned();
+        async move { s.post("/v1/join/handoff", &token, &m).await }
+    };
+    let st: pb::JoinHandoffSourceState = poll(&laptop, vec![], vec![]).await.proto();
+    assert_eq!((st.name.as_str(), st.pk.is_empty()), ("tablet", true));
+    // Код — того устройства, что его создало.
+    assert_eq!(
+        poll(&other, vec![], vec![]).await.status,
+        StatusCode::NOT_FOUND
+    );
+
+    let tok: pb::JoinToken = s
+        .send(
+            http::Request::post("/v1/join/redeem")
+                .header("x-selfsync-proto", selfsync_proto::proto_header())
+                .body(axum::body::Body::from(
+                    pb::JoinRedeem {
+                        code: code.code.clone(),
+                        name: "my tablet".into(),
+                    }
+                    .encode_to_vec(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .proto();
+    assert_eq!(tok.handoff_commit, handoff::commit(a.public()));
+    let put = |pk: Vec<u8>, mac: Vec<u8>| {
+        let body = pb::JoinHandoffJoiner { pk, mac }.encode_to_vec();
+        let token = tok.token.clone();
+        async move {
+            s.call(Method::PUT, "/v1/join/handoff", Some(&token), body, &[])
+                .await
+        }
+    };
+    let r = put(vec![4; 65], vec![]).await;
+    assert_eq!(r.error().code, "bad_handoff_key", "не точка на кривой");
+    // Устройство только для чтения присылает свой ключ: это не запись в vault.
+    let m = [5u8; 16];
+    let r = put(
+        b.public().to_vec(),
+        handoff::link_mac(&m, b.public()).to_vec(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    // Повтор (ответ потерялся) — 204, другой запрос — 409.
+    let r = put(
+        b.public().to_vec(),
+        handoff::link_mac(&m, b.public()).to_vec(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        put(b.public().to_vec(), vec![]).await.error().code,
+        "handoff_key_set"
+    );
+    let joiner_get = || async { s.get("/v1/join/handoff", &tok.token).await };
+    let j: pb::JoinHandoffJoinerState = joiner_get().await.proto();
+    assert!(j.pk.is_empty() && j.wrapped.is_empty());
+
+    let st: pb::JoinHandoffSourceState = poll(&laptop, vec![], vec![]).await.proto();
+    assert_eq!(st.name, "my tablet");
+    assert_eq!(st.device_id, tok.device_id);
+    assert_eq!(st.pk, b.public());
+    assert!(handoff::check_mac(&m, &st.pk, &st.mac));
+    let r = poll(&laptop, b.public().to_vec(), vec![]).await;
+    assert_eq!(
+        r.error().code,
+        "bad_commit",
+        "раскрыть можно только обещанный ключ"
+    );
+    let master = [9u8; 32];
+    let l = Labels::selfsync();
+    let wrapped = handoff::wrap(&l, &a, &st.pk, &master).unwrap();
+    let st: pb::JoinHandoffSourceState = poll(&laptop, a.public().to_vec(), wrapped).await.proto();
+    assert!(st.delivered);
+
+    let j: pb::JoinHandoffJoinerState = joiner_get().await.proto();
+    assert!(handoff::check_commit(&j.pk, &tok.handoff_commit));
+    assert_eq!(*handoff::unwrap(&l, &b, &j.pk, &j.wrapped).unwrap(), master);
+    // Ответ мог потеряться: обёртка отдаётся снова, пока устройство не закроет обмен.
+    let again: pb::JoinHandoffJoinerState = joiner_get().await.proto();
+    assert_eq!(again, j);
+    let del = || async {
+        s.call(
+            Method::DELETE,
+            "/v1/join/handoff",
+            Some(&tok.token),
+            vec![],
+            &[],
+        )
+        .await
+    };
+    assert_eq!(
+        del().await.status,
+        StatusCode::NO_CONTENT,
+        "ro-устройство тоже"
+    );
+    assert_eq!(del().await.error().code, "no_handoff");
+    assert_eq!(joiner_get().await.error().code, "no_handoff");
+    assert_eq!(
+        poll(&laptop, vec![], vec![]).await.status,
+        StatusCode::NOT_FOUND
+    );
+    // Прочие записи ro-устройству по-прежнему закрыты.
+    let r = s
+        .post("/v1/join", &tok.token, &pb::JoinCreate::default())
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN);
+}
+
+/// Без обязательства в коде обмена нет: старый клиент источника — как раньше.
+#[tokio::test]
+async fn join_without_commit_has_no_handoff() {
+    let s = TestServer::new();
+    let t = s.token("notes", "laptop");
+    let code: pb::JoinCode = s
+        .post("/v1/join", &t, &pb::JoinCreate::default())
+        .await
+        .proto();
+    let tok: pb::JoinToken = s
+        .send(
+            http::Request::post("/v1/join/redeem")
+                .header("x-selfsync-proto", "1.3")
+                .body(axum::body::Body::from(
+                    pb::JoinRedeem {
+                        code: code.code,
+                        name: String::new(),
+                    }
+                    .encode_to_vec(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .proto();
+    assert!(tok.handoff_commit.is_empty());
+    assert_eq!(
+        s.get("/v1/join/handoff", &tok.token).await.error().code,
+        "no_handoff"
+    );
+}
+
+/// Источник отменяет обмен (`cancel`): новое устройство получает 404, код, по
+/// которому ещё не подключились, остаётся рабочим без обмена.
+#[tokio::test]
+async fn join_handoff_source_cancel() {
+    use selfsync_core::handoff::{self, Ephemeral};
+    let s = &TestServer::new();
+    let laptop = s.token("notes", "laptop");
+    let other = s.token("notes", "desktop");
+    let a = Ephemeral::generate().unwrap();
+    let create = || async {
+        s.post(
+            "/v1/join",
+            &laptop,
+            &pb::JoinCreate {
+                name: "tablet".into(),
+                commit: handoff::commit(a.public()).to_vec(),
+                ..Default::default()
+            },
+        )
+        .await
+        .proto::<pb::JoinCode>()
+        .code
+    };
+    let cancel = |token: &str, code: &str| {
+        let m = pb::JoinHandoffSource {
+            code: code.to_owned(),
+            cancel: true,
+            ..Default::default()
+        };
+        let token = token.to_owned();
+        async move { s.post("/v1/join/handoff", &token, &m).await }
+    };
+    let redeem = |code: String| async move {
+        s.send(
+            http::Request::post("/v1/join/redeem")
+                .header("x-selfsync-proto", selfsync_proto::proto_header())
+                .body(axum::body::Body::from(
+                    pb::JoinRedeem {
+                        code,
+                        name: String::new(),
+                    }
+                    .encode_to_vec(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .proto::<pb::JoinToken>()
+    };
+    // До входа: код без обмена остаётся рабочим.
+    let code = create().await;
+    assert_eq!(cancel(&other, &code).await.error().code, "code_invalid");
+    assert_eq!(cancel(&laptop, &code).await.status, StatusCode::OK);
+    assert!(redeem(code).await.handoff_commit.is_empty());
+    // После входа: новое устройство обмена больше не видит.
+    let code = create().await;
+    let tok = redeem(code.clone()).await;
+    assert!(!tok.handoff_commit.is_empty());
+    assert_eq!(cancel(&laptop, &code).await.status, StatusCode::OK);
+    assert_eq!(
+        s.get("/v1/join/handoff", &tok.token).await.error().code,
+        "no_handoff"
+    );
+    assert_eq!(cancel(&laptop, &code).await.error().code, "code_invalid");
 }

@@ -270,7 +270,7 @@ pub(crate) async fn verify_keys(cx: &Ctx) -> SyncResult<()> {
     }
 }
 
-fn set_master(cx: &Ctx, master: MasterKey, remember: bool, verified: bool, epoch: u32) {
+pub(crate) fn set_master(cx: &Ctx, master: MasterKey, remember: bool, verified: bool, epoch: u32) {
     if remember {
         cx.hub.emit(Action::RememberKey {
             key: master.as_bytes().to_vec(),

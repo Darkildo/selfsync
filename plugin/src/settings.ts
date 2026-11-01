@@ -496,8 +496,8 @@ export class SelfsyncSettingTab extends PluginSettingTab {
               .setCta()
               .onClick(async () => {
                 const readOnly = this.joinReadOnly;
-                const r = await runner.command({ type: "createJoin", name: name || t("join.namePlaceholder"), readOnly });
-                if (r.type === "join") new JoinModal(this.app, { ...r, readOnly }).open();
+                const r = await runner.command({ type: "createJoin", name: name || t("join.namePlaceholder"), readOnly, handoff: true });
+                if (r.type === "join") new JoinModal(this.app, { ...r, readOnly }, { runner, server: this.plugin.settings.server }).open();
                 else new Notice(r.type === "error" ? errorText(r) : r.type);
               }),
           );

@@ -1,0 +1,50 @@
+{
+  "about": "Передача ключа по коду: P-256 (несжатые точки SEC1), commit = sha256(A), mac = HMAC-SHA256(link_secret, B), h = base64url без паддинга (commit[0..16]), sas = sha256(prefix + ' sas' ‖ A ‖ B)[0..4] BE mod 10^6, k = HKDF-SHA256(ECDH x, salt = A ‖ B, info = prefix + ' key'), wrapped = nonce ‖ AES-256-GCM(k, payload) без AAD. Байты — hex. Генератор: scripts/handoff-vectors.mjs",
+  "cases": [
+    {
+      "prefix": "selfsync/join-handoff/v1",
+      "a_secret": "01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3da",
+      "b_secret": "656c737a81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e",
+      "a_public": "04eb72df8d977165de80499532a268530cd607775d160ebb588832ff518697656147741e19ab55fe615232386b74224b7ef5fade207808b6cd13731cf5273f6402",
+      "b_public": "049e32ba225515e0efcfbb7d2601ba1dcd6b55adfa1d09921e1f66365cd79af93380625eeccf72bde97eda00f5f424777223450a442cc241abd3609cb4f429b1a8",
+      "commit": "b334be5a015ab5b1a03bb604420d695a24021fab768564ff75f4af25f20f359a",
+      "h": "szS-WgFatbGgO7YEQg1pWg",
+      "link_secret": "c9d0d7dee5ecf3fa01080f161d242b32",
+      "mac": "050c9a76712ba768fd810ab2b255bda7efa146c5e27feb65cff9b4ebe393be53",
+      "sas": "909543",
+      "nonce": "1f262d343b424950575e656c",
+      "payload": "3d444b525960676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f16",
+      "wrapped": "1f262d343b424950575e656c7ed3259e37209a45d0f6e3857e1ba4d0a2b4647b92b69cd3db59d208c578f7392f0780668dcfe95cadc220fa136c83f2"
+    },
+    {
+      "prefix": "selfsync-cloud/handoff/v1",
+      "a_secret": "020910171e252c333a41484f565d646b727980878e959ca3aab1b8bfc6cdd4db",
+      "b_secret": "666d747b828990979ea5acb3bac1c8cfd6dde4ebf2f900070e151c232a31383f",
+      "a_public": "04292f85927a8f1f5af272908e0216a273c1d55bf575ec4e11071dfeae1c1316069296c0b17f83a2ca98ee0b8fc8f26609a5b0714bb82e497f054d70075871b970",
+      "b_public": "040991bbd2cd65f42e26a7ecdac8354f8a06d500f07a1c99d95e0879e7d9d614aa21dc2fe3a45766a4015dc6b17a5c16a904d20e2eb32ad7ce1b6cc8a6f6a74932",
+      "commit": "1c720c8806b662534b418c54d73847a6d39b713e54b37d90002f004f5c98cc4d",
+      "h": "HHIMiAa2YlNLQYxU1zhHpg",
+      "link_secret": "cad1d8dfe6edf4fb020910171e252c33",
+      "mac": "1a26b1807ebe95fa92c617719e18f56167bb7ceb7b44e17658e5e3e4a6abd54b",
+      "sas": "348306",
+      "nonce": "20272e353c434a51585f666d",
+      "payload": "3e454c535a61686f767d848b9299a0a7aeb5bcc3cad1d8dfe6edf4fb02091017",
+      "wrapped": "20272e353c434a51585f666d0c4c3f55f02650e9b7d4efc2cf6f48eb0efba27e100de1cb1edfd0b8ff4c01e5ebd27ac33ba4263e4e787459c2452d9d"
+    },
+    {
+      "prefix": "selfsync/join-handoff/v1",
+      "a_secret": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
+      "b_secret": "676e757c838a91989fa6adb4bbc2c9d0d7dee5ecf3fa01080f161d242b323940",
+      "a_public": "042475b1acbe8c58c6e92a51791be1142d8a4727933a3e711d95e83ae95d110afa650b848a41965cde7f00a25837ec61fc78cb9eaad01b8429564ccfa1c1586c98",
+      "b_public": "0492d4a3efa27f290e0af7bcea2765da325b9f105dae7b7e9e509b7c03569ec4a69b7361db436ad6a2618c81b2145ee53848578e99b2cde92d93dc079d9a58827b",
+      "commit": "2165eb481abe0e02cb7c421c53bb0ec03e7a179c64f6b931baeefb463dc4097c",
+      "h": "IWXrSBq-DgLLfEIcU7sOwA",
+      "link_secret": "cbd2d9e0e7eef5fc030a11181f262d34",
+      "mac": "ffbffe5df644243ab5348646d6517af31c139aa78b8e5e73289f27ad1463f652",
+      "sas": "994388",
+      "nonce": "21282f363d444b525960676e",
+      "payload": "3f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7eef5fc030a1118",
+      "wrapped": "21282f363d444b525960676efc5a1104664fae5311c8de173a4ac6d3d8c92236862f9fb0cf7be2066d5a35a894e585c254824ea2ebc67cfa7e998a78"
+    }
+  ]
+}

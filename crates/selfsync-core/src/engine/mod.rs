@@ -10,6 +10,7 @@ mod commands;
 mod crypto_flow;
 mod ctx;
 mod diagnose;
+mod handoff;
 mod pull;
 mod push;
 mod repair;
@@ -23,6 +24,7 @@ pub mod types;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+pub use api::{base64url, base64url_decode};
 use ctx::{Ctx, State, build_excludes};
 pub use ctx::{SyncError, TEMP_SUFFIX};
 use runtime::{Hub, Task, poll_task};
@@ -121,6 +123,7 @@ impl Engine {
                 }
                 cx.set_status(|st| st.state = SyncState::Idle);
             }
+            Event::UseKey { key } => crypto_flow::set_remembered(&cx, &key),
             Event::Tick => {}
             Event::SyncNow => cx.with_mut(|s| {
                 s.need_full_scan = true;

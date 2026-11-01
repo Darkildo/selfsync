@@ -6,6 +6,7 @@ use selfsync_proto::{MINOR_QUOTA, MINOR_READ_ONLY, MINOR_REKEY};
 
 use super::api;
 use super::ctx::{Ctx, SMALL_BLOB, SyncError, SyncResult};
+use super::handoff;
 use super::resolve::unique_copy;
 use super::transfer::{download_to, fetch_small};
 use super::types::*;
@@ -178,6 +179,7 @@ fn writes(cmd: &UiCommand) -> bool {
             | UiCommand::RestoreRevision { .. }
             | UiCommand::RevokeDevice { .. }
             | UiCommand::CreateJoin { .. }
+            | UiCommand::JoinHandoff { .. }
             | UiCommand::SetRetention { .. }
             | UiCommand::CreateRecovery { .. }
             | UiCommand::RemoveRecovery { .. }
@@ -347,20 +349,42 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             api::revoke_device(cx, id).await?;
             Ok(UiResult::Ok)
         }
-        UiCommand::CreateJoin { name, read_only } => {
+        UiCommand::CreateJoin {
+            name,
+            read_only,
+            handoff: want_handoff,
+        } => {
             // Сервер 0.1.x поле `read_only` молча отбросил бы и выдал полный доступ.
             if read_only && server_minor(cx).await? < MINOR_READ_ONLY {
                 return Err(SyncError::ServerOutdated(
                     "сервер не поддерживает устройства только для чтения: обновите его до 0.2.1 или новее".into(),
                 ));
             }
-            let j = api::join_create(cx, name, read_only).await?;
+            let offer = if want_handoff {
+                handoff::offer(cx, server_minor(cx).await?).await?
+            } else {
+                None
+            };
+            let commit = offer.as_ref().map(|(c, _)| c.clone()).unwrap_or_default();
+            let j = api::join_create(cx, name, read_only, commit).await?;
+            let (secret, check) = match offer {
+                Some((commit, h)) => {
+                    let secret = handoff::link_secret(&h);
+                    cx.with_mut(|s| s.handoffs.insert(j.code.clone(), h));
+                    (Some(secret), Some(handoff::link_check(&commit)))
+                }
+                None => (None, None),
+            };
             Ok(UiResult::Join {
                 code: j.code,
                 url: j.url,
                 expires_at: j.expires_at,
+                secret,
+                check,
             })
         }
+        UiCommand::JoinHandoff { code, confirm } => handoff::source_step(cx, code, confirm).await,
+        UiCommand::CancelHandoff { code } => handoff::source_cancel(cx, code).await,
         UiCommand::Redeem { code, name } => {
             let t = api::join_redeem(cx, code, name).await?;
             Ok(UiResult::Token {
@@ -368,7 +392,20 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                 vault: t.vault,
                 device_id: t.device_id,
                 device_name: t.device_name,
+                handoff: (!t.handoff_commit.is_empty()).then_some(t.handoff_commit),
             })
+        }
+        UiCommand::ReceiveKey {
+            commit,
+            link_secret,
+            check,
+        } => handoff::receive_start(cx, commit, link_secret, check).await,
+        UiCommand::ReceivePoll { confirm } => handoff::receive_poll(cx, confirm).await,
+        UiCommand::CancelReceive => {
+            if cx.with_mut(|s| s.receiving.take()).is_some() {
+                let _ = api::handoff_joiner_delete(cx).await;
+            }
+            Ok(UiResult::Ok)
         }
         UiCommand::GetRetention => Ok(UiResult::Retention {
             days: api::get_retention(cx).await?,

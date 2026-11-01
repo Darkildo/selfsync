@@ -163,14 +163,34 @@ export interface DeviceView {
   client?: string;
 }
 
+/** Шаг передачи ключа по коду: `confirm` — цифры готовы, `done` — ключ
+ *  передан/получен. `qr` у источника — ключ нового устройства подтверждён QR
+ *  (сверять цифры не обязательно, согласие нужно); у нового — обязательство
+ *  сверено по `h` (без этого ключ примется только после сверки цифр здесь). */
+export interface HandoffView {
+  type: "handoff";
+  /** У источника: `sent` — обёртку пытались отправить, подтверждение потерялось,
+   *  а обмена уже нет: ключ мог быть отправлен, проверить там; `rejected` —
+   *  ключ нового устройства не совпал с QR, ключ не передан. */
+  step: "waiting" | "confirm" | "done" | "sent" | "rejected";
+  name: string;
+  sas?: string | null;
+  qr?: boolean;
+  /** Сервер сейчас недоступен: шаг прежний, обмен не брошен, опрос — реже. */
+  offline?: boolean;
+  /** У источника: id подключившегося устройства (0 — ещё нет) — для отзыва. */
+  device?: number;
+}
+
 export type UiResult =
   | { type: "ok" }
   | { type: "error"; code: string; message: string; retryAfter?: number }
   | { type: "deleted"; items: DeletedView[] }
   | { type: "history"; revisions: RevisionView[] }
   | { type: "devices"; vault: string; devices: DeviceView[] }
-  | { type: "join"; code: string; url: string; expiresAt: number }
-  | { type: "token"; token: string; vault: string; deviceId: number; deviceName: string }
+  | { type: "join"; code: string; url: string; expiresAt: number; secret?: string | null; check?: string | null }
+  | { type: "token"; token: string; vault: string; deviceId: number; deviceName: string; handoff?: Uint8Array | null }
+  | HandoffView
   | { type: "retention"; days: number }
   | {
       type: "stats";
@@ -207,8 +227,13 @@ export type UiCommand =
   | { type: "purgeHistory"; path: string; beforeRev: number }
   | { type: "devices" }
   | { type: "revokeDevice"; id: number }
-  | { type: "createJoin"; name: string; readOnly?: boolean }
+  | { type: "createJoin"; name: string; readOnly?: boolean; handoff?: boolean }
+  | { type: "joinHandoff"; code: string; confirm?: string | null }
+  | { type: "cancelHandoff"; code: string }
   | { type: "redeem"; code: string; name: string }
+  | { type: "receiveKey"; commit: Uint8Array; linkSecret?: string | null; check?: string | null }
+  | { type: "receivePoll"; confirm?: string | null }
+  | { type: "cancelReceive" }
   | { type: "getRetention" }
   | { type: "setRetention"; days: number }
   | { type: "stats" }
@@ -267,6 +292,7 @@ export type IoAction = Extract<Action, { id: number }>;
 
 export type EngineEvent =
   | { type: "start"; key?: Uint8Array | null }
+  | { type: "useKey"; key: Uint8Array }
   | { type: "tick" }
   | { type: "syncNow" }
   | { type: "changed"; path: string }

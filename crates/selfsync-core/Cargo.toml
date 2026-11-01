@@ -17,6 +17,8 @@ hkdf.workspace = true
 argon2.workspace = true
 aes-gcm-siv.workspace = true
 aes-siv.workspace = true
+p256.workspace = true
+aes-gcm.workspace = true
 getrandom.workspace = true
 subtle.workspace = true
 unicode-normalization.workspace = true
@@ -29,3 +31,4 @@ serde_bytes = "0.11"
 
 [dev-dependencies]
 proptest.workspace = true
+serde_json.workspace = true

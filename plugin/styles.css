@@ -4,6 +4,15 @@
   margin: 0 auto 1em;
 }
 
+/* Цифры для сверки при передаче ключа по коду. */
+.selfsync-sas {
+  font-family: var(--font-monospace);
+  font-size: 2em;
+  letter-spacing: 0.15em;
+  text-align: center;
+  margin: 0.5em 0;
+}
+
 .selfsync-device-revoked .setting-item-name {
   text-decoration: line-through;
   opacity: 0.6;

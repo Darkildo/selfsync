@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.6"
+version = "0.5.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.97"
@@ -35,6 +35,9 @@ hkdf = "0.13"
 argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
 aes-gcm-siv = { version = "0.12", default-features = false, features = ["alloc", "aes"] }
 aes-siv = { version = "0.8", default-features = false, features = ["alloc"] }
+# Передача ключа по коду: ECDH P-256 и AES-256-GCM (как WebCrypto у плагинов).
+p256 = { version = "0.14", default-features = false, features = ["ecdh", "alloc"] }
+aes-gcm = { version = "0.11", default-features = false, features = ["alloc", "aes"] }
 getrandom = "0.4"
 subtle = "2.6"
 unicode-normalization = "0.1"

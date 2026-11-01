@@ -10,6 +10,7 @@ pub mod blob;
 pub mod crypto;
 pub mod engine;
 pub mod exclude;
+pub mod handoff;
 pub mod hash;
 pub mod index;
 pub mod merge;
