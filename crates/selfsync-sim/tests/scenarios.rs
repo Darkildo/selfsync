@@ -2542,353 +2542,421 @@ fn required_encryption_sends_no_plaintext() {
 }
 
 /// Передача ключа по коду (1.4): A показывает код, B подключается и получает ключ
-/// без пароля. `qr` — секрет из QR есть (подтверждение MAC), иначе — сверка цифр.
-fn handoff_world(qr: bool) -> (World, String, String) {
-    use selfsync_core::engine::{HandoffStep, UiCommand, UiResult};
-    let mut w = World::new(quiet(2));
-    let t = base_note(&mut w, 0, "a.md");
-    w.sync(0);
-    w.encrypted_password = Some(PASSWORD.to_owned());
-    w.deliver(
-        0,
-        Event::EnableEncryption {
-            password: PASSWORD.into(),
-            remember: true,
-            recovery: false,
-        },
-    );
-    w.drain(0);
-    w.sync(0);
-    let UiResult::Join { code, secret, .. } = ui_result(
-        &mut w,
-        0,
-        1,
-        UiCommand::CreateJoin {
-            name: "phone".into(),
-            read_only: false,
-            handoff: true,
-        },
-    ) else {
-        panic!("нет кода");
-    };
-    let secret = secret.expect("ключ раскрыт, сервер 1.4 — обмен предложен");
-    // До входа нового устройства источник ждёт.
-    let r = ui_result(
-        &mut w,
-        0,
-        2,
-        UiCommand::JoinHandoff {
-            code: code.clone(),
-            confirm: None,
-        },
-    );
-    assert!(
-        matches!(
-            r,
-            UiResult::Handoff {
-                step: HandoffStep::Waiting,
-                ..
-            }
-        ),
-        "{r:?}"
-    );
-    let UiResult::Token { token, handoff, .. } = ui_result(
-        &mut w,
-        1,
-        3,
-        UiCommand::Redeem {
-            code: code.clone(),
-            name: "my phone".into(),
-        },
-    ) else {
-        panic!("код не погашен");
-    };
-    w.clients[1].token = token;
-    let r = ui_result(
-        &mut w,
-        1,
-        4,
-        UiCommand::ReceiveKey {
-            commit: handoff.expect("обязательство источника"),
-            link_secret: qr.then_some(secret),
-        },
-    );
-    assert!(
-        matches!(
-            r,
-            UiResult::Handoff {
-                step: HandoffStep::Waiting,
-                ..
-            }
-        ),
-        "{r:?}"
-    );
-    (w, code, t)
-}
-
-fn handoff_finish(w: &mut World, note: &str) {
+/// без пароля.
+mod handoff {
+    use super::*;
     use selfsync_core::engine::{HandoffStep, SyncState, UiCommand, UiResult};
-    let r = ui_result(w, 1, 20, UiCommand::ReceivePoll);
-    assert!(
-        matches!(
-            r,
-            UiResult::Handoff {
-                step: HandoffStep::Done,
-                ..
-            }
-        ),
-        "{r:?}"
-    );
-    assert!(w.clients[1].remembered_key.is_some(), "ключ запомнен");
-    assert_eq!(w.clients[1].remembered_key, w.clients[0].remembered_key);
-    w.sync(1);
-    let st = w.clients[1].status.clone().unwrap();
-    assert_ne!(st.state, SyncState::Blocked, "{st:?}");
-    assert!(st.encrypted);
-    let text = String::from_utf8(w.clients[1].fs.read_file("a.md").cloned().unwrap()).unwrap();
-    assert!(text.contains(note));
-}
+    use selfsync_core::handoff::{self as hf, Ephemeral, Labels};
 
-#[test]
-fn handoff_by_qr_needs_no_password() {
-    use selfsync_core::engine::{HandoffStep, UiCommand, UiResult};
-    let (mut w, code, note) = handoff_world(true);
-    // MAC из QR сошёлся: цифры сверять не нужно, но согласие — нужно.
-    let UiResult::Handoff {
-        step: HandoffStep::Confirm,
-        name,
-        sas: Some(sas),
-        qr: true,
-    } = ui_result(
-        &mut w,
-        0,
-        10,
-        UiCommand::JoinHandoff {
-            code: code.clone(),
-            confirm: None,
-        },
-    )
-    else {
-        panic!("источник должен спросить согласие");
-    };
-    assert_eq!(name, "my phone");
-    let r = ui_result(
-        &mut w,
-        0,
-        12,
-        UiCommand::JoinHandoff {
-            code: code.clone(),
-            confirm: Some(sas),
-        },
-    );
-    assert!(
-        matches!(
-            &r,
-            UiResult::Handoff {
-                step: HandoffStep::Done,
-                ..
-            }
-        ),
-        "{r:?}"
-    );
-    handoff_finish(&mut w, &note);
-    // Обмен закончен и забыт на обеих сторонах.
-    let r = ui_result(
-        &mut w,
-        0,
-        11,
-        UiCommand::JoinHandoff {
+    /// Как B вошёл: по QR (`m=` и `h=`) или кодом руками.
+    #[derive(Clone, Copy, PartialEq)]
+    pub enum By {
+        Qr,
+        Typed,
+    }
+
+    pub struct Pair {
+        pub w: World,
+        pub code: String,
+        pub note: String,
+        pub secret: String,
+        pub check: String,
+        pub commit: Vec<u8>,
+    }
+
+    /// A: зашифрованный vault и код с обменом; B: код погашен, токен B — новый.
+    pub fn pair() -> Pair {
+        let mut w = World::new(quiet(2));
+        let note = base_note(&mut w, 0, "a.md");
+        w.sync(0);
+        w.encrypted_password = Some(PASSWORD.to_owned());
+        w.deliver(
+            0,
+            Event::EnableEncryption {
+                password: PASSWORD.into(),
+                remember: true,
+                recovery: false,
+            },
+        );
+        w.drain(0);
+        w.sync(0);
+        let UiResult::Join {
             code,
-            confirm: None,
-        },
-    );
-    assert!(
-        matches!(&r, UiResult::Error { code, .. } if code == "no_handoff"),
-        "{r:?}"
-    );
-    let r = ui_result(&mut w, 1, 21, UiCommand::ReceivePoll);
-    assert!(
-        matches!(&r, UiResult::Error { code, .. } if code == "no_handoff"),
-        "{r:?}"
-    );
-}
+            secret,
+            check,
+            ..
+        } = ui_result(
+            &mut w,
+            0,
+            1,
+            UiCommand::CreateJoin {
+                name: "phone".into(),
+                read_only: false,
+                handoff: true,
+            },
+        )
+        else {
+            panic!("нет кода");
+        };
+        // До входа нового устройства источник ждёт.
+        let r = source(&mut w, &code, None, 2);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Waiting,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        Pair {
+            w,
+            code,
+            note,
+            secret: secret.expect("ключ раскрыт, сервер 1.4 — обмен предложен"),
+            check: check.expect("h для QR"),
+            commit: Vec::new(),
+        }
+    }
 
-#[test]
-fn handoff_by_typed_code_needs_matching_digits() {
-    use selfsync_core::engine::{HandoffStep, UiCommand, UiResult};
-    let (mut w, code, note) = handoff_world(false);
-    let UiResult::Handoff {
-        step: HandoffStep::Confirm,
-        sas: Some(sas),
-        ..
-    } = ui_result(
-        &mut w,
-        0,
-        10,
-        UiCommand::JoinHandoff {
-            code: code.clone(),
-            confirm: None,
-        },
-    )
-    else {
-        panic!("источник должен попросить сверить цифры");
-    };
-    assert_eq!(sas.len(), 6);
-    let r = ui_result(&mut w, 1, 11, UiCommand::ReceivePoll);
-    assert!(
-        matches!(&r, UiResult::Handoff { step: HandoffStep::Confirm, sas: Some(s), .. } if *s == sas),
-        "те же цифры на новом устройстве: {r:?}"
-    );
-    // Не те цифры — ключ не уходит.
-    let r = ui_result(
-        &mut w,
-        0,
-        12,
-        UiCommand::JoinHandoff {
-            code: code.clone(),
-            confirm: Some("000000".into()),
-        },
-    );
-    assert!(
-        matches!(
-            r,
+    pub fn redeem(p: &mut Pair) {
+        let UiResult::Token { token, handoff, .. } = ui_result(
+            &mut p.w,
+            1,
+            3,
+            UiCommand::Redeem {
+                code: p.code.clone(),
+                name: "my phone".into(),
+            },
+        ) else {
+            panic!("код не погашен");
+        };
+        p.w.clients[1].token = token;
+        p.commit = handoff.expect("обязательство источника");
+    }
+
+    pub fn start(p: &mut Pair, by: By) -> UiResult {
+        let qr = by == By::Qr;
+        ui_result(
+            &mut p.w,
+            1,
+            4,
+            UiCommand::ReceiveKey {
+                commit: p.commit.clone(),
+                link_secret: qr.then(|| p.secret.clone()),
+                check: qr.then(|| p.check.clone()),
+            },
+        )
+    }
+
+    pub fn source(w: &mut World, code: &str, confirm: Option<String>, req: u64) -> UiResult {
+        ui_result(
+            w,
+            0,
+            req,
+            UiCommand::JoinHandoff {
+                code: code.to_owned(),
+                confirm,
+            },
+        )
+    }
+
+    pub fn poll(w: &mut World, confirm: Option<String>, req: u64) -> UiResult {
+        ui_result(w, 1, req, UiCommand::ReceivePoll { confirm })
+    }
+
+    pub fn sas_of(r: &UiResult) -> String {
+        match r {
             UiResult::Handoff {
                 step: HandoffStep::Confirm,
+                sas: Some(s),
                 ..
-            }
-        ),
-        "{r:?}"
-    );
-    let r = ui_result(
-        &mut w,
-        0,
-        13,
-        UiCommand::JoinHandoff {
-            code,
-            confirm: Some(sas),
-        },
-    );
-    assert!(
-        matches!(
-            r,
-            UiResult::Handoff {
-                step: HandoffStep::Done,
-                ..
-            }
-        ),
-        "{r:?}"
-    );
-    handoff_finish(&mut w, &note);
-}
+            } => s.clone(),
+            other => panic!("ждали цифры: {other:?}"),
+        }
+    }
 
-#[test]
-fn handoff_aborts_on_wrong_qr_secret() {
-    use selfsync_core::engine::{UiCommand, UiResult};
-    let mut w = World::new(quiet(2));
-    base_note(&mut w, 0, "a.md");
-    w.sync(0);
-    w.encrypted_password = Some(PASSWORD.to_owned());
-    w.deliver(
-        0,
-        Event::EnableEncryption {
-            password: PASSWORD.into(),
-            remember: true,
-            recovery: false,
-        },
-    );
-    w.drain(0);
-    let UiResult::Join { code, .. } = ui_result(
-        &mut w,
-        0,
-        1,
-        UiCommand::CreateJoin {
-            name: "x".into(),
-            read_only: false,
-            handoff: true,
-        },
-    ) else {
-        panic!();
-    };
-    let UiResult::Token { token, handoff, .. } = ui_result(
-        &mut w,
-        1,
-        2,
-        UiCommand::Redeem {
-            code: code.clone(),
-            name: String::new(),
-        },
-    ) else {
-        panic!();
-    };
-    w.clients[1].token = token;
-    // Чужой секрет: MAC не сходится — как если бы сервер подменил ключ.
-    ui_result(
-        &mut w,
-        1,
-        3,
-        UiCommand::ReceiveKey {
-            commit: handoff.unwrap(),
-            link_secret: Some("AAAAAAAAAAAAAAAAAAAAAA".into()),
-        },
-    );
-    let r = ui_result(
-        &mut w,
-        0,
-        4,
-        UiCommand::JoinHandoff {
-            code: code.clone(),
-            confirm: None,
-        },
-    );
-    assert!(
-        matches!(&r, UiResult::Error { code, .. } if code == "handoff_mac_mismatch"),
-        "{r:?}"
-    );
-    let r = ui_result(
-        &mut w,
-        0,
-        5,
-        UiCommand::JoinHandoff {
-            code,
-            confirm: None,
-        },
-    );
-    assert!(
-        matches!(&r, UiResult::Error { code, .. } if code == "no_handoff"),
-        "{r:?}"
-    );
-    assert!(w.clients[1].remembered_key.is_none());
-}
+    pub fn finish(w: &mut World, note: &str) {
+        assert!(w.clients[1].remembered_key.is_some(), "ключ запомнен");
+        assert_eq!(w.clients[1].remembered_key, w.clients[0].remembered_key);
+        // Обмен закрыт: обёртки на сервере не осталось.
+        let left: i64 = {
+            let pool = w.state.server_pool().unwrap();
+            let c = pool.get().unwrap();
+            c.query_row(
+                "SELECT COUNT(*) FROM join_codes WHERE wrapped IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(left, 0);
+        w.sync(1);
+        let st = w.clients[1].status.clone().unwrap();
+        assert_ne!(st.state, SyncState::Blocked, "{st:?}");
+        assert!(st.encrypted);
+        let text = String::from_utf8(w.clients[1].fs.read_file("a.md").cloned().unwrap()).unwrap();
+        assert!(text.contains(note));
+    }
 
-#[test]
-fn handoff_not_offered_without_key() {
-    use selfsync_core::engine::{UiCommand, UiResult};
-    let mut w = World::new(quiet(2));
-    base_note(&mut w, 0, "a.md");
-    w.sync(0);
-    let UiResult::Join { code, secret, .. } = ui_result(
-        &mut w,
-        0,
-        1,
-        UiCommand::CreateJoin {
-            name: "x".into(),
-            read_only: false,
-            handoff: true,
-        },
-    ) else {
-        panic!();
-    };
-    assert_eq!(secret, None, "vault не зашифрован — передавать нечего");
-    let UiResult::Token { handoff, .. } = ui_result(
-        &mut w,
-        1,
-        2,
-        UiCommand::Redeem {
+    pub fn sql(w: &World, q: &str, p: impl rusqlite::Params) {
+        let pool = w.state.server_pool().unwrap();
+        let c = pool.get().unwrap();
+        c.execute(q, p).unwrap();
+    }
+
+    pub fn joiner_pk(w: &World) -> Vec<u8> {
+        let pool = w.state.server_pool().unwrap();
+        let c = pool.get().unwrap();
+        c.query_row(
+            "SELECT joiner_pk FROM join_codes WHERE joiner_pk IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn by_qr_needs_no_password() {
+        let mut p = pair();
+        redeem(&mut p);
+        start(&mut p, By::Qr);
+        // MAC из QR сошёлся: цифры сверять не нужно, но согласие — нужно.
+        let UiResult::Handoff {
+            step: HandoffStep::Confirm,
+            name,
+            sas: Some(sas),
+            qr: true,
+        } = source(&mut p.w, &p.code, None, 10)
+        else {
+            panic!("источник должен спросить согласие");
+        };
+        assert_eq!(name, "my phone");
+        // Новое устройство цифры показывает всегда (сверить, если их показал и источник).
+        assert_eq!(sas_of(&poll(&mut p.w, None, 11)), sas);
+        let r = source(&mut p.w, &p.code, Some(sas), 12);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Done,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        // По h ключ источника подлинный: сверка на новом устройстве не нужна.
+        let r = poll(&mut p.w, None, 13);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Done,
+                    qr: true,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        let note = p.note.clone();
+        finish(&mut p.w, &note);
+        let r = source(&mut p.w, &p.code, None, 14);
+        assert!(
+            matches!(&r, UiResult::Error { code, .. } if code == "no_handoff"),
+            "{r:?}"
+        );
+        let r = poll(&mut p.w, None, 15);
+        assert!(
+            matches!(&r, UiResult::Error { code, .. } if code == "no_handoff"),
+            "{r:?}"
+        );
+    }
+
+    #[test]
+    fn typed_code_needs_digits_on_both_devices() {
+        let mut p = pair();
+        redeem(&mut p);
+        start(&mut p, By::Typed);
+        let r = source(&mut p.w, &p.code, None, 10);
+        assert!(matches!(r, UiResult::Handoff { qr: false, .. }), "{r:?}");
+        let sas = sas_of(&r);
+        let r = poll(&mut p.w, None, 11);
+        assert_eq!(sas_of(&r), sas, "те же цифры на новом устройстве");
+        assert!(matches!(r, UiResult::Handoff { qr: false, .. }));
+        // Не те цифры — ключ не уходит.
+        let r = source(&mut p.w, &p.code, Some("000000".into()), 12);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Confirm,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        let r = source(&mut p.w, &p.code, Some(sas.clone()), 13);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Done,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        // Обёртка пришла, но без сверки здесь ключ не принимается.
+        assert_eq!(sas_of(&poll(&mut p.w, None, 14)), sas);
+        assert_eq!(sas_of(&poll(&mut p.w, Some("000000".into()), 15)), sas);
+        assert!(p.w.clients[1].remembered_key.is_none());
+        let r = poll(&mut p.w, Some(sas), 16);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Done,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        let note = p.note.clone();
+        finish(&mut p.w, &note);
+    }
+
+    /// Сервер выдаёт новому устройству своё обязательство (commit' = sha256(A')):
+    /// по QR его ловит h, а без QR ключ сервера не примется без сверки цифр.
+    #[test]
+    fn forged_source_key_is_refused() {
+        let mallory = Ephemeral::generate().unwrap();
+        let forged = hf::commit(mallory.public());
+        // По QR: обязательство не сходится с h — отказ сразу, ключ B на сервер не ушёл.
+        let mut p = pair();
+        sql(
+            &p.w,
+            "UPDATE join_codes SET offer_commit = ?1",
+            [forged.to_vec()],
+        );
+        redeem(&mut p);
+        assert_eq!(p.commit, forged);
+        let r = start(&mut p, By::Qr);
+        assert!(
+            matches!(&r, UiResult::Error { code, .. } if code == "handoff_commit_mismatch"),
+            "{r:?}"
+        );
+        let n: i64 = {
+            let pool = p.w.state.server_pool().unwrap();
+            let c = pool.get().unwrap();
+            c.query_row(
+                "SELECT COUNT(*) FROM join_codes WHERE joiner_pk IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(n, 0);
+
+        // Кодом руками: сервер отдаёт A' и обёртку своего ключа под B.
+        let mut p = pair();
+        sql(
+            &p.w,
+            "UPDATE join_codes SET offer_commit = ?1",
+            [forged.to_vec()],
+        );
+        redeem(&mut p);
+        start(&mut p, By::Typed);
+        let b = joiner_pk(&p.w);
+        let fake = hf::wrap(&Labels::selfsync(), &mallory, &b, &[0x42; 32]).unwrap();
+        sql(
+            &p.w,
+            "UPDATE join_codes SET owner_pk = ?1, wrapped = ?2",
+            (mallory.public().to_vec(), fake),
+        );
+        let r = poll(&mut p.w, None, 10);
+        // Цифры — от ключа сервера: на источнике их нет (или другие); без «совпадают»
+        // ключ не открывается и не запоминается.
+        let _ = sas_of(&r);
+        assert_eq!(sas_of(&poll(&mut p.w, None, 11)), sas_of(&r));
+        assert!(p.w.clients[1].remembered_key.is_none());
+    }
+
+    /// Сервер убирает MAC: источник уходит в сверку цифр, новое устройство их тоже
+    /// показывает — подмену видно.
+    #[test]
+    fn stripped_mac_shows_digits_on_both() {
+        let mut p = pair();
+        redeem(&mut p);
+        start(&mut p, By::Qr);
+        sql(&p.w, "UPDATE join_codes SET joiner_mac = NULL", ());
+        let r = source(&mut p.w, &p.code, None, 10);
+        assert!(matches!(r, UiResult::Handoff { qr: false, .. }), "{r:?}");
+        let src = sas_of(&r);
+        let r = poll(&mut p.w, None, 11);
+        assert!(matches!(r, UiResult::Handoff { qr: true, .. }), "{r:?}");
+        assert_eq!(sas_of(&r), src);
+    }
+
+    #[test]
+    fn aborts_on_wrong_qr_secret() {
+        let mut p = pair();
+        redeem(&mut p);
+        // Чужой секрет: MAC не сходится — как если бы сервер подменил ключ B.
+        p.secret = "AAAAAAAAAAAAAAAAAAAAAA".into();
+        start(&mut p, By::Qr);
+        let r = source(&mut p.w, &p.code, None, 10);
+        assert!(
+            matches!(&r, UiResult::Error { code, .. } if code == "handoff_mac_mismatch"),
+            "{r:?}"
+        );
+        let r = source(&mut p.w, &p.code, None, 11);
+        assert!(
+            matches!(&r, UiResult::Error { code, .. } if code == "no_handoff"),
+            "{r:?}"
+        );
+        assert!(p.w.clients[1].remembered_key.is_none());
+    }
+
+    #[test]
+    fn not_offered_without_key() {
+        let mut w = World::new(quiet(2));
+        base_note(&mut w, 0, "a.md");
+        w.sync(0);
+        let UiResult::Join {
             code,
-            name: String::new(),
-        },
-    ) else {
-        panic!();
-    };
-    assert_eq!(handoff, None);
+            secret,
+            check,
+            ..
+        } = ui_result(
+            &mut w,
+            0,
+            1,
+            UiCommand::CreateJoin {
+                name: "x".into(),
+                read_only: false,
+                handoff: true,
+            },
+        )
+        else {
+            panic!();
+        };
+        assert_eq!(
+            (secret, check),
+            (None, None),
+            "vault не зашифрован — передавать нечего"
+        );
+        let UiResult::Token { handoff, .. } = ui_result(
+            &mut w,
+            1,
+            2,
+            UiCommand::Redeem {
+                code,
+                name: String::new(),
+            },
+        ) else {
+            panic!();
+        };
+        assert_eq!(handoff, None);
+    }
 }

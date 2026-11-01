@@ -231,6 +231,18 @@ pub fn handoff_commit(public: &[u8]) -> Vec<u8> {
     selfsync_core::handoff::commit(public).to_vec()
 }
 
+/// `h` для QR: первые 16 байт обязательства.
+#[wasm_bindgen(js_name = handoffCheck)]
+pub fn handoff_check(commit: &[u8]) -> Vec<u8> {
+    selfsync_core::handoff::commit_check(commit).to_vec()
+}
+
+/// Обязательство от сервера совпадает с `h` из QR (за постоянное время).
+#[wasm_bindgen(js_name = handoffCheckMatches)]
+pub fn handoff_check_matches(check: &[u8], commit: &[u8]) -> bool {
+    selfsync_core::handoff::check_commit_check(check, commit)
+}
+
 /// `HMAC-SHA256(секрет из QR, B)`.
 #[wasm_bindgen(js_name = handoffMac)]
 pub fn handoff_mac(link_secret: &[u8], public: &[u8]) -> Vec<u8> {

@@ -1095,7 +1095,7 @@ async fn diagnose_finds_typical_problems() {
 
 /// Сценарий вместо терминала: ответы на вопросы по очереди, всё сказанное — в
 /// журнал. `wait` — перед ответом дождаться сигнала (цифры показаны на другой
-/// стороне), `signal` — послать его, когда сказаны цифры.
+/// стороне), `signal` — послать его, когда показаны цифры.
 struct Script {
     answers: Vec<bool>,
     said: Vec<String>,
@@ -1112,28 +1112,33 @@ impl Script {
             signal: None,
         }
     }
-}
 
-impl selfsync_cli::handoff::Prompt for Script {
-    fn say(&mut self, text: &str) {
-        if text.contains("сверьте цифры")
+    fn note(&mut self, text: &str) {
+        if text.contains("цифры")
             && let Some(s) = &self.signal
         {
             let _ = s.send(());
         }
         self.said.push(text.to_owned());
     }
+}
 
-    fn ask(&mut self, question: &str) -> bool {
-        self.said.push(question.to_owned());
+impl selfsync_cli::handoff::Prompt for Script {
+    fn say(&mut self, text: &str) {
+        self.note(text);
+    }
+
+    async fn ask(&mut self, question: &str) -> selfsync_cli::handoff::Answer {
+        use selfsync_cli::handoff::Answer;
+        self.note(question);
         if let Some(w) = &self.wait {
             w.recv_timeout(Duration::from_secs(5))
                 .expect("цифры на новом устройстве");
         }
-        if self.answers.is_empty() {
-            false
+        if !self.answers.is_empty() && self.answers.remove(0) {
+            Answer::Yes
         } else {
-            self.answers.remove(0)
+            Answer::No
         }
     }
 }
@@ -1148,17 +1153,18 @@ fn now_ms() -> i64 {
 struct Handoff {
     fresh: tempfile::TempDir,
     cfg: Config,
-    given: bool,
-    got: bool,
+    given: selfsync_cli::handoff::Exchange,
+    got: selfsync_cli::handoff::Exchange,
     src: Script,
     dst: Script,
 }
 
 /// Зашифрованный vault на папке A (ключ запомнен) и новое устройство по коду A
 /// с передачей ключа. Источник — в своём потоке (ядро не `Send`, а вопрос
-/// «передать?» ждёт, пока новое устройство покажет цифры). `qr` — секрет из QR
-/// у нового устройства, `give` — ответ источника.
-async fn handoff_pair(srv: &Server, vault: &str, qr: bool, give: bool) -> Handoff {
+/// «передать?» ждёт, пока новое устройство покажет цифры). `qr` — у нового
+/// устройства ссылка из QR (`m=`, `h=`), `give` и `agree` — ответы источника и
+/// нового устройства.
+async fn handoff_pair(srv: &Server, vault: &str, qr: bool, give: bool, agree: bool) -> Handoff {
     use selfsync_cli::handoff::{give_key, receive_key};
     use selfsync_cli::runner::Session;
     const PW: &str = "correct horse battery staple";
@@ -1195,6 +1201,7 @@ async fn handoff_pair(srv: &Server, vault: &str, qr: bool, give: bool) -> Handof
                 code,
                 expires_at,
                 secret,
+                check,
                 ..
             } = r
             else {
@@ -1204,19 +1211,18 @@ async fn handoff_pair(srv: &Server, vault: &str, qr: bool, give: bool) -> Handof
                 .send((
                     code.clone(),
                     secret.expect("ключ запомнен — обмен предложен"),
+                    check.expect("h"),
                 ))
                 .unwrap();
             let mut ui = Script::new(vec![give]);
-            if !qr {
-                ui.wait = Some(sig_rx);
-            }
+            ui.wait = Some(sig_rx);
             let given = give_key(&mut src, &code, expires_at, tick, &mut ui)
                 .await
                 .unwrap();
             (given, ui)
         })
     });
-    let (code, secret) = code_rx.recv().unwrap();
+    let (code, secret, check) = code_rx.recv().unwrap();
     let fresh = tempfile::tempdir().unwrap();
     let UiResult::Token { token, handoff, .. } = runner::command(
         fresh.path(),
@@ -1241,12 +1247,13 @@ async fn handoff_pair(srv: &Server, vault: &str, qr: bool, give: bool) -> Handof
     };
     cfg.save(fresh.path()).unwrap();
     let mut dst = Session::new(fresh.path(), &srv.url, Some(token), "laptop").unwrap();
-    let mut ui_dst = Script::new(vec![]);
+    let mut ui_dst = Script::new(vec![agree]);
     ui_dst.signal = Some(sig_tx);
     let got = receive_key(
         &mut dst,
         handoff.expect("обязательство источника"),
         qr.then_some(secret),
+        qr.then_some(check),
         now_ms() + 3_000,
         tick,
         &mut ui_dst,
@@ -1277,15 +1284,24 @@ fn digits(said: &[String]) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn join_hands_key_by_qr() {
+    use selfsync_cli::handoff::Exchange;
     let srv = server().await;
-    let h = handoff_pair(&srv, "hq", true, true).await;
-    assert!(h.given && h.got, "{:?} {:?}", h.src.said, h.dst.said);
+    let h = handoff_pair(&srv, "hq", true, true, true).await;
+    assert_eq!(
+        (h.given, h.got),
+        (Exchange::Done, Exchange::Done),
+        "{:?} {:?}",
+        h.src.said,
+        h.dst.said
+    );
     assert!(
         h.src
             .said
             .iter()
             .any(|s| s.contains("подключилось по QR-коду"))
     );
+    // Цифры новое устройство показывает и при QR.
+    assert!(h.dst.said.iter().any(|s| s.contains("цифры обмена")));
     assert!(h.fresh.path().join(".selfsync/key").exists());
     // Пароль не нужен: ключ уже на устройстве.
     assert_eq!(sync(h.fresh.path(), &h.cfg).await, Outcome::Synced);
@@ -1297,19 +1313,39 @@ async fn join_hands_key_by_qr() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn join_hands_key_by_typed_code_after_digits() {
+    use selfsync_cli::handoff::Exchange;
     let srv = server().await;
-    let h = handoff_pair(&srv, "hc", false, true).await;
-    assert!(h.given && h.got, "{:?} {:?}", h.src.said, h.dst.said);
+    let h = handoff_pair(&srv, "hc", false, true, true).await;
+    assert_eq!(
+        (h.given, h.got),
+        (Exchange::Done, Exchange::Done),
+        "{:?} {:?}",
+        h.src.said,
+        h.dst.said
+    );
     // Обе стороны показали одни и те же цифры.
     assert_eq!(digits(&h.src.said), digits(&h.dst.said));
     assert_eq!(sync(h.fresh.path(), &h.cfg).await, Outcome::Synced);
 }
 
+/// Кодом руками: новое устройство не подтвердило цифры — ключ не принят, даже
+/// если источник его отдал.
+#[tokio::test(flavor = "multi_thread")]
+async fn join_typed_code_needs_confirm_on_new_device() {
+    use selfsync_cli::handoff::Exchange;
+    let srv = server().await;
+    let h = handoff_pair(&srv, "hd", false, true, false).await;
+    assert_eq!(h.got, Exchange::Refused, "{:?}", h.dst.said);
+    assert!(!h.fresh.path().join(".selfsync/key").exists());
+    assert_eq!(sync(h.fresh.path(), &h.cfg).await, Outcome::NeedPassword);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn join_declined_leaves_password() {
+    use selfsync_cli::handoff::Exchange;
     let srv = server().await;
-    let h = handoff_pair(&srv, "hn", true, false).await;
-    assert!(!h.given && !h.got);
+    let h = handoff_pair(&srv, "hn", true, false, true).await;
+    assert_eq!((h.given, h.got), (Exchange::Refused, Exchange::Refused));
     assert!(!h.fresh.path().join(".selfsync/key").exists());
     assert_eq!(sync(h.fresh.path(), &h.cfg).await, Outcome::NeedPassword);
 }

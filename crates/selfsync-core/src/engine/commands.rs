@@ -367,16 +367,20 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             };
             let commit = offer.as_ref().map(|(c, _)| c.clone()).unwrap_or_default();
             let j = api::join_create(cx, name, read_only, commit).await?;
-            let secret = offer.map(|(_, h)| {
-                let secret = handoff::link_secret(&h);
-                cx.with_mut(|s| s.handoffs.insert(j.code.clone(), h));
-                secret
-            });
+            let (secret, check) = match offer {
+                Some((commit, h)) => {
+                    let secret = handoff::link_secret(&h);
+                    cx.with_mut(|s| s.handoffs.insert(j.code.clone(), h));
+                    (Some(secret), Some(handoff::link_check(&commit)))
+                }
+                None => (None, None),
+            };
             Ok(UiResult::Join {
                 code: j.code,
                 url: j.url,
                 expires_at: j.expires_at,
                 secret,
+                check,
             })
         }
         UiCommand::JoinHandoff { code, confirm } => handoff::source_step(cx, code, confirm).await,
@@ -397,8 +401,15 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
         UiCommand::ReceiveKey {
             commit,
             link_secret,
-        } => handoff::receive_start(cx, commit, link_secret).await,
-        UiCommand::ReceivePoll => handoff::receive_poll(cx).await,
+            check,
+        } => handoff::receive_start(cx, commit, link_secret, check).await,
+        UiCommand::ReceivePoll { confirm } => handoff::receive_poll(cx, confirm).await,
+        UiCommand::CancelReceive => {
+            if cx.with_mut(|s| s.receiving.take()).is_some() {
+                let _ = api::handoff_joiner_delete(cx).await;
+            }
+            Ok(UiResult::Ok)
+        }
         UiCommand::GetRetention => Ok(UiResult::Retention {
             days: api::get_retention(cx).await?,
         }),

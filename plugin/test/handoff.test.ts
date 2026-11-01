@@ -11,6 +11,7 @@ import type { UiResult } from "../src/types.ts";
 
 interface Vector {
   prefix: string;
+  h: string;
   a_secret: string;
   b_secret: string;
   a_public: string;
@@ -43,7 +44,9 @@ test("тест-векторы ядра сходятся с WebCrypto", async () 
   for (const v of vectors) {
     const A = hex(v.a_public);
     const B = hex(v.b_public);
-    assert.equal(toHex(await subtle.digest("SHA-256", A)), v.commit);
+    const commit = new Uint8Array(await subtle.digest("SHA-256", A));
+    assert.equal(toHex(commit), v.commit);
+    assert.equal(b64u(commit.slice(0, 16)), v.h);
     const macKey = await subtle.importKey("raw", hex(v.link_secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     assert.equal(toHex(await subtle.sign("HMAC", macKey, B)), v.mac);
     const sasHash = new Uint8Array(await subtle.digest("SHA-256", cat(new TextEncoder().encode(`${v.prefix} sas`), A, B)));
@@ -71,12 +74,13 @@ test("тест-векторы ядра сходятся с WebCrypto", async () 
 });
 
 test("ссылка для QR ведёт в Obsidian и несёт секрет", () => {
-  const link = connectLink("https://sync.example.com:8443/base", "abcd1234efgh5678", "c2VjcmV0LXNlY3JldA");
+  const link = connectLink("https://sync.example.com:8443/base", "abcd1234efgh5678", "c2VjcmV0LXNlY3JldA", "szS-WgFatbGgO7YEQg1pWg");
   assert.ok(link.startsWith("obsidian://selfsync-connect?"));
   const q = new URLSearchParams(link.slice(link.indexOf("?") + 1));
   assert.equal(q.get("server"), "https://sync.example.com:8443/base");
   assert.equal(q.get("code"), "abcd1234efgh5678");
   assert.equal(q.get("m"), "c2VjcmV0LXNlY3JldA");
+  assert.equal(q.get("h"), "szS-WgFatbGgO7YEQg1pWg");
 });
 
 test("цифры группами по три", () => {

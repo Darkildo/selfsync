@@ -1,12 +1,16 @@
 //! Передача ключа по коду подключения (протокол 1.4): мастер-ключ vault'а уходит
 //! новому устройству обменом ECDH P-256 мимо сервера. Сервер хранит только открытые
-//! ключи и обёртку, прочитать ключ не может, а подменить открытые ключи незаметно —
-//! только с вероятностью 10⁻⁶ на попытку (сверка цифр) или никак (MAC из QR).
+//! ключи и обёртку и прочитать ключ не может. Подменить открытые ключи незаметно он
+//! не может при входе по QR (`h` сверяет обязательство источника, MAC из `m` —
+//! ключ нового устройства) и может только с вероятностью 10⁻⁶ на попытку при коде,
+//! введённом руками, — если пользователь сверил цифры на обоих устройствах.
 //!
 //! Роли: **источник** (устройство с ключом, пара `a/A`) и **новое устройство**
 //! (пара `b/B`). Порядок шагов — в `spec/protocol.md`; здесь только примитивы:
 //!
 //! - `commit = sha256(A)` — источник обязуется своим ключом до того, как увидит `B`;
+//! - `h` — первые 16 байт `commit` в QR: новое устройство сверяет обязательство,
+//!   полученное от сервера;
 //! - `mac = HMAC-SHA256(m, B)` — `m` (16 байт) есть только в QR, сервер его не видит;
 //! - цифры: `sha256(<метка> sas ‖ A ‖ B)`, первые 4 байта big-endian по модулю 10⁶;
 //! - `k = HKDF-SHA256(ECDH(a, B), salt = A ‖ B, info = <метка> key)`;
@@ -132,6 +136,24 @@ pub fn check_commit(public: &[u8], commitment: &[u8]) -> bool {
     bool::from(commit(public).as_slice().ct_eq(commitment))
 }
 
+/// Длина `h` — префикса обязательства в QR.
+pub const COMMIT_CHECK_LEN: usize = 16;
+
+/// `h` для QR: первые 16 байт обязательства.
+pub fn commit_check(commitment: &[u8]) -> [u8; COMMIT_CHECK_LEN] {
+    let mut out = [0u8; COMMIT_CHECK_LEN];
+    let n = commitment.len().min(COMMIT_CHECK_LEN);
+    out[..n].copy_from_slice(&commitment[..n]);
+    out
+}
+
+/// Обязательство от сервера совпадает с `h` из QR (за постоянное время).
+pub fn check_commit_check(check: &[u8], commitment: &[u8]) -> bool {
+    commitment.len() == 32
+        && check.len() == COMMIT_CHECK_LEN
+        && bool::from(commitment[..COMMIT_CHECK_LEN].ct_eq(check))
+}
+
 /// MAC открытого ключа нового устройства секретом из QR.
 pub fn link_mac(link_secret: &[u8], public: &[u8]) -> [u8; 32] {
     let mut m =
@@ -237,6 +259,10 @@ mod tests {
         b.iter().map(|x| format!("{x:02x}")).collect()
     }
 
+    fn base64url(b: &[u8]) -> String {
+        crate::engine::base64url(b)
+    }
+
     fn arr<const N: usize>(v: &serde_json::Value) -> [u8; N] {
         hex(v.as_str().unwrap()).try_into().unwrap()
     }
@@ -256,6 +282,10 @@ mod tests {
             assert_eq!(to_hex(a.public()), c["a_public"].as_str().unwrap());
             assert_eq!(to_hex(b.public()), c["b_public"].as_str().unwrap());
             assert_eq!(to_hex(&commit(a.public())), c["commit"].as_str().unwrap());
+            let h = commit_check(&commit(a.public()));
+            assert_eq!(base64url(&h), c["h"].as_str().unwrap());
+            assert!(check_commit_check(&h, &commit(a.public())));
+            assert!(!check_commit_check(&h, &commit(b.public())));
             let m = hex(c["link_secret"].as_str().unwrap());
             assert_eq!(
                 to_hex(&link_mac(&m, b.public())),

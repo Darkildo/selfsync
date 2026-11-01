@@ -259,6 +259,22 @@ pub async fn handoff_joiner_put(
     }
 }
 
+/// Новое устройство закрывает обмен: ключ получен или обмен прерван.
+pub async fn handoff_joiner_delete(
+    State(st): State<AppState>,
+    Extension(a): Extension<AuthCtx>,
+) -> ApiResult<StatusCode> {
+    let device = a.device_id;
+    let ok = st
+        .server_db(move |c| Ok(server::joiner_handoff_delete(c, device)?))
+        .await?;
+    if ok {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::not_found("no_handoff"))
+    }
+}
+
 /// Шаг нового устройства: опрос ключа источника и обёртки.
 pub async fn handoff_joiner_get(
     State(st): State<AppState>,

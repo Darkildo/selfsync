@@ -742,15 +742,26 @@ pub enum UiCommand {
         name: String,
     },
     /// Новое устройство (движком с токеном из `Token`): начать получение ключа.
-    /// `commit` — `Token.handoff`, `link_secret` — `m=` из ссылки QR.
+    /// `commit` — `Token.handoff`, `link_secret` и `check` — `m=` и `h=` из ссылки
+    /// QR (`h` сверяет обязательство, полученное от сервера).
     ReceiveKey {
         #[serde(with = "serde_bytes")]
         commit: Vec<u8>,
         #[serde(default)]
         link_secret: Option<String>,
+        #[serde(default)]
+        check: Option<String>,
     },
     /// Опрос получения ключа; `done` — ключ раскрыт и запомнен (`RememberKey`).
-    ReceivePoll,
+    /// `confirm` — цифры, которые пользователь сверил на этом устройстве: без `h`
+    /// ключ принимается только после этого.
+    ReceivePoll {
+        #[serde(default)]
+        confirm: Option<String>,
+    },
+    /// Новое устройство прерывает получение ключа (цифры не совпали, ждать не
+    /// стали): обмен забыт и закрыт на сервере.
+    CancelReceive,
     GetRetention,
     SetRetention {
         days: u32,
@@ -910,6 +921,9 @@ pub enum UiResult {
         /// Секрет для ссылки в QR (`m=`), если ключ будет передан по коду.
         #[serde(default)]
         secret: Option<String>,
+        /// Префикс обязательства для ссылки в QR (`h=`).
+        #[serde(default)]
+        check: Option<String>,
     },
     Token {
         token: String,
@@ -921,8 +935,10 @@ pub enum UiResult {
         handoff: Option<Vec<u8>>,
     },
     /// Шаг передачи ключа по коду. `name` — имя нового устройства (у источника),
-    /// `sas` — шесть цифр для сверки, `qr` — ключ нового устройства подтверждён
-    /// секретом из QR (цифры сверять не нужно, согласие — нужно).
+    /// `sas` — шесть цифр для сверки. `qr` у источника — ключ нового устройства
+    /// подтверждён секретом из QR (цифры сверять не нужно, согласие — нужно); у
+    /// нового устройства — обязательство сверено по `h` из QR (без этого ключ
+    /// принимается только после `ReceivePoll { confirm }`).
     Handoff {
         step: HandoffStep,
         name: String,

@@ -343,7 +343,7 @@ message JoinHandoffJoiner {
 }
 
 // `GET /v1/join/handoff`: ключ источника и обёртка, когда они есть. Обёртка
-// отдаётся один раз.
+// отдаётся повторно, пока новое устройство не закроет обмен (`DELETE`).
 message JoinHandoffJoinerState {
   bytes pk = 1;
   bytes wrapped = 2;

@@ -1,6 +1,8 @@
 // Подключение по одноразовому коду: из ссылки obsidian://selfsync-connect или
 // вручную. Код обменивается на токен устройства; если устройство, где открыт код,
-// передаёт ключ шифрования, окно ждёт его (протокол 1.4) — пароль не нужен.
+// передаёт ключ шифрования, окно ждёт его (протокол 1.4) — пароль не нужен. Цифры
+// обмена показываются всегда; без QR (`h=`) ключ примется только после того, как
+// пользователь сверит их здесь.
 
 import { type App, Modal, Notice, Setting } from "obsidian";
 
@@ -14,6 +16,8 @@ import { DiagnoseModal } from "./diagnose.ts";
 export class ConnectModal extends Modal {
   private closed = false;
   private stopWaiting = false;
+  /** Цифры, которые пользователь сверил на этом устройстве. */
+  private confirmed: string | null = null;
 
   constructor(
     app: App,
@@ -23,6 +27,8 @@ export class ConnectModal extends Modal {
     private onDone?: () => void,
     /** `m=` из ссылки QR (секрет обмена ключом). */
     private secret?: string,
+    /** `h=` из ссылки QR (префикс обязательства источника). */
+    private check?: string,
   ) {
     super(app);
   }
@@ -39,6 +45,7 @@ export class ConnectModal extends Modal {
         this.code = v;
         // Код ввели заново — секрет из прежней ссылки к нему не относится.
         this.secret = undefined;
+        this.check = undefined;
       }),
     );
     new Setting(form).setName(t("connect.device")).addText((x) => x.setValue(device).onChange((v) => (device = v)));
@@ -53,10 +60,12 @@ export class ConnectModal extends Modal {
             const server = normalizeServer(this.server);
             const err = await this.plugin.redeem(server, this.code.trim(), device.trim() || this.plugin.settings.deviceName, {
               secret: this.secret,
+              check: this.check,
               onResult: (r) => {
                 form.hide();
                 this.renderReceive(status, r);
               },
+              confirmed: () => this.confirmed,
               stopped: () => this.closed || this.stopWaiting,
             });
             b.setDisabled(false);
@@ -89,18 +98,43 @@ export class ConnectModal extends Modal {
       el.createEl("p", { text: t("handoff.received") });
       return;
     }
-    if (r.step === "confirm" && r.sas && !this.secret) {
-      el.createEl("p", { text: t("handoff.compare") });
+    const stop = (): void => {
+      this.stopWaiting = true;
+      el.empty();
+    };
+    if (r.step === "confirm" && r.sas) {
       el.createEl("p", { text: formatSas(r.sas), cls: "selfsync-sas" });
+      if (r.qr) {
+        // По QR сверять не обязательно; если источник всё же их показал — сервер
+        // мог убрать MAC: сверить.
+        el.createEl("p", { text: t("handoff.digitsQr") });
+      } else if (this.confirmed !== r.sas) {
+        el.createEl("p", { text: t("handoff.compare") });
+        const sas = r.sas;
+        new Setting(el)
+          .addButton((b) =>
+            b.setButtonText(t("handoff.mismatch")).onClick(() => {
+              stop();
+              el.createEl("p", { text: t("handoff.mismatchDone") });
+            }),
+          )
+          .addButton((b) =>
+            b
+              .setButtonText(t("handoff.match"))
+              .setCta()
+              .onClick(() => {
+                this.confirmed = sas;
+                this.renderReceive(el, r);
+              }),
+          );
+        return;
+      } else {
+        el.createEl("p", { text: t("handoff.approveThere") });
+      }
     } else {
-      el.createEl("p", { text: t(r.step === "confirm" ? "handoff.approveThere" : "handoff.receiving") });
+      el.createEl("p", { text: t("handoff.receiving") });
     }
-    new Setting(el).addButton((b) =>
-      b.setButtonText(t("handoff.usePassword")).onClick(() => {
-        this.stopWaiting = true;
-        el.empty();
-      }),
-    );
+    new Setting(el).addButton((b) => b.setButtonText(t("handoff.usePassword")).onClick(stop));
   }
 
   override onClose(): void {

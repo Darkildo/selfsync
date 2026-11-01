@@ -418,6 +418,14 @@ pub async fn handoff_joiner_get(cx: &Ctx) -> SyncResult<pb::JoinHandoffJoinerSta
     call(cx, req("GET", "/v1/join/handoff".into(), vec![], None)).await
 }
 
+/// Новое устройство: обмен закончен (ключ получен или обмен прерван) — сервер
+/// стирает его, не дожидаясь срока.
+pub async fn handoff_joiner_delete(cx: &Ctx) -> SyncResult<()> {
+    call_empty(cx, req("DELETE", "/v1/join/handoff".into(), vec![], None))
+        .await
+        .map(|_| ())
+}
+
 pub async fn join_redeem(cx: &Ctx, code: String, name: String) -> SyncResult<pb::JoinToken> {
     let mut r = proto_req(
         "POST",

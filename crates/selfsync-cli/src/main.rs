@@ -63,6 +63,8 @@ enum Cmd {
     /// Подключить новое устройство: одноразовый код, ссылка и QR. Если ключ
     /// шифрования здесь есть (запомнен или --password-file), окно ждёт новое
     /// устройство и с вашего согласия передаёт ему ключ (только с терминалом).
+    /// QR с секретом обмена остаётся в истории терминала: секрет одноразовый и без
+    /// вашего согласия ключа не даёт, но экран и журнал терминала лучше не показывать.
     Join {
         /// Имя будущего устройства (можно изменить при подключении).
         #[arg(long, default_value = "new device")]
@@ -502,16 +504,17 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             use_wait,
             no_handoff,
         } => {
-            let (server, code, secret) = match link {
+            let (server, code, secret, check) = match link {
                 Some(l) => {
                     let l = handoff::parse_link(&l).context(
                         "ссылка не разобрана: нужна https://…/join/<код> или obsidian://selfsync-connect?…",
                     )?;
-                    (l.server, l.code, l.secret)
+                    (l.server, l.code, l.secret, l.check)
                 }
                 None => (
                     server.context("нужен --server")?,
                     code.context("нужен --code")?,
+                    None,
                     None,
                 ),
             };
@@ -565,15 +568,25 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                                 &mut sess,
                                 commit,
                                 secret,
+                                check,
                                 deadline,
                                 handoff::POLL,
                                 &mut handoff::Terminal,
                             )
                             .await?;
-                            if got {
-                                println!("ключ шифрования сохранён в {STATE_DIR}/key");
-                            } else {
-                                eprintln!("ключ не получен: пароль понадобится при run");
+                            match got {
+                                handoff::Exchange::Done => {
+                                    println!("ключ шифрования сохранён в {STATE_DIR}/key");
+                                }
+                                handoff::Exchange::Refused => {
+                                    eprintln!("ключ не получен: пароль понадобится при run");
+                                }
+                                handoff::Exchange::Interrupted => {
+                                    eprintln!("прервано: пароль понадобится при run");
+                                    // Чтение ответа в отдельном потоке не прервать —
+                                    // выйти, не дожидаясь его.
+                                    std::process::exit(130);
+                                }
                             }
                         }
                     }
@@ -614,13 +627,14 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     handoff: want,
                 })
                 .await?;
-            let (code, url, expires_at, secret) = match r {
+            let (code, url, expires_at, secret, check) = match r {
                 UiResult::Join {
                     code,
                     url,
                     expires_at,
                     secret,
-                } => (code, url, expires_at, secret),
+                    check,
+                } => (code, url, expires_at, secret, check),
                 UiResult::Error { message, .. } => anyhow::bail!("сервер отказал: {message}"),
                 other => anyhow::bail!("неожиданный ответ: {other:?}"),
             };
@@ -635,10 +649,10 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             );
             println!("{url}\n");
             // С обменом QR ведёт сразу в Obsidian и несёт секрет: сервер его не видит.
-            let qr = secret.as_deref().map_or_else(
-                || url.clone(),
-                |m| handoff::connect_link(&cfg.server, &code, m),
-            );
+            let qr = match (&secret, &check) {
+                (Some(m), Some(h)) => handoff::connect_link(&cfg.server, &code, m, h),
+                _ => url.clone(),
+            };
             print!("{}", handoff::render_qr(&qr)?);
             println!("\nКод для ручного ввода: {code}");
             println!(
@@ -655,8 +669,11 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     &mut handoff::Terminal,
                 )
                 .await?;
-                if !given {
-                    return Ok(ExitCode::from(1));
+                match given {
+                    handoff::Exchange::Done => {}
+                    handoff::Exchange::Refused => return Ok(ExitCode::from(1)),
+                    // Чтение ответа в отдельном потоке не прервать — выйти сразу.
+                    handoff::Exchange::Interrupted => std::process::exit(130),
                 }
             } else if want {
                 eprintln!(

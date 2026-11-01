@@ -52,7 +52,7 @@ export class JoinModal extends Modal {
 
   constructor(
     app: App,
-    private join: { url: string; code: string; expiresAt: number; readOnly?: boolean; secret?: string | null },
+    private join: { url: string; code: string; expiresAt: number; readOnly?: boolean; secret?: string | null; check?: string | null },
     private handoff?: JoinHandoff,
   ) {
     super(app);
@@ -65,9 +65,10 @@ export class JoinModal extends Modal {
     if (this.join.readOnly) contentEl.createEl("p", { text: `${t("join.readOnly")}: ${t("join.readOnlyDesc")}` });
     const h = this.handoff;
     const secret = this.join.secret;
-    // Секрет — только в QR: ссылку для копирования пересылают, и с секретом
+    const check = this.join.check;
+    // Секрет и h — только в QR: ссылку для копирования пересылают, и с секретом
     // она отдавала бы ключ без сверки цифр.
-    const qr = h && secret ? connectLink(h.server, this.join.code, secret) : this.join.url;
+    const qr = h && secret && check ? connectLink(h.server, this.join.code, secret, check) : this.join.url;
     contentEl.appendChild(qrSvg(document, qrModules(qr)));
     if (h && secret) contentEl.createEl("p", { text: t("handoff.offer"), cls: "setting-item-description" });
     new Setting(contentEl)

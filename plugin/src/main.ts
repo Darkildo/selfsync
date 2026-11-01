@@ -32,8 +32,12 @@ const LOG_LINES = 500;
 export interface KeyReceiver {
   /** `m=` из ссылки QR: с ним источнику не нужно сверять цифры. */
   secret?: string;
+  /** `h=` из ссылки QR: сверяет обязательство источника, полученное от сервера. */
+  check?: string;
   onResult(r: UiResult): void;
-  /** Ждать перестали (окно закрыто, «ввести пароль»). */
+  /** Цифры, которые пользователь сверил здесь (без `h` ключ без них не примется). */
+  confirmed(): string | null;
+  /** Ждать перестали (окно закрыто, «ввести пароль», цифры не совпали). */
   stopped(): boolean;
 }
 
@@ -112,7 +116,7 @@ export default class SelfsyncPlugin extends Plugin {
   protected registerConnect(): void {
     this.addCommand({ id: "connect", name: t("cmd.connect"), callback: () => this.openConnect() });
     this.registerObsidianProtocolHandler("selfsync-connect", (p) => {
-      new ConnectModal(this.app, this, p.server ?? "", p.code ?? "", undefined, p.m).open();
+      new ConnectModal(this.app, this, p.server ?? "", p.code ?? "", undefined, p.m, p.h).open();
     });
   }
 
@@ -318,16 +322,19 @@ export default class SelfsyncPlugin extends Plugin {
       rememberKey: (k) => this.app.saveLocalStorage(KEY_STORAGE, toBase64(k)),
     });
     try {
-      const first = await tmp.command({ type: "receiveKey", commit, linkSecret: receive.secret ?? null });
+      const first = await tmp.command({ type: "receiveKey", commit, linkSecret: receive.secret ?? null, check: receive.check ?? null });
       receive.onResult(first);
       if (!isHandoff(first)) return false;
       const last = await pollHandoff({
-        step: () => tmp.command({ type: "receivePoll" }),
+        step: () => tmp.command({ type: "receivePoll", confirm: receive.confirmed() }),
         onResult: (x) => receive.onResult(x),
         stopped: () => receive.stopped(),
         deadline: Date.now() + HANDOFF_WAIT_MS,
       });
-      return last !== null && isHandoff(last) && last.step === "done";
+      const done = last !== null && isHandoff(last) && last.step === "done";
+      // Не дождались — обмен на сервере закрыть сразу, не ждать срока.
+      if (!done) await tmp.command({ type: "cancelReceive" });
+      return done;
     } finally {
       tmp.stop();
     }

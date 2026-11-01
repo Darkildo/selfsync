@@ -27,6 +27,9 @@ pub(crate) struct SourceHandoff {
 pub(crate) struct JoinerHandoff {
     eph: Ephemeral,
     commit: Vec<u8>,
+    /// Обязательство сверено по `h` из QR: ключ источника подлинный, сверка
+    /// цифр здесь не нужна. Иначе ключ принимается только после неё.
+    by_qr: bool,
 }
 
 fn fail<T>(code: &str, message: &str) -> SyncResult<T> {
@@ -75,6 +78,11 @@ pub(crate) async fn offer(
 /// Секрет для ссылки (`m=` в QR), base64url.
 pub(crate) fn link_secret(h: &SourceHandoff) -> String {
     api::base64url(&h.link_secret)
+}
+
+/// Префикс обязательства для ссылки (`h=` в QR), base64url.
+pub(crate) fn link_check(commit: &[u8]) -> String {
+    api::base64url(&handoff::commit_check(commit))
 }
 
 /// Шаг источника. `confirm` — цифры шага `confirm`, на которых пользователь
@@ -177,67 +185,103 @@ async fn source_advance(
 }
 
 /// Новое устройство: начать обмен (после `Redeem` с обязательством источника).
-/// `link_secret` — `m=` из QR; без него источник попросит сверить цифры.
+/// `link_secret` и `check` — `m=` и `h=` из QR; без них ключ примется только после
+/// сверки цифр на этом устройстве.
 pub(crate) async fn receive_start(
     cx: &Ctx,
     commit: Vec<u8>,
     link_secret: Option<String>,
+    check: Option<String>,
 ) -> SyncResult<UiResult> {
     if commit.len() != 32 {
         return fail("bad_commit", "обязательство источника — 32 байта");
     }
+    let nonempty = |v: Option<String>| v.map(|x| x.trim().to_owned()).filter(|x| !x.is_empty());
+    let by_qr = match nonempty(check) {
+        None => false,
+        Some(h) => {
+            let ok =
+                api::base64url_decode(&h).is_some_and(|h| handoff::check_commit_check(&h, &commit));
+            if !ok {
+                // Обязательство от сервера не то, что показал QR источника: сервер
+                // (или кто-то между) подставил свой ключ. Ключ на сервер не уходит.
+                let _ = api::handoff_joiner_delete(cx).await;
+                return fail(
+                    "handoff_commit_mismatch",
+                    "обязательство источника не совпало с QR-кодом — возможна подмена, обмен прерван",
+                );
+            }
+            true
+        }
+    };
     let eph = Ephemeral::generate().map_err(|e| SyncError::Io(e.to_string()))?;
-    let mac = match link_secret
-        .as_deref()
-        .map(str::trim)
-        .filter(|m| !m.is_empty())
-    {
+    let mac = match nonempty(link_secret) {
         None => vec![],
-        Some(m) => match api::base64url_decode(m) {
+        Some(m) => match api::base64url_decode(&m) {
             Some(m) if m.len() == LINK_SECRET_LEN => handoff::link_mac(&m, eph.public()).to_vec(),
             // Испорченный секрет — не повод отказаться: сверка цифр.
             _ => vec![],
         },
     };
     api::handoff_joiner_put(cx, eph.public().to_vec(), mac).await?;
-    cx.with_mut(|s| s.receiving = Some(JoinerHandoff { eph, commit }));
-    Ok(step(HandoffStep::Waiting, String::new(), None))
+    cx.with_mut(|s| s.receiving = Some(JoinerHandoff { eph, commit, by_qr }));
+    Ok(joiner_step(HandoffStep::Waiting, None, by_qr))
 }
 
-/// Новое устройство: опрос. `confirm` — цифры для сверки на источнике (ключ
-/// источника пришёл, обёртки ещё нет); `done` — ключ раскрыт и запомнен.
-pub(crate) async fn receive_poll(cx: &Ctx) -> SyncResult<UiResult> {
+fn joiner_step(step: HandoffStep, sas: Option<String>, qr: bool) -> UiResult {
+    UiResult::Handoff {
+        step,
+        name: String::new(),
+        sas,
+        qr,
+    }
+}
+
+/// Новое устройство: опрос. `confirm` — ключ источника пришёл, цифры готовы (без
+/// `qr` ключ примется, только когда пользователь их сверит: `confirm` команды —
+/// эти цифры); `done` — ключ раскрыт и запомнен, обмен на сервере закрыт.
+pub(crate) async fn receive_poll(cx: &Ctx, confirm: Option<String>) -> SyncResult<UiResult> {
     let Some(h) = cx.with(|s| s.receiving.clone()) else {
         return fail("no_handoff", "обмен ключом не начат");
     };
-    let res = receive_advance(cx, &h).await;
-    if !matches!(
+    let res = receive_advance(cx, &h, confirm).await;
+    let ongoing = matches!(
         res,
         Ok(UiResult::Handoff {
             step: HandoffStep::Waiting | HandoffStep::Confirm,
             ..
         })
-    ) {
+    );
+    if !ongoing {
         cx.with_mut(|s| s.receiving = None);
+        // Получили или отказались — обмен на сервере больше не нужен.
+        let _ = api::handoff_joiner_delete(cx).await;
     }
     res
 }
 
-async fn receive_advance(cx: &Ctx, h: &JoinerHandoff) -> SyncResult<UiResult> {
+async fn receive_advance(
+    cx: &Ctx,
+    h: &JoinerHandoff,
+    confirm: Option<String>,
+) -> SyncResult<UiResult> {
     let labels = Labels::selfsync();
     let st = api::handoff_joiner_get(cx).await?;
     if st.pk.is_empty() {
-        return Ok(step(HandoffStep::Waiting, String::new(), None));
+        return Ok(joiner_step(HandoffStep::Waiting, None, h.by_qr));
     }
     if !handoff::check_commit(&st.pk, &h.commit) {
         return fail(
             "handoff_commit_mismatch",
-            "ключ источника не совпал с обязательством — обмен прерван",
+            "ключ источника не совпал с обязательством — возможна подмена, обмен прерван",
         );
     }
     let sas = handoff::sas_digits(&labels, &st.pk, h.eph.public());
-    if st.wrapped.is_empty() {
-        return Ok(step(HandoffStep::Confirm, String::new(), Some(sas)));
+    // Без `h` ключ источника пришёл только от сервера: им мог оказаться ключ
+    // сервера. Ключ не открывается и не запоминается, пока цифры не сверены здесь.
+    let trusted = h.by_qr || confirm.as_deref() == Some(sas.as_str());
+    if st.wrapped.is_empty() || !trusted {
+        return Ok(joiner_step(HandoffStep::Confirm, Some(sas), h.by_qr));
     }
     let key = handoff::unwrap(&labels, &h.eph, &st.pk, &st.wrapped)
         .map_err(|_| SyncError::Corrupt("обёртка ключа не открывается".into()))?;
@@ -264,5 +308,5 @@ async fn receive_advance(cx: &Ctx, h: &JoinerHandoff) -> SyncResult<UiResult> {
         LogLevel::Info,
         "ключ шифрования получен от другого устройства",
     );
-    Ok(step(HandoffStep::Done, String::new(), Some(sas)))
+    Ok(joiner_step(HandoffStep::Done, Some(sas), h.by_qr))
 }

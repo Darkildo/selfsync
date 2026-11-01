@@ -30,6 +30,7 @@ function one(prefix, aSecret, bSecret, linkSecret, nonce, payload) {
     a_public: hex(A),
     b_public: hex(B),
     commit: createHash("sha256").update(A).digest("hex"),
+    h: createHash("sha256").update(A).digest().subarray(0, 16).toString("base64url"),
     link_secret: hex(linkSecret),
     mac: createHmac("sha256", linkSecret).update(B).digest("hex"),
     sas,
@@ -48,7 +49,7 @@ const cases = [
 const doc = {
   about:
     "Передача ключа по коду: P-256 (несжатые точки SEC1), commit = sha256(A), mac = HMAC-SHA256(link_secret, B), " +
-    "sas = sha256(prefix + ' sas' ‖ A ‖ B)[0..4] BE mod 10^6, k = HKDF-SHA256(ECDH x, salt = A ‖ B, info = prefix + ' key'), " +
+    "h = base64url без паддинга (commit[0..16]), sas = sha256(prefix + ' sas' ‖ A ‖ B)[0..4] BE mod 10^6, k = HKDF-SHA256(ECDH x, salt = A ‖ B, info = prefix + ' key'), " +
     "wrapped = nonce ‖ AES-256-GCM(k, payload) без AAD. Байты — hex. Генератор: scripts/handoff-vectors.mjs",
   cases,
 };

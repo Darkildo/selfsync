@@ -580,32 +580,32 @@ pub fn owner_handoff(
 }
 
 /// Шаг нового устройства: ключ источника и обёртка, когда они есть. Обёртка
-/// отдаётся один раз — затем запись обмена удаляется. `None` — обмена нет.
+/// отдаётся и повторно (ответ мог потеряться; без секрета нового устройства она
+/// бесполезна), пока устройство не закроет обмен ([`joiner_handoff_delete`]) или
+/// он не истечёт. `None` — обмена нет.
 pub fn joiner_handoff_get(c: &Connection, device: u32) -> rusqlite::Result<Option<Handoff>> {
-    let row = c
-        .query_row(
-            "SELECT code_hash, owner_pk, wrapped FROM join_codes
-             WHERE used_by = ?1 AND offer_commit IS NOT NULL AND expires_at > ?2",
-            params![device, now_ms()],
-            |r| {
-                Ok((
-                    r.get::<_, Vec<u8>>(0)?,
-                    Handoff {
-                        owner_pk: r.get(1)?,
-                        wrapped: r.get(2)?,
-                        ..Handoff::default()
-                    },
-                ))
-            },
-        )
-        .optional()?;
-    let Some((h, hand)) = row else {
-        return Ok(None);
-    };
-    if hand.wrapped.is_some() {
-        c.execute("DELETE FROM join_codes WHERE code_hash = ?1", params![h])?;
-    }
-    Ok(Some(hand))
+    c.query_row(
+        "SELECT owner_pk, wrapped FROM join_codes
+         WHERE used_by = ?1 AND offer_commit IS NOT NULL AND expires_at > ?2",
+        params![device, now_ms()],
+        |r| {
+            Ok(Handoff {
+                owner_pk: r.get(0)?,
+                wrapped: r.get(1)?,
+                ..Handoff::default()
+            })
+        },
+    )
+    .optional()
+}
+
+/// Новое устройство закрыло обмен (ключ получен или обмен прерван): запись стёрта
+/// вместе с ключами и обёрткой. `false` — обмена не было.
+pub fn joiner_handoff_delete(c: &Connection, device: u32) -> rusqlite::Result<bool> {
+    Ok(c.execute(
+        "DELETE FROM join_codes WHERE used_by = ?1 AND offer_commit IS NOT NULL",
+        params![device],
+    )? > 0)
 }
 
 /// Истёкшие коды и обмены ключом (`selfsync sweep`): открытые ключи и обёртки не
@@ -747,9 +747,17 @@ mod tests {
             Some(&b"wrap"[..]),
             "обёртка пишется один раз"
         );
-        // Обёртка отдаётся один раз, затем обмена нет.
+        // Обёртка отдаётся повторно (ответ мог потеряться), пока устройство не
+        // закроет обмен.
         let j = joiner_handoff_get(&c, joiner).unwrap().unwrap();
         assert_eq!(j.wrapped.as_deref(), Some(&b"wrap"[..]));
+        assert_eq!(joiner_handoff_get(&c, joiner).unwrap().unwrap(), j);
+        assert!(
+            !joiner_handoff_delete(&c, src).unwrap(),
+            "чужой обмен не стереть"
+        );
+        assert!(joiner_handoff_delete(&c, joiner).unwrap());
+        assert!(!joiner_handoff_delete(&c, joiner).unwrap());
         assert_eq!(joiner_handoff_get(&c, joiner).unwrap(), None);
         assert_eq!(
             owner_handoff(&c, "notes", src, &code, None, None).unwrap(),

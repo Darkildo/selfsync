@@ -9,12 +9,12 @@ export const HANDOFF_POLL_MS = 1500;
 export const HANDOFF_WAIT_MS = 10 * 60 * 1000;
 
 /**
- * Ссылка для QR с секретом обмена `m`. Строит её устройство-источник: секрет не
- * должен проходить через сервер (страница `/join/{code}` его не знает), поэтому QR
- * ведёт сразу в Obsidian, а не на страницу сервера.
+ * Ссылка для QR с секретом обмена `m` и префиксом обязательства `h`. Строит её
+ * устройство-источник: через сервер она не должна проходить (страница
+ * `/join/{code}` их не знает), поэтому QR ведёт сразу в Obsidian.
  */
-export function connectLink(server: string, code: string, secret: string): string {
-  const q = new URLSearchParams({ server, code, m: secret });
+export function connectLink(server: string, code: string, secret: string, check: string): string {
+  const q = new URLSearchParams({ server, code, m: secret, h: check });
   return `obsidian://selfsync-connect?${q.toString()}`;
 }
 

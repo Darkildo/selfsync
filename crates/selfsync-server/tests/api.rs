@@ -1251,9 +1251,14 @@ async fn read_only_token_rejects_writes() {
                 _ => uri.clone(),
             };
             let r = s.call(method.clone(), &uri, Some(&ro), vec![], &[]).await;
-            if (*m, uri.as_str()) == ("PUT", "/v1/join/handoff") {
-                // Единственное исключение: свой ключ обмена при подключении (1.4).
-                assert_eq!(r.error().code, "bad_handoff_key", "{m} {uri}");
+            if uri == "/v1/join/handoff" && matches!(*m, "PUT" | "DELETE") {
+                // Единственное исключение: свой обмен ключом при подключении (1.4).
+                let want = if *m == "PUT" {
+                    "bad_handoff_key"
+                } else {
+                    "no_handoff"
+                };
+                assert_eq!(r.error().code, want, "{m} {uri}");
                 continue;
             }
             if *m == "GET" {
@@ -1794,11 +1799,26 @@ async fn join_handoff_flow() {
     let j: pb::JoinHandoffJoinerState = joiner_get().await.proto();
     assert!(handoff::check_commit(&j.pk, &tok.handoff_commit));
     assert_eq!(*handoff::unwrap(&l, &b, &j.pk, &j.wrapped).unwrap(), master);
+    // Ответ мог потеряться: обёртка отдаётся снова, пока устройство не закроет обмен.
+    let again: pb::JoinHandoffJoinerState = joiner_get().await.proto();
+    assert_eq!(again, j);
+    let del = || async {
+        s.call(
+            Method::DELETE,
+            "/v1/join/handoff",
+            Some(&tok.token),
+            vec![],
+            &[],
+        )
+        .await
+    };
     assert_eq!(
-        joiner_get().await.error().code,
-        "no_handoff",
-        "обёртка — один раз"
+        del().await.status,
+        StatusCode::NO_CONTENT,
+        "ro-устройство тоже"
     );
+    assert_eq!(del().await.error().code, "no_handoff");
+    assert_eq!(joiner_get().await.error().code, "no_handoff");
     assert_eq!(
         poll(&laptop, vec![], vec![]).await.status,
         StatusCode::NOT_FOUND

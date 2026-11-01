@@ -13,14 +13,35 @@ pub const POLL: Duration = Duration::from_millis(1500);
 /// Сколько новое устройство ждёт ключ (столько же сервер хранит обмен).
 pub const WAIT_MS: i64 = 10 * 60 * 1000;
 
+/// Ответ на вопрос «да/нет».
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answer {
+    Yes,
+    No,
+    /// Ctrl-C во время вопроса.
+    Interrupted,
+}
+
+/// Чем кончился обмен.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Exchange {
+    /// Ключ передан (источник) или получен и сохранён (новое устройство).
+    Done,
+    /// Не передан: отказ, ошибка, срок вышел.
+    Refused,
+    /// Ctrl-C.
+    Interrupted,
+}
+
 /// Ввод-вывод обмена: терминал или сценарий теста.
 pub trait Prompt {
     fn say(&mut self, text: &str);
     /// Вопрос «да/нет»; по умолчанию — нет.
-    fn ask(&mut self, question: &str) -> bool;
+    fn ask(&mut self, question: &str) -> impl std::future::Future<Output = Answer>;
 }
 
-/// Терминал: сообщения — в stderr, ответ — строка из stdin.
+/// Терминал: сообщения — в stderr, ответ — строка из stdin. Ctrl-C во время
+/// вопроса прерывает обмен.
 pub struct Terminal;
 
 impl Prompt for Terminal {
@@ -28,18 +49,27 @@ impl Prompt for Terminal {
         eprintln!("{text}");
     }
 
-    fn ask(&mut self, question: &str) -> bool {
+    async fn ask(&mut self, question: &str) -> Answer {
         use std::io::{BufRead, Write};
         eprint!("{question} [y/N] ");
         let _ = std::io::stderr().flush();
-        let mut line = String::new();
-        if std::io::stdin().lock().read_line(&mut line).is_err() {
-            return false;
+        // Чтение stdin блокирует: в отдельном потоке, чтобы Ctrl-C прервал вопрос.
+        let line = tokio::task::spawn_blocking(|| {
+            let mut line = String::new();
+            std::io::stdin().lock().read_line(&mut line).map(|_| line)
+        });
+        tokio::select! {
+            r = line => match r {
+                Ok(Ok(l)) if matches!(l.trim().to_lowercase().as_str(), "y" | "yes" | "д" | "да") => {
+                    Answer::Yes
+                }
+                _ => Answer::No,
+            },
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!();
+                Answer::Interrupted
+            }
         }
-        matches!(
-            line.trim().to_lowercase().as_str(),
-            "y" | "yes" | "д" | "да"
-        )
     }
 }
 
@@ -56,6 +86,8 @@ pub struct Link {
     pub code: String,
     /// `m=` — секрет обмена из QR.
     pub secret: Option<String>,
+    /// `h=` — префикс обязательства источника из QR.
+    pub check: Option<String>,
 }
 
 /// `obsidian://selfsync-connect?server=…&code=…[&m=…]` (QR) или страница сервера
@@ -66,6 +98,7 @@ pub fn parse_link(s: &str) -> Option<Link> {
         let mut server = None;
         let mut code = None;
         let mut secret = None;
+        let mut check = None;
         for pair in q.split('&') {
             let (k, v) = pair.split_once('=')?;
             let v = percent_decode(v)?;
@@ -73,6 +106,7 @@ pub fn parse_link(s: &str) -> Option<Link> {
                 "server" => server = Some(v),
                 "code" => code = Some(v),
                 "m" => secret = Some(v),
+                "h" => check = Some(v),
                 _ => {}
             }
         }
@@ -80,6 +114,7 @@ pub fn parse_link(s: &str) -> Option<Link> {
             server: server?.trim_end_matches('/').to_owned(),
             code: code?,
             secret,
+            check,
         });
     }
     if s.starts_with("https://") || s.starts_with("http://") {
@@ -91,6 +126,7 @@ pub fn parse_link(s: &str) -> Option<Link> {
             server: base.to_owned(),
             code: code.to_owned(),
             secret: None,
+            check: None,
         });
     }
     None
@@ -132,14 +168,15 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
-/// Ссылка для QR с секретом обмена — та же, что строит плагин. Секрет не проходит
-/// через сервер: QR ведёт сразу в Obsidian.
-pub fn connect_link(server: &str, code: &str, secret: &str) -> String {
+/// Ссылка для QR с секретом обмена `m` и префиксом обязательства `h` — та же, что
+/// строит плагин. Через сервер она не проходит: QR ведёт сразу в Obsidian.
+pub fn connect_link(server: &str, code: &str, secret: &str, check: &str) -> String {
     format!(
-        "obsidian://selfsync-connect?server={}&code={}&m={}",
+        "obsidian://selfsync-connect?server={}&code={}&m={}&h={}",
         percent_encode(server),
         percent_encode(code),
-        percent_encode(secret)
+        percent_encode(secret),
+        percent_encode(check)
     )
 }
 
@@ -194,15 +231,14 @@ async fn pause(interval: Duration) -> bool {
 }
 
 /// Источник: ждать новое устройство по коду и передать ему ключ с согласия
-/// пользователя (при коде, введённом руками, — после сверки цифр). `true` —
-/// ключ передан.
+/// пользователя (при коде, введённом руками, — после сверки цифр).
 pub async fn give_key(
     sess: &mut Session,
     code: &str,
     deadline_ms: i64,
     interval: Duration,
-    ui: &mut dyn Prompt,
-) -> anyhow::Result<bool> {
+    ui: &mut impl Prompt,
+) -> anyhow::Result<Exchange> {
     let mut confirm: Option<String> = None;
     let mut waiting_said = false;
     while now_ms() < deadline_ms {
@@ -219,7 +255,7 @@ pub async fn give_key(
                 ..
             } => {
                 ui.say(&format!("ключ шифрования передан «{name}»"));
-                return Ok(true);
+                return Ok(Exchange::Done);
             }
             UiResult::Handoff {
                 step: HandoffStep::Waiting,
@@ -246,10 +282,16 @@ pub async fn give_key(
                         format_sas(&sas)
                     )
                 };
-                if !ui.ask(&question) {
-                    cancel(sess, code).await;
-                    ui.say("ключ не передан: на новом устройстве понадобится пароль");
-                    return Ok(false);
+                match ui.ask(&question).await {
+                    Answer::Yes => {}
+                    a => {
+                        cancel(sess, code).await;
+                        if a == Answer::Interrupted {
+                            return Ok(Exchange::Interrupted);
+                        }
+                        ui.say("ключ не передан: на новом устройстве понадобится пароль");
+                        return Ok(Exchange::Refused);
+                    }
                 }
                 confirm = Some(sas);
                 // Ответ — сразу, без паузы.
@@ -259,18 +301,18 @@ pub async fn give_key(
                 ui.say(&format!(
                     "ключ не передан: {message}. На новом устройстве можно ввести пароль"
                 ));
-                return Ok(false);
+                return Ok(Exchange::Refused);
             }
             other => anyhow::bail!("неожиданный ответ: {other:?}"),
         }
         if !pause(interval).await {
             cancel(sess, code).await;
-            return Ok(false);
+            return Ok(Exchange::Interrupted);
         }
     }
     cancel(sess, code).await;
     ui.say("новое устройство не пришло за отведённое время");
-    Ok(false)
+    Ok(Exchange::Refused)
 }
 
 async fn cancel(sess: &mut Session, code: &str) {
@@ -282,24 +324,27 @@ async fn cancel(sess: &mut Session, code: &str) {
 }
 
 /// Новое устройство: получить ключ от источника (`commit` — из `Token.handoff`,
-/// `secret` — `m=` из ссылки). Ключ запоминается в `.selfsync/key`. `true` —
-/// получен.
+/// `link` — `m=` и `h=` из ссылки QR). Цифры показываются всегда; без `h` ключ
+/// принимается, только когда пользователь подтвердит их здесь. Ключ сохраняется
+/// в `.selfsync/key`.
 pub async fn receive_key(
     sess: &mut Session,
     commit: Vec<u8>,
     secret: Option<String>,
+    check: Option<String>,
     deadline_ms: i64,
     interval: Duration,
-    ui: &mut dyn Prompt,
-) -> anyhow::Result<bool> {
-    let by_qr = secret.is_some();
+    ui: &mut impl Prompt,
+) -> anyhow::Result<Exchange> {
     let mut r = sess
         .command(UiCommand::ReceiveKey {
             commit,
             link_secret: secret,
+            check,
         })
         .await?;
     let mut said: Option<HandoffStep> = None;
+    let mut confirmed: Option<String> = None;
     loop {
         match r {
             UiResult::Handoff {
@@ -307,36 +352,81 @@ pub async fn receive_key(
                 ..
             } => {
                 ui.say("ключ шифрования получен");
-                return Ok(true);
+                return Ok(Exchange::Done);
             }
-            UiResult::Handoff { step, sas, .. } => {
-                if said != Some(step) {
-                    said = Some(step);
-                    match (step, sas) {
-                        (HandoffStep::Confirm, Some(sas)) if !by_qr => ui.say(&format!(
-                            "сверьте цифры с экраном устройства, где открыт код, и подтвердите там: {}",
+            UiResult::Handoff {
+                step: HandoffStep::Confirm,
+                sas,
+                qr,
+                ..
+            } => {
+                let sas = sas.unwrap_or_default();
+                if qr {
+                    if said != Some(HandoffStep::Confirm) {
+                        ui.say(&format!(
+                            "цифры обмена: {}. При входе по QR на устройстве с кодом их сверять \
+                             не нужно; если оно всё же показывает цифры — сверьте, а не совпадают \
+                             — это подмена, прервите (Ctrl-C)",
                             format_sas(&sas)
-                        )),
-                        (HandoffStep::Confirm, _) => {
-                            ui.say("подтвердите передачу ключа на устройстве, где открыт код");
-                        }
-                        _ => ui.say(
-                            "ждём ключ шифрования с устройства, где открыт код \
-                             (Ctrl-C — ввести пароль позже)…",
-                        ),
+                        ));
                     }
+                } else if confirmed.as_deref() != Some(sas.as_str()) {
+                    let q = format!(
+                        "цифры на этом устройстве: {}. Совпадают с экраном устройства, где открыт код?",
+                        format_sas(&sas)
+                    );
+                    match ui.ask(&q).await {
+                        Answer::Yes => {
+                            confirmed = Some(sas);
+                            ui.say("подтвердите передачу ключа на устройстве, где открыт код");
+                            said = Some(HandoffStep::Confirm);
+                            r = sess
+                                .command(UiCommand::ReceivePoll {
+                                    confirm: confirmed.clone(),
+                                })
+                                .await?;
+                            continue;
+                        }
+                        a => {
+                            let _ = sess.command(UiCommand::CancelReceive).await;
+                            if a == Answer::Interrupted {
+                                return Ok(Exchange::Interrupted);
+                            }
+                            ui.say("цифры не совпали — возможна подмена, ключ не принят");
+                            return Ok(Exchange::Refused);
+                        }
+                    }
+                }
+                said = Some(HandoffStep::Confirm);
+            }
+            UiResult::Handoff { .. } => {
+                if said.is_none() {
+                    said = Some(HandoffStep::Waiting);
+                    ui.say(
+                        "ждём ключ шифрования с устройства, где открыт код \
+                         (Ctrl-C — ввести пароль позже)…",
+                    );
                 }
             }
             UiResult::Error { message, .. } => {
                 ui.say(&format!("ключ не пришёл: {message}"));
-                return Ok(false);
+                return Ok(Exchange::Refused);
             }
             other => anyhow::bail!("неожиданный ответ: {other:?}"),
         }
-        if now_ms() >= deadline_ms || !pause(interval).await {
-            return Ok(false);
+        if now_ms() >= deadline_ms {
+            let _ = sess.command(UiCommand::CancelReceive).await;
+            return Ok(Exchange::Refused);
         }
-        r = sess.command(UiCommand::ReceivePoll).await?;
+        if !pause(interval).await {
+            let _ = sess.command(UiCommand::CancelReceive).await;
+            return Ok(Exchange::Interrupted);
+        }
+        r = sess
+            .command(UiCommand::ReceivePoll {
+                confirm: confirmed.clone(),
+            })
+            .await?;
     }
 }
 
@@ -350,6 +440,7 @@ mod tests {
             "https://notes.example.com:8443/s",
             "abcd1234efgh5678",
             "c2Vj-cmV0_",
+            "szS-WgFatbGgO7YEQg1pWg",
         );
         assert_eq!(
             parse_link(&l),
@@ -357,6 +448,7 @@ mod tests {
                 server: "https://notes.example.com:8443/s".into(),
                 code: "abcd1234efgh5678".into(),
                 secret: Some("c2Vj-cmV0_".into()),
+                check: Some("szS-WgFatbGgO7YEQg1pWg".into()),
             })
         );
         assert_eq!(
@@ -365,15 +457,19 @@ mod tests {
                 server: "https://notes.example.com".into(),
                 code: "abcd1234efgh5678".into(),
                 secret: None,
+                check: None,
             })
         );
         // Как строит ссылку плагин (URLSearchParams).
         assert_eq!(
-            parse_link("obsidian://selfsync-connect?server=https%3A%2F%2Fa.example&code=x1&m=s"),
+            parse_link(
+                "obsidian://selfsync-connect?server=https%3A%2F%2Fa.example&code=x1&m=s&h=c"
+            ),
             Some(Link {
                 server: "https://a.example".into(),
                 code: "x1".into(),
                 secret: Some("s".into()),
+                check: Some("c".into()),
             })
         );
         assert_eq!(parse_link("obsidian://selfsync-connect?code=x"), None);
