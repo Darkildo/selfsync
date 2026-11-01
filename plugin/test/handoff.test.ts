@@ -114,6 +114,27 @@ test("опрос: до done, на ошибке и по остановке", asyn
   assert.deepEqual([r.last, r.seen], [err, 2]);
   r = await run([waiting], 3);
   assert.equal(r.seen, 3);
+  // Без связи пауза растёт вдвое до 15 с, со связью — снова обычная.
+  const pauses: number[] = [];
+  const off: UiResult = { type: "handoff", step: "waiting", name: "", offline: true };
+  let k = 0;
+  const seq = [off, off, off, off, off, off, waiting, done];
+  await pollHandoff({
+    step: () => Promise.resolve(seq[k++]!),
+    onResult: () => {},
+    stopped: () => false,
+    deadline: Number.MAX_SAFE_INTEGER,
+    interval: 1500,
+    sleep: (ms) => {
+      pauses.push(ms);
+      return Promise.resolve();
+    },
+  });
+  assert.deepEqual(pauses, [3000, 6000, 12000, 15000, 15000, 15000, 1500]);
+  // «Отправлен» — конец опроса.
+  const sent: UiResult = { type: "handoff", step: "sent", name: "phone" };
+  r = await run([waiting, sent]);
+  assert.deepEqual([r.last, r.seen], [sent, 2]);
   // Срок вышел — ни одного шага.
   const none = await pollHandoff({
     step: () => Promise.resolve(done),

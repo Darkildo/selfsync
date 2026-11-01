@@ -1726,6 +1726,7 @@ async fn join_handoff_flow() {
             code: code.code.clone(),
             pk,
             wrapped,
+            cancel: false,
         };
         let token = token.to_owned();
         async move { s.post("/v1/join/handoff", &token, &m).await }
@@ -1859,4 +1860,69 @@ async fn join_without_commit_has_no_handoff() {
         s.get("/v1/join/handoff", &tok.token).await.error().code,
         "no_handoff"
     );
+}
+
+/// Источник отменяет обмен (`cancel`): новое устройство получает 404, код, по
+/// которому ещё не подключились, остаётся рабочим без обмена.
+#[tokio::test]
+async fn join_handoff_source_cancel() {
+    use selfsync_core::handoff::{self, Ephemeral};
+    let s = &TestServer::new();
+    let laptop = s.token("notes", "laptop");
+    let other = s.token("notes", "desktop");
+    let a = Ephemeral::generate().unwrap();
+    let create = || async {
+        s.post(
+            "/v1/join",
+            &laptop,
+            &pb::JoinCreate {
+                name: "tablet".into(),
+                commit: handoff::commit(a.public()).to_vec(),
+                ..Default::default()
+            },
+        )
+        .await
+        .proto::<pb::JoinCode>()
+        .code
+    };
+    let cancel = |token: &str, code: &str| {
+        let m = pb::JoinHandoffSource {
+            code: code.to_owned(),
+            cancel: true,
+            ..Default::default()
+        };
+        let token = token.to_owned();
+        async move { s.post("/v1/join/handoff", &token, &m).await }
+    };
+    let redeem = |code: String| async move {
+        s.send(
+            http::Request::post("/v1/join/redeem")
+                .header("x-selfsync-proto", selfsync_proto::proto_header())
+                .body(axum::body::Body::from(
+                    pb::JoinRedeem {
+                        code,
+                        name: String::new(),
+                    }
+                    .encode_to_vec(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .proto::<pb::JoinToken>()
+    };
+    // До входа: код без обмена остаётся рабочим.
+    let code = create().await;
+    assert_eq!(cancel(&other, &code).await.error().code, "code_invalid");
+    assert_eq!(cancel(&laptop, &code).await.status, StatusCode::OK);
+    assert!(redeem(code).await.handoff_commit.is_empty());
+    // После входа: новое устройство обмена больше не видит.
+    let code = create().await;
+    let tok = redeem(code.clone()).await;
+    assert!(!tok.handoff_commit.is_empty());
+    assert_eq!(cancel(&laptop, &code).await.status, StatusCode::OK);
+    assert_eq!(
+        s.get("/v1/join/handoff", &tok.token).await.error().code,
+        "no_handoff"
+    );
+    assert_eq!(cancel(&laptop, &code).await.error().code, "code_invalid");
 }

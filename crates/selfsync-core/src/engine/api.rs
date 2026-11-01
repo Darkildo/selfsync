@@ -394,10 +394,33 @@ pub async fn handoff_source(
         proto_req(
             "POST",
             "/v1/join/handoff".into(),
-            &pb::JoinHandoffSource { code, pk, wrapped },
+            &pb::JoinHandoffSource {
+                code,
+                pk,
+                wrapped,
+                cancel: false,
+            },
         ),
     )
     .await
+}
+
+/// Источник отменяет обмен по коду.
+pub async fn handoff_source_cancel(cx: &Ctx, code: String) -> SyncResult<()> {
+    let _: pb::JoinHandoffSourceState = call(
+        cx,
+        proto_req(
+            "POST",
+            "/v1/join/handoff".into(),
+            &pb::JoinHandoffSource {
+                code,
+                cancel: true,
+                ..Default::default()
+            },
+        ),
+    )
+    .await?;
+    Ok(())
 }
 
 /// Шаг нового устройства: свой ключ обмена и MAC из QR.

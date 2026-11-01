@@ -599,6 +599,28 @@ pub fn joiner_handoff_get(c: &Connection, device: u32) -> rusqlite::Result<Optio
     .optional()
 }
 
+/// Источник (устройство `device` vault'а `vault`, создавшее код) отменяет обмен:
+/// по коду, которым ещё не подключились, он остаётся рабочим без передачи ключа;
+/// по погашенному — запись обмена стирается вместе с ключами и обёрткой. В обоих
+/// случаях новое устройство получает 404. `false` — обмена нет.
+pub fn owner_handoff_cancel(
+    c: &Connection,
+    vault: &str,
+    device: u32,
+    code: &str,
+) -> rusqlite::Result<bool> {
+    let h = hash_secret(code);
+    let mine = "code_hash = ?1 AND vault = ?2 AND created_by = ?3 AND offer_commit IS NOT NULL";
+    let n = c.execute(
+        &format!("UPDATE join_codes SET offer_commit = NULL WHERE {mine} AND used_at IS NULL"),
+        params![h, vault, device],
+    )? + c.execute(
+        &format!("DELETE FROM join_codes WHERE {mine} AND used_at IS NOT NULL"),
+        params![h, vault, device],
+    )?;
+    Ok(n > 0)
+}
+
 /// Новое устройство закрыло обмен (ключ получен или обмен прерван): запись стёрта
 /// вместе с ключами и обёрткой. `false` — обмена не было.
 pub fn joiner_handoff_delete(c: &Connection, device: u32) -> rusqlite::Result<bool> {
@@ -763,6 +785,36 @@ mod tests {
             owner_handoff(&c, "notes", src, &code, None, None).unwrap(),
             Err(HandoffRefusal::NotFound)
         );
+    }
+
+    #[test]
+    fn source_cancels_handoff() {
+        let mut c = db();
+        let (src, _) = add_device(&c, "notes", "laptop", false, 0).unwrap();
+        let (other, _) = add_device(&c, "notes", "desktop", false, 0).unwrap();
+        // До входа: код остаётся рабочим, но уже без обмена.
+        let (code, _) = create_join_code(&c, "notes", "a", Some(src), false).unwrap();
+        offer_handoff(&c, &code, &[1; 32]).unwrap();
+        assert!(
+            !owner_handoff_cancel(&c, "notes", other, &code).unwrap(),
+            "чужой код"
+        );
+        assert!(owner_handoff_cancel(&c, "notes", src, &code).unwrap());
+        assert!(!owner_handoff_cancel(&c, "notes", src, &code).unwrap());
+        let (id, ..) = redeem_join_code(&mut c, &code, "", &|_| Ok(0))
+            .unwrap()
+            .unwrap();
+        assert_eq!(joiner_commit(&c, id).unwrap(), None);
+        // После входа: новое устройство обмена больше не видит.
+        let (code, _) = create_join_code(&c, "notes", "b", Some(src), false).unwrap();
+        offer_handoff(&c, &code, &[1; 32]).unwrap();
+        let (id, ..) = redeem_join_code(&mut c, &code, "", &|_| Ok(0))
+            .unwrap()
+            .unwrap();
+        assert!(joiner_handoff_put(&c, id, b"pk", None).unwrap());
+        assert!(owner_handoff_cancel(&c, "notes", src, &code).unwrap());
+        assert_eq!(joiner_handoff_get(&c, id).unwrap(), None);
+        assert!(!joiner_handoff_delete(&c, id).unwrap());
     }
 
     #[test]

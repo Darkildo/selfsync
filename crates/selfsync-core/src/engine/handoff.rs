@@ -1,6 +1,9 @@
 //! Передача ключа vault'а по коду подключения (протокол 1.4): шаги источника и
 //! нового устройства поверх [`crate::handoff`]. Интерфейс опрашивает их командами,
-//! пока не придёт `done`; на любой ошибке обмен забыт, и новое устройство вводит
+//! пока не придёт `done` (или `sent`). Сбой сети и ответы 5xx — не повод бросать
+//! обмен: состояние остаётся, ответ — тот же шаг с `offline`, интерфейс повторяет
+//! реже. Обмен забывается на отказе по существу (подмена, неверный ключ, обмен
+//! отменён или истёк — 404) и по явной отмене; тогда новое устройство вводит
 //! пароль как раньше.
 
 use super::api;
@@ -19,7 +22,15 @@ pub(crate) struct SourceHandoff {
     link_secret: [u8; LINK_SECRET_LEN],
     /// Ключ нового устройства, каким его увидели впервые.
     joiner_pk: Option<Vec<u8>>,
+    /// Последний шаг: имя нового устройства, цифры и MAC сошёлся — его же
+    /// показывает интерфейс, пока сервер недоступен.
+    name: String,
+    sas: Option<String>,
+    qr: bool,
     revealed: bool,
+    /// Обёртку уже отправляли: если потом обмена на сервере нет (404), новое
+    /// устройство её забрало и закрыло обмен — ключ отправлен.
+    wrap_sent: bool,
 }
 
 /// Обмен, где это устройство — новое.
@@ -30,6 +41,12 @@ pub(crate) struct JoinerHandoff {
     /// Обязательство сверено по `h` из QR: ключ источника подлинный, сверка
     /// цифр здесь не нужна. Иначе ключ принимается только после неё.
     by_qr: bool,
+    /// MAC ключа обмена секретом из QR (пусто — без QR).
+    mac: Vec<u8>,
+    /// Свой ключ на сервере (иначе отправить при следующем опросе).
+    pk_sent: bool,
+    /// Цифры, когда ключ источника уже пришёл.
+    sas: Option<String>,
 }
 
 fn fail<T>(code: &str, message: &str) -> SyncResult<T> {
@@ -40,12 +57,44 @@ fn fail<T>(code: &str, message: &str) -> SyncResult<T> {
     })
 }
 
-fn step(step: HandoffStep, name: String, sas: Option<String>) -> UiResult {
+/// Сбой связи, а не отказ: сеть, таймаут, 5xx, лимитер, ответ не разобран (прокси).
+fn transient(e: &SyncError) -> bool {
+    matches!(
+        e,
+        SyncError::Network(_)
+            | SyncError::Server { .. }
+            | SyncError::RateLimited { .. }
+            | SyncError::Protocol(_)
+    )
+}
+
+/// Обмена на сервере нет: отменён другой стороной, истёк или закрыт.
+fn gone(e: &SyncError) -> bool {
+    matches!(e, SyncError::Http { status: 404, .. })
+}
+
+fn result(step: HandoffStep, name: String, sas: Option<String>, qr: bool) -> UiResult {
     UiResult::Handoff {
         step,
         name,
         sas,
-        qr: false,
+        qr,
+        offline: false,
+    }
+}
+
+/// Тот же шаг, что был, с пометкой «нет связи, повторяем».
+fn offline(sas: Option<String>, name: String, qr: bool) -> UiResult {
+    UiResult::Handoff {
+        step: if sas.is_some() {
+            HandoffStep::Confirm
+        } else {
+            HandoffStep::Waiting
+        },
+        name,
+        sas,
+        qr,
+        offline: true,
     }
 }
 
@@ -70,7 +119,11 @@ pub(crate) async fn offer(
             eph,
             link_secret,
             joiner_pk: None,
+            name: String::new(),
+            sas: None,
+            qr: false,
             revealed: false,
+            wrap_sent: false,
         },
     )))
 }
@@ -98,20 +151,32 @@ pub(crate) async fn source_step(
             "обмен ключом по этому коду не начат или закончен",
         );
     };
-    let forget = |cx: &Ctx| cx.with_mut(|s| s.handoffs.remove(&code));
-    let res = source_advance(cx, &code, &mut h, confirm).await;
-    match &res {
+    let res = match source_advance(cx, &code, &mut h, confirm).await {
+        Err(e) if transient(&e) => Ok(offline(h.sas.clone(), h.name.clone(), h.qr)),
+        // Обёртку отправляли, а обмена уже нет: новое устройство её забрало.
+        Err(e) if gone(&e) && h.wrap_sent => {
+            Ok(result(HandoffStep::Sent, h.name.clone(), None, h.qr))
+        }
+        Err(e) if gone(&e) => fail(
+            "handoff_gone",
+            "обмен прерван на новом устройстве или истёк",
+        ),
+        r => r,
+    };
+    let ongoing = matches!(
+        res,
         Ok(UiResult::Handoff {
-            step: HandoffStep::Done,
+            step: HandoffStep::Waiting | HandoffStep::Confirm,
             ..
         })
-        | Err(_) => {
-            forget(cx);
+    );
+    cx.with_mut(|s| {
+        if ongoing {
+            s.handoffs.insert(code.clone(), h);
+        } else {
+            s.handoffs.remove(&code);
         }
-        _ => {
-            cx.with_mut(|s| s.handoffs.insert(code.clone(), h));
-        }
-    }
+    });
     res
 }
 
@@ -122,12 +187,20 @@ async fn source_advance(
     confirm: Option<String>,
 ) -> SyncResult<UiResult> {
     let labels = Labels::selfsync();
+    // Согласие на уже показанных цифрах — сразу обёртка, без лишнего опроса.
+    if let (Some(b), Some(sas)) = (h.joiner_pk.clone(), h.sas.clone())
+        && h.revealed
+        && confirm.as_deref() == Some(sas.as_str())
+    {
+        return send_wrap(cx, code, h, &b).await;
+    }
     let st = api::handoff_source(cx, code.to_owned(), vec![], vec![]).await?;
+    h.name = st.name.clone();
     if st.delivered {
-        return Ok(step(HandoffStep::Done, st.name, None));
+        return Ok(result(HandoffStep::Done, st.name, None, h.qr));
     }
     if st.pk.is_empty() {
-        return Ok(step(HandoffStep::Waiting, st.name, None));
+        return Ok(result(HandoffStep::Waiting, st.name, None, false));
     }
     // Сервер пишет ключ один раз; другой ключ при следующем опросе — подмена.
     match &h.joiner_pk {
@@ -160,19 +233,26 @@ async fn source_advance(
             "ключ нового устройства не совпал с QR-кодом — обмен прерван",
         );
     }
+    h.sas = Some(sas.clone());
+    h.qr = qr;
     if confirm.as_deref() != Some(sas.as_str()) {
-        return Ok(UiResult::Handoff {
-            step: HandoffStep::Confirm,
-            name: st.name,
-            sas: Some(sas),
-            qr,
-        });
+        return Ok(result(HandoffStep::Confirm, st.name, Some(sas), qr));
     }
+    send_wrap(cx, code, h, &st.pk).await
+}
+
+async fn send_wrap(
+    cx: &Ctx,
+    code: &str,
+    h: &mut SourceHandoff,
+    joiner: &[u8],
+) -> SyncResult<UiResult> {
     let Some(master) = cx.with(|s| s.master.clone()) else {
         return fail("no_key", "ключ шифрования на этом устройстве не раскрыт");
     };
-    let wrapped = handoff::wrap(&labels, &h.eph, &st.pk, master.as_bytes())
+    let wrapped = handoff::wrap(&Labels::selfsync(), &h.eph, joiner, master.as_bytes())
         .map_err(|e| SyncError::Io(e.to_string()))?;
+    h.wrap_sent = true;
     let done = api::handoff_source(cx, code.to_owned(), vec![], wrapped).await?;
     if !done.delivered {
         return fail("handoff_not_delivered", "сервер не принял обёртку ключа");
@@ -181,7 +261,18 @@ async fn source_advance(
         LogLevel::Info,
         format!("ключ шифрования передан устройству «{}»", done.name),
     );
-    Ok(step(HandoffStep::Done, done.name, None))
+    Ok(result(HandoffStep::Done, done.name, None, h.qr))
+}
+
+/// Источник отменяет обмен («Не передавать», окно закрыто): сервер его забывает,
+/// новое устройство получает 404 и переходит к паролю. Код, по которому ещё не
+/// подключились, остаётся рабочим — без передачи ключа.
+pub(crate) async fn source_cancel(cx: &Ctx, code: String) -> SyncResult<UiResult> {
+    if cx.with_mut(|s| s.handoffs.remove(&code)).is_some() {
+        // Сеть недоступна — обмен истечёт сам.
+        let _ = api::handoff_source_cancel(cx, code).await;
+    }
+    Ok(UiResult::Ok)
 }
 
 /// Новое устройство: начать обмен (после `Redeem` с обязательством источника).
@@ -223,28 +314,35 @@ pub(crate) async fn receive_start(
             _ => vec![],
         },
     };
-    api::handoff_joiner_put(cx, eph.public().to_vec(), mac).await?;
-    cx.with_mut(|s| s.receiving = Some(JoinerHandoff { eph, commit, by_qr }));
-    Ok(joiner_step(HandoffStep::Waiting, None, by_qr))
-}
-
-fn joiner_step(step: HandoffStep, sas: Option<String>, qr: bool) -> UiResult {
-    UiResult::Handoff {
-        step,
-        name: String::new(),
-        sas,
-        qr,
-    }
+    cx.with_mut(|s| {
+        s.receiving = Some(JoinerHandoff {
+            eph,
+            commit,
+            by_qr,
+            mac,
+            pk_sent: false,
+            sas: None,
+        })
+    });
+    // Первый шаг — как опрос: при сбое сети ключ уйдёт при следующем.
+    receive_poll(cx, None).await
 }
 
 /// Новое устройство: опрос. `confirm` — ключ источника пришёл, цифры готовы (без
 /// `qr` ключ примется, только когда пользователь их сверит: `confirm` команды —
 /// эти цифры); `done` — ключ раскрыт и запомнен, обмен на сервере закрыт.
 pub(crate) async fn receive_poll(cx: &Ctx, confirm: Option<String>) -> SyncResult<UiResult> {
-    let Some(h) = cx.with(|s| s.receiving.clone()) else {
+    let Some(mut h) = cx.with(|s| s.receiving.clone()) else {
         return fail("no_handoff", "обмен ключом не начат");
     };
-    let res = receive_advance(cx, &h, confirm).await;
+    let res = match receive_advance(cx, &mut h, confirm).await {
+        Err(e) if transient(&e) => Ok(offline(h.sas.clone(), String::new(), h.by_qr)),
+        Err(e) if gone(&e) => fail(
+            "handoff_gone",
+            "обмен отменён на устройстве с кодом или истёк — введите пароль",
+        ),
+        r => r,
+    };
     let ongoing = matches!(
         res,
         Ok(UiResult::Handoff {
@@ -252,7 +350,9 @@ pub(crate) async fn receive_poll(cx: &Ctx, confirm: Option<String>) -> SyncResul
             ..
         })
     );
-    if !ongoing {
+    if ongoing {
+        cx.with_mut(|s| s.receiving = Some(h));
+    } else {
         cx.with_mut(|s| s.receiving = None);
         // Получили или отказались — обмен на сервере больше не нужен.
         let _ = api::handoff_joiner_delete(cx).await;
@@ -262,13 +362,17 @@ pub(crate) async fn receive_poll(cx: &Ctx, confirm: Option<String>) -> SyncResul
 
 async fn receive_advance(
     cx: &Ctx,
-    h: &JoinerHandoff,
+    h: &mut JoinerHandoff,
     confirm: Option<String>,
 ) -> SyncResult<UiResult> {
     let labels = Labels::selfsync();
+    if !h.pk_sent {
+        api::handoff_joiner_put(cx, h.eph.public().to_vec(), h.mac.clone()).await?;
+        h.pk_sent = true;
+    }
     let st = api::handoff_joiner_get(cx).await?;
     if st.pk.is_empty() {
-        return Ok(joiner_step(HandoffStep::Waiting, None, h.by_qr));
+        return Ok(result(HandoffStep::Waiting, String::new(), None, h.by_qr));
     }
     if !handoff::check_commit(&st.pk, &h.commit) {
         return fail(
@@ -277,11 +381,17 @@ async fn receive_advance(
         );
     }
     let sas = handoff::sas_digits(&labels, &st.pk, h.eph.public());
+    h.sas = Some(sas.clone());
     // Без `h` ключ источника пришёл только от сервера: им мог оказаться ключ
     // сервера. Ключ не открывается и не запоминается, пока цифры не сверены здесь.
     let trusted = h.by_qr || confirm.as_deref() == Some(sas.as_str());
     if st.wrapped.is_empty() || !trusted {
-        return Ok(joiner_step(HandoffStep::Confirm, Some(sas), h.by_qr));
+        return Ok(result(
+            HandoffStep::Confirm,
+            String::new(),
+            Some(sas),
+            h.by_qr,
+        ));
     }
     let key = handoff::unwrap(&labels, &h.eph, &st.pk, &st.wrapped)
         .map_err(|_| SyncError::Corrupt("обёртка ключа не открывается".into()))?;
@@ -308,5 +418,5 @@ async fn receive_advance(
         LogLevel::Info,
         "ключ шифрования получен от другого устройства",
     );
-    Ok(joiner_step(HandoffStep::Done, Some(sas), h.by_qr))
+    Ok(result(HandoffStep::Done, String::new(), Some(sas), h.by_qr))
 }

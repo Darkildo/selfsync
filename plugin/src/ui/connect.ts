@@ -98,6 +98,7 @@ export class ConnectModal extends Modal {
       el.createEl("p", { text: t("handoff.received") });
       return;
     }
+    if (r.offline) el.createEl("p", { text: t("handoff.offline"), cls: "setting-item-description" });
     const stop = (): void => {
       this.stopWaiting = true;
       el.empty();

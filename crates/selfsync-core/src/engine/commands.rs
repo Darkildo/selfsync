@@ -384,10 +384,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             })
         }
         UiCommand::JoinHandoff { code, confirm } => handoff::source_step(cx, code, confirm).await,
-        UiCommand::CancelHandoff { code } => {
-            cx.with_mut(|s| s.handoffs.remove(&code));
-            Ok(UiResult::Ok)
-        }
+        UiCommand::CancelHandoff { code } => handoff::source_cancel(cx, code).await,
         UiCommand::Redeem { code, name } => {
             let t = api::join_redeem(cx, code, name).await?;
             Ok(UiResult::Token {

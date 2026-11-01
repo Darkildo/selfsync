@@ -5,6 +5,8 @@ import type { HandoffView, UiResult } from "./types.ts";
 
 /** Опрос шагов обмена. */
 export const HANDOFF_POLL_MS = 1500;
+/** Самая длинная пауза опроса, пока сервер недоступен. */
+export const HANDOFF_BACKOFF_MAX_MS = 15_000;
 /** Сколько новое устройство ждёт ключ (столько же сервер хранит обмен). */
 export const HANDOFF_WAIT_MS = 10 * 60 * 1000;
 
@@ -40,17 +42,21 @@ export interface PollOptions {
   interval?: number;
 }
 
-/** Опрашивать до `done`, ошибки, остановки или срока. Возвращает последний ответ
- *  (`null` — остановлено или срок вышел). */
+/** Опрашивать до `done`/`sent`, ошибки, остановки или срока. Без связи
+ *  (`offline`) пауза растёт вдвое до 15 с. Возвращает последний ответ (`null` —
+ *  остановлено или срок вышел). */
 export async function pollHandoff(o: PollOptions): Promise<UiResult | null> {
   const now = o.now ?? Date.now;
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => window.setTimeout(r, ms)));
+  const base = o.interval ?? HANDOFF_POLL_MS;
+  let wait = base;
   while (!o.stopped() && now() < o.deadline) {
     const r = await o.step();
     if (o.stopped()) return null;
     o.onResult(r);
-    if (!isHandoff(r) || r.step === "done") return r;
-    await sleep(o.interval ?? HANDOFF_POLL_MS);
+    if (!isHandoff(r) || r.step === "done" || r.step === "sent") return r;
+    wait = r.offline ? Math.min(wait * 2, Math.max(HANDOFF_BACKOFF_MAX_MS, base)) : base;
+    await sleep(wait);
   }
   return null;
 }

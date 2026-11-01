@@ -230,8 +230,23 @@ async fn pause(interval: Duration) -> bool {
     }
 }
 
+/// Самая длинная пауза опроса, пока сервер недоступен.
+const BACKOFF_MAX: Duration = Duration::from_secs(15);
+
+/// Пауза опроса: обычная, а без связи — вдвое дольше прежней (до 15 с).
+fn next_pause(cur: Duration, base: Duration, offline: bool, ui: &mut impl Prompt) -> Duration {
+    if !offline {
+        return base;
+    }
+    if cur == base {
+        ui.say("нет связи с сервером — повторяем…");
+    }
+    (cur * 2).min(BACKOFF_MAX.max(base))
+}
+
 /// Источник: ждать новое устройство по коду и передать ему ключ с согласия
-/// пользователя (при коде, введённом руками, — после сверки цифр).
+/// пользователя (при коде, введённом руками, — после сверки цифр). Сбой сети — не
+/// повод бросать обмен: опрос продолжается реже.
 pub async fn give_key(
     sess: &mut Session,
     code: &str,
@@ -241,6 +256,7 @@ pub async fn give_key(
 ) -> anyhow::Result<Exchange> {
     let mut confirm: Option<String> = None;
     let mut waiting_said = false;
+    let mut wait = interval;
     while now_ms() < deadline_ms {
         let r = sess
             .command(UiCommand::JoinHandoff {
@@ -258,23 +274,29 @@ pub async fn give_key(
                 return Ok(Exchange::Done);
             }
             UiResult::Handoff {
-                step: HandoffStep::Waiting,
+                step: HandoffStep::Sent,
+                name,
                 ..
             } => {
-                if !waiting_said {
-                    ui.say("ждём новое устройство (Ctrl-C — выйти)…");
-                    waiting_said = true;
-                }
+                ui.say(&format!(
+                    "ключ шифрования отправлен «{name}»; проверьте на новом устройстве, что он принят"
+                ));
+                return Ok(Exchange::Done);
             }
             UiResult::Handoff {
                 step: HandoffStep::Confirm,
                 name,
-                sas,
+                sas: Some(sas),
                 qr,
-            } => {
-                let sas = sas.unwrap_or_default();
+                offline,
+            } if confirm.as_deref() != Some(sas.as_str()) => {
                 let question = if qr {
-                    format!("«{name}» подключилось по QR-коду. Передать ему ключ шифрования?")
+                    format!(
+                        "«{name}» подключилось по QR-коду. Передать ему ключ шифрования? \
+                         (если новое устройство показывает цифры {}, сверьте: не совпадают — \
+                         отвечайте «нет»)",
+                        format_sas(&sas)
+                    )
                 } else {
                     format!(
                         "«{name}» подключилось по коду. На нём должны быть цифры {}. \
@@ -282,6 +304,9 @@ pub async fn give_key(
                         format_sas(&sas)
                     )
                 };
+                if offline {
+                    ui.say("нет связи с сервером — ответ отправится, когда она вернётся");
+                }
                 match ui.ask(&question).await {
                     Answer::Yes => {}
                     a => {
@@ -297,6 +322,13 @@ pub async fn give_key(
                 // Ответ — сразу, без паузы.
                 continue;
             }
+            UiResult::Handoff { step, offline, .. } => {
+                if step == HandoffStep::Waiting && !waiting_said {
+                    ui.say("ждём новое устройство (Ctrl-C — выйти)…");
+                    waiting_said = true;
+                }
+                wait = next_pause(wait, interval, offline, ui);
+            }
             UiResult::Error { message, .. } => {
                 ui.say(&format!(
                     "ключ не передан: {message}. На новом устройстве можно ввести пароль"
@@ -305,7 +337,7 @@ pub async fn give_key(
             }
             other => anyhow::bail!("неожиданный ответ: {other:?}"),
         }
-        if !pause(interval).await {
+        if !pause(wait).await {
             cancel(sess, code).await;
             return Ok(Exchange::Interrupted);
         }
@@ -315,6 +347,7 @@ pub async fn give_key(
     Ok(Exchange::Refused)
 }
 
+/// Отменить обмен на сервере: новое устройство узнает об этом и спросит пароль.
 async fn cancel(sess: &mut Session, code: &str) {
     let _ = sess
         .command(UiCommand::CancelHandoff {
@@ -324,9 +357,9 @@ async fn cancel(sess: &mut Session, code: &str) {
 }
 
 /// Новое устройство: получить ключ от источника (`commit` — из `Token.handoff`,
-/// `link` — `m=` и `h=` из ссылки QR). Цифры показываются всегда; без `h` ключ
-/// принимается, только когда пользователь подтвердит их здесь. Ключ сохраняется
-/// в `.selfsync/key`.
+/// `secret` и `check` — `m=` и `h=` из ссылки QR). Цифры показываются всегда; без
+/// `h` ключ принимается, только когда пользователь подтвердит их здесь. Ключ
+/// сохраняется в `.selfsync/key`. Сбой сети — не повод бросать обмен.
 pub async fn receive_key(
     sess: &mut Session,
     commit: Vec<u8>,
@@ -345,6 +378,7 @@ pub async fn receive_key(
         .await?;
     let mut said: Option<HandoffStep> = None;
     let mut confirmed: Option<String> = None;
+    let mut wait = interval;
     loop {
         match r {
             UiResult::Handoff {
@@ -356,17 +390,17 @@ pub async fn receive_key(
             }
             UiResult::Handoff {
                 step: HandoffStep::Confirm,
-                sas,
+                sas: Some(sas),
                 qr,
+                offline,
                 ..
             } => {
-                let sas = sas.unwrap_or_default();
                 if qr {
                     if said != Some(HandoffStep::Confirm) {
                         ui.say(&format!(
                             "цифры обмена: {}. При входе по QR на устройстве с кодом их сверять \
-                             не нужно; если оно всё же показывает цифры — сверьте, а не совпадают \
-                             — это подмена, прервите (Ctrl-C)",
+                             не нужно; если оно всё же показывает цифры и они не совпадают — \
+                             нажмите там «нет» (не передавать)",
                             format_sas(&sas)
                         ));
                     }
@@ -388,6 +422,7 @@ pub async fn receive_key(
                             continue;
                         }
                         a => {
+                            // Отказ здесь доходит до источника: он увидит, что обмен прерван.
                             let _ = sess.command(UiCommand::CancelReceive).await;
                             if a == Answer::Interrupted {
                                 return Ok(Exchange::Interrupted);
@@ -398,8 +433,9 @@ pub async fn receive_key(
                     }
                 }
                 said = Some(HandoffStep::Confirm);
+                wait = next_pause(wait, interval, offline, ui);
             }
-            UiResult::Handoff { .. } => {
+            UiResult::Handoff { offline, .. } => {
                 if said.is_none() {
                     said = Some(HandoffStep::Waiting);
                     ui.say(
@@ -407,6 +443,7 @@ pub async fn receive_key(
                          (Ctrl-C — ввести пароль позже)…",
                     );
                 }
+                wait = next_pause(wait, interval, offline, ui);
             }
             UiResult::Error { message, .. } => {
                 ui.say(&format!("ключ не пришёл: {message}"));
@@ -418,7 +455,7 @@ pub async fn receive_key(
             let _ = sess.command(UiCommand::CancelReceive).await;
             return Ok(Exchange::Refused);
         }
-        if !pause(interval).await {
+        if !pause(wait).await {
             let _ = sess.command(UiCommand::CancelReceive).await;
             return Ok(Exchange::Interrupted);
         }

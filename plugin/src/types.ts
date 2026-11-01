@@ -169,10 +169,14 @@ export interface DeviceView {
  *  сверено по `h` (без этого ключ примется только после сверки цифр здесь). */
 export interface HandoffView {
   type: "handoff";
-  step: "waiting" | "confirm" | "done";
+  /** `sent` — у источника: обёртка ушла, подтверждение сервера потерялось, а
+   *  обмена уже нет (новое устройство её забрало) — проверить там. */
+  step: "waiting" | "confirm" | "done" | "sent";
   name: string;
   sas?: string | null;
   qr?: boolean;
+  /** Сервер сейчас недоступен: шаг прежний, обмен не брошен, опрос — реже. */
+  offline?: boolean;
 }
 
 export type UiResult =

@@ -2728,6 +2728,7 @@ mod handoff {
             name,
             sas: Some(sas),
             qr: true,
+            ..
         } = source(&mut p.w, &p.code, None, 10)
         else {
             panic!("источник должен спросить согласие");
@@ -2916,6 +2917,210 @@ mod handoff {
             "{r:?}"
         );
         assert!(p.w.clients[1].remembered_key.is_none());
+    }
+
+    fn err_code(r: &UiResult) -> &str {
+        match r {
+            UiResult::Error { code, .. } => code,
+            other => panic!("ждали ошибку: {other:?}"),
+        }
+    }
+
+    fn is_offline(r: &UiResult) -> bool {
+        matches!(r, UiResult::Handoff { offline: true, .. })
+    }
+
+    /// Ответ GET с обёрткой потерялся: обмен не брошен, повтор отдаёт ту же
+    /// обёртку, ключ принят.
+    #[test]
+    fn lost_wrapped_response_is_retried() {
+        let mut p = pair();
+        redeem(&mut p);
+        start(&mut p, By::Qr);
+        let sas = sas_of(&source(&mut p.w, &p.code, None, 10));
+        let r = source(&mut p.w, &p.code, Some(sas), 11);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Done,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        p.w.planned_faults
+            .push_back(("GET /v1/join/handoff".into(), true));
+        let r = poll(&mut p.w, None, 12);
+        assert!(is_offline(&r), "{r:?}");
+        assert!(p.w.clients[1].remembered_key.is_none());
+        let r = poll(&mut p.w, None, 13);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Done,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        let note = p.note.clone();
+        finish(&mut p.w, &note);
+    }
+
+    /// Сеть пропала у источника и у нового устройства до ключа: шаг прежний с
+    /// `offline`, обмен продолжается.
+    #[test]
+    fn network_errors_keep_exchange() {
+        let mut p = pair();
+        redeem(&mut p);
+        // Ключ нового устройства не дошёл до сервера — уйдёт при следующем опросе.
+        p.w.planned_faults
+            .push_back(("PUT /v1/join/handoff".into(), false));
+        let r = start(&mut p, By::Typed);
+        assert!(is_offline(&r), "{r:?}");
+        p.w.planned_faults
+            .push_back(("POST /v1/join/handoff".into(), false));
+        let r = source(&mut p.w, &p.code, None, 10);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Waiting,
+                    offline: true,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        let r = poll(&mut p.w, None, 11);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Waiting,
+                    offline: false,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        let sas = sas_of(&source(&mut p.w, &p.code, None, 12));
+        assert_eq!(sas_of(&poll(&mut p.w, Some(sas.clone()), 13)), sas);
+        let r = source(&mut p.w, &p.code, Some(sas.clone()), 14);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Done,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        let r = poll(&mut p.w, Some(sas), 15);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Done,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+    }
+
+    /// Подтверждение отправки обёртки потерялось, а новое устройство её уже забрало
+    /// и закрыло обмен: источник говорит «отправлен», а не «истёк».
+    #[test]
+    fn lost_delivery_ack_means_sent() {
+        let mut p = pair();
+        redeem(&mut p);
+        start(&mut p, By::Qr);
+        let sas = sas_of(&source(&mut p.w, &p.code, None, 10));
+        p.w.planned_faults
+            .push_back(("POST /v1/join/handoff".into(), true));
+        let r = source(&mut p.w, &p.code, Some(sas.clone()), 11);
+        assert!(is_offline(&r), "{r:?}");
+        let r = poll(&mut p.w, None, 12);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Done,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        let r = source(&mut p.w, &p.code, Some(sas), 13);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Sent,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+    }
+
+    /// «Не передавать» на источнике доходит до нового устройства, «цифры другие»
+    /// на новом — до источника.
+    #[test]
+    fn refusal_reaches_other_side() {
+        let mut p = pair();
+        redeem(&mut p);
+        start(&mut p, By::Typed);
+        sas_of(&source(&mut p.w, &p.code, None, 10));
+        let r = ui_result(
+            &mut p.w,
+            0,
+            11,
+            UiCommand::CancelHandoff {
+                code: p.code.clone(),
+            },
+        );
+        assert!(matches!(r, UiResult::Ok), "{r:?}");
+        assert_eq!(err_code(&poll(&mut p.w, None, 12)), "handoff_gone");
+
+        let mut p = pair();
+        redeem(&mut p);
+        start(&mut p, By::Typed);
+        sas_of(&source(&mut p.w, &p.code, None, 10));
+        sas_of(&poll(&mut p.w, None, 11));
+        let r = ui_result(&mut p.w, 1, 12, UiCommand::CancelReceive);
+        assert!(matches!(r, UiResult::Ok), "{r:?}");
+        assert_eq!(
+            err_code(&source(&mut p.w, &p.code, None, 13)),
+            "handoff_gone"
+        );
+
+        // Источник отменил до входа: код работает, но без передачи ключа.
+        let mut p = pair();
+        ui_result(
+            &mut p.w,
+            0,
+            11,
+            UiCommand::CancelHandoff {
+                code: p.code.clone(),
+            },
+        );
+        let UiResult::Token { handoff, .. } = ui_result(
+            &mut p.w,
+            1,
+            12,
+            UiCommand::Redeem {
+                code: p.code.clone(),
+                name: String::new(),
+            },
+        ) else {
+            panic!("код должен остаться рабочим");
+        };
+        assert_eq!(handoff, None);
     }
 
     #[test]

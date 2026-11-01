@@ -198,6 +198,17 @@ pub async fn handoff_source(
     let code = req.code.trim().replace('-', "").to_ascii_lowercase();
     let vault = a.vault.name.clone();
     let device = a.device_id;
+    if req.cancel {
+        let ok = st
+            .server_db(move |c| Ok(server::owner_handoff_cancel(c, &vault, device, &code)?))
+            .await?;
+        return if ok {
+            tracing::info!(device, "обмен ключом по коду отменён источником");
+            Ok(Proto(pb::JoinHandoffSourceState::default()))
+        } else {
+            Err(ApiError::not_found("code_invalid"))
+        };
+    }
     let pk = (!req.pk.is_empty()).then_some(req.pk);
     let wrapped = (!req.wrapped.is_empty()).then_some(req.wrapped);
     let h = st

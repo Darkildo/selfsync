@@ -326,6 +326,7 @@ message JoinHandoffSource {
   string code = 1;
   bytes pk = 2;              // открытый ключ источника (его sha256 — commit)
   bytes wrapped = 3;         // nonce ‖ AES-256-GCM(k, мастер-ключ)
+  bool cancel = 4;           // отменить обмен: новое устройство получит 404, код без обмена остаётся рабочим
 }
 
 message JoinHandoffSourceState {

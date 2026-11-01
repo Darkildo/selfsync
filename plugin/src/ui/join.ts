@@ -93,12 +93,17 @@ export class JoinModal extends Modal {
       return;
     }
     if (r.type !== "handoff") return;
+    if (r.offline) el.createEl("p", { text: t("handoff.offline"), cls: "setting-item-description" });
     if (r.step === "waiting") {
       el.createEl("p", { text: t("handoff.waiting") });
       return;
     }
     if (r.step === "done") {
       el.createEl("p", { text: t("handoff.sent", { name: r.name }) });
+      return;
+    }
+    if (r.step === "sent") {
+      el.createEl("p", { text: t("handoff.sentUnconfirmed", { name: r.name }) });
       return;
     }
     const sas = r.sas ?? "";
