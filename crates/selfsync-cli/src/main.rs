@@ -4,9 +4,10 @@ use std::process::ExitCode;
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use selfsync_cli::config::{Config, STATE_DIR};
-use selfsync_cli::runner::{self, Options, Outcome, VaultCommand};
+use selfsync_cli::handoff;
+use selfsync_cli::runner::{self, Options, Outcome, Session, VaultCommand};
 use selfsync_core::engine::{
-    ConflictChoice, DiagCheck, DiagLevel, QuotaStatus, StorageHealth, UiCommand, UiResult,
+    ConflictChoice, DiagCheck, DiagLevel, Event, QuotaStatus, StorageHealth, UiCommand, UiResult,
 };
 use selfsync_core::index::Index;
 
@@ -39,16 +40,42 @@ enum Cmd {
         #[arg(long)]
         use_wait: bool,
     },
-    /// Подключить папку одноразовым кодом (`selfsync link` или «Подключить новое устройство»).
+    /// Подключить папку одноразовым кодом (`selfsync link`, «Подключить новое
+    /// устройство» или `selfsync-cli join`). Если устройство с кодом передаёт ключ
+    /// шифрования, ключ приходит сюда — пароль не нужен (только с терминалом).
     Connect {
-        #[arg(long)]
-        server: String,
-        #[arg(long)]
-        code: String,
+        #[arg(long, required_unless_present = "link")]
+        server: Option<String>,
+        #[arg(long, required_unless_present = "link")]
+        code: Option<String>,
+        /// Ссылка подключения вместо --server и --code: страница сервера
+        /// (`https://…/join/<код>`) или `obsidian://selfsync-connect?…` из QR.
+        #[arg(long, conflicts_with_all = ["server", "code"])]
+        link: Option<String>,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
         use_wait: bool,
+        /// Не ждать ключ шифрования от устройства с кодом (пароль — при `run`).
+        #[arg(long)]
+        no_handoff: bool,
+    },
+    /// Подключить новое устройство: одноразовый код, ссылка и QR. Если ключ
+    /// шифрования здесь есть (запомнен или --password-file), окно ждёт новое
+    /// устройство и с вашего согласия передаёт ему ключ (только с терминалом).
+    Join {
+        /// Имя будущего устройства (можно изменить при подключении).
+        #[arg(long, default_value = "new device")]
+        name: String,
+        /// Подключить устройство только для чтения.
+        #[arg(long)]
+        read_only: bool,
+        /// Файл с паролем шифрования (или SELFSYNC_PASSWORD), если ключ не запомнен.
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+        /// Не передавать ключ шифрования: только код.
+        #[arg(long)]
+        no_handoff: bool,
     },
     /// Синхронизировать: следить за папкой до Ctrl-C (или один цикл с --once).
     Run {
@@ -470,9 +497,24 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
         Cmd::Connect {
             server,
             code,
+            link,
             name,
             use_wait,
+            no_handoff,
         } => {
+            let (server, code, secret) = match link {
+                Some(l) => {
+                    let l = handoff::parse_link(&l).context(
+                        "ссылка не разобрана: нужна https://…/join/<код> или obsidian://selfsync-connect?…",
+                    )?;
+                    (l.server, l.code, l.secret)
+                }
+                None => (
+                    server.context("нужен --server")?,
+                    code.context("нужен --code")?,
+                    None,
+                ),
+            };
             std::fs::create_dir_all(dir.join(STATE_DIR))?;
             let mut cfg = Config::load(&dir).unwrap_or_default();
             if let Some(n) = name {
@@ -495,6 +537,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     token,
                     vault,
                     device_name,
+                    handoff: commit,
                     ..
                 } => {
                     cfg.server = server;
@@ -504,6 +547,36 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     cfg.use_wait = use_wait;
                     cfg.save(&dir)?;
                     println!("подключено к vault «{vault}» как «{}»", cfg.device_name);
+                    if let Some(commit) = commit {
+                        if no_handoff || !handoff::interactive() {
+                            eprintln!(
+                                "устройство с кодом готово передать ключ шифрования, но обмен \
+                                 выключен или нет терминала: пароль понадобится при run"
+                            );
+                        } else {
+                            let mut sess = Session::new(
+                                &dir,
+                                &cfg.server,
+                                Some(cfg.token.clone()),
+                                &cfg.device_name,
+                            )?;
+                            let deadline = now_ms() + handoff::WAIT_MS;
+                            let got = handoff::receive_key(
+                                &mut sess,
+                                commit,
+                                secret,
+                                deadline,
+                                handoff::POLL,
+                                &mut handoff::Terminal,
+                            )
+                            .await?;
+                            if got {
+                                println!("ключ шифрования сохранён в {STATE_DIR}/key");
+                            } else {
+                                eprintln!("ключ не получен: пароль понадобится при run");
+                            }
+                        }
+                    }
                 }
                 UiResult::Error {
                     code, retry_after, ..
@@ -512,6 +585,84 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 ),
                 UiResult::Error { message, .. } => anyhow::bail!("сервер отказал: {message}"),
                 other => anyhow::bail!("неожиданный ответ: {other:?}"),
+            }
+        }
+        Cmd::Join {
+            name,
+            read_only,
+            password_file,
+            no_handoff,
+        } => {
+            let cfg = Config::load(&dir)?;
+            let want = !no_handoff && handoff::interactive();
+            let mut sess = Session::for_folder(&dir, &cfg)?;
+            let key_saved = dir.join(STATE_DIR).join("key").is_file();
+            if want
+                && !key_saved
+                && let Some(password) = read_password(password_file)?
+            {
+                sess.feed(Event::Password {
+                    password,
+                    remember: false,
+                });
+                sess.settle().await?;
+            }
+            let r = sess
+                .command(UiCommand::CreateJoin {
+                    name: name.clone(),
+                    read_only,
+                    handoff: want,
+                })
+                .await?;
+            let (code, url, expires_at, secret) = match r {
+                UiResult::Join {
+                    code,
+                    url,
+                    expires_at,
+                    secret,
+                } => (code, url, expires_at, secret),
+                UiResult::Error { message, .. } => anyhow::bail!("сервер отказал: {message}"),
+                other => anyhow::bail!("неожиданный ответ: {other:?}"),
+            };
+            println!(
+                "Ссылка подключения «{name}»{} (одноразовая, до {}):",
+                if read_only {
+                    " только для чтения"
+                } else {
+                    ""
+                },
+                fmt_time(expires_at)
+            );
+            println!("{url}\n");
+            // С обменом QR ведёт сразу в Obsidian и несёт секрет: сервер его не видит.
+            let qr = secret.as_deref().map_or_else(
+                || url.clone(),
+                |m| handoff::connect_link(&cfg.server, &code, m),
+            );
+            print!("{}", handoff::render_qr(&qr)?);
+            println!("\nКод для ручного ввода: {code}");
+            println!(
+                "Другая папка: selfsync-cli connect --server {} --code {code}",
+                cfg.server
+            );
+            if secret.is_some() {
+                let deadline = expires_at + handoff::WAIT_MS;
+                let given = handoff::give_key(
+                    &mut sess,
+                    &code,
+                    deadline,
+                    handoff::POLL,
+                    &mut handoff::Terminal,
+                )
+                .await?;
+                if !given {
+                    return Ok(ExitCode::from(1));
+                }
+            } else if want {
+                eprintln!(
+                    "ключ шифрования по коду не передаётся (vault не зашифрован, ключа здесь \
+                     нет — --password-file — или сервер старее 0.5.0)"
+                );
             }
         }
         Cmd::Run {
@@ -1010,6 +1161,12 @@ fn storage_line(s: &StorageHealth) -> String {
         parts.push(format!("проверено {}", fmt_time(s.verified_at)));
     }
     parts.join("; ")
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 fn fmt_time(ms: i64) -> String {

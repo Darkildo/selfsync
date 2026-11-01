@@ -334,7 +334,10 @@ selfsync-cli encrypt --dir ~/notes --password-file ~/.notes-pass
 selfsync-cli rekey --dir ~/notes --password-file ~/.notes-pass
 selfsync-cli status --dir ~/notes
 selfsync-cli check --dir ~/notes                # connection check: address, certificate, proxy, token, …
+selfsync-cli join --dir ~/notes --name phone    # connect a new device: link, QR and code
 ```
+
+Connecting a device to an encrypted vault needs no password when the key is passed over: `join` on a folder that knows the key (remembered, or `--password-file`) waits for the new device, shows its name (and six digits if the code was typed in) and asks before giving it the key; `connect` (by code, or `--link` with a link from a QR code) receives the key and remembers it in `.selfsync/key`. This needs a terminal on both sides and a server 0.5.0 or newer; `--no-handoff` turns it off, and without a terminal the password is asked for as before.
 
 History, the server trash and conflicts work without Obsidian too. Each of these commands first runs a sync cycle (it needs the current index and, for an encrypted vault, the key: `--password-file` or `SELFSYNC_PASSWORD`, as for `run`); commands that change something wait for one more cycle, so the result is already on the server when they return. Exit codes are the same as for `run --once`; `--json` prints machine-readable output.
 

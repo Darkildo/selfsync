@@ -1092,3 +1092,224 @@ async fn diagnose_finds_typical_problems() {
     let d = diagnose(b.path(), &cc).await;
     assert_eq!(d, pairs(&[("server", "refused")]), "{d:?}");
 }
+
+/// Сценарий вместо терминала: ответы на вопросы по очереди, всё сказанное — в
+/// журнал. `wait` — перед ответом дождаться сигнала (цифры показаны на другой
+/// стороне), `signal` — послать его, когда сказаны цифры.
+struct Script {
+    answers: Vec<bool>,
+    said: Vec<String>,
+    wait: Option<std::sync::mpsc::Receiver<()>>,
+    signal: Option<std::sync::mpsc::Sender<()>>,
+}
+
+impl Script {
+    fn new(answers: Vec<bool>) -> Script {
+        Script {
+            answers,
+            said: vec![],
+            wait: None,
+            signal: None,
+        }
+    }
+}
+
+impl selfsync_cli::handoff::Prompt for Script {
+    fn say(&mut self, text: &str) {
+        if text.contains("сверьте цифры")
+            && let Some(s) = &self.signal
+        {
+            let _ = s.send(());
+        }
+        self.said.push(text.to_owned());
+    }
+
+    fn ask(&mut self, question: &str) -> bool {
+        self.said.push(question.to_owned());
+        if let Some(w) = &self.wait {
+            w.recv_timeout(Duration::from_secs(5))
+                .expect("цифры на новом устройстве");
+        }
+        if self.answers.is_empty() {
+            false
+        } else {
+            self.answers.remove(0)
+        }
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+}
+
+struct Handoff {
+    fresh: tempfile::TempDir,
+    cfg: Config,
+    given: bool,
+    got: bool,
+    src: Script,
+    dst: Script,
+}
+
+/// Зашифрованный vault на папке A (ключ запомнен) и новое устройство по коду A
+/// с передачей ключа. Источник — в своём потоке (ядро не `Send`, а вопрос
+/// «передать?» ждёт, пока новое устройство покажет цифры). `qr` — секрет из QR
+/// у нового устройства, `give` — ответ источника.
+async fn handoff_pair(srv: &Server, vault: &str, qr: bool, give: bool) -> Handoff {
+    use selfsync_cli::handoff::{give_key, receive_key};
+    use selfsync_cli::runner::Session;
+    const PW: &str = "correct horse battery staple";
+    let (a, ca) = folder(srv, vault, "a");
+    std::fs::write(a.path().join("s.md"), "secret\n").unwrap();
+    let enable = Options {
+        enable_encryption: true,
+        ..once(Some(PW))
+    };
+    assert_eq!(
+        runner::run(a.path(), &ca, enable).await.unwrap(),
+        Outcome::Synced
+    );
+    let tick = Duration::from_millis(30);
+    let (code_tx, code_rx) = std::sync::mpsc::channel();
+    let (sig_tx, sig_rx) = std::sync::mpsc::channel();
+    let source = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            // Ключ — из .selfsync/key, без запуска синка.
+            let mut src = Session::for_folder(a.path(), &ca).unwrap();
+            let r = src
+                .command(UiCommand::CreateJoin {
+                    name: "laptop".into(),
+                    read_only: false,
+                    handoff: true,
+                })
+                .await
+                .unwrap();
+            let UiResult::Join {
+                code,
+                expires_at,
+                secret,
+                ..
+            } = r
+            else {
+                panic!("нет кода: {r:?}");
+            };
+            code_tx
+                .send((
+                    code.clone(),
+                    secret.expect("ключ запомнен — обмен предложен"),
+                ))
+                .unwrap();
+            let mut ui = Script::new(vec![give]);
+            if !qr {
+                ui.wait = Some(sig_rx);
+            }
+            let given = give_key(&mut src, &code, expires_at, tick, &mut ui)
+                .await
+                .unwrap();
+            (given, ui)
+        })
+    });
+    let (code, secret) = code_rx.recv().unwrap();
+    let fresh = tempfile::tempdir().unwrap();
+    let UiResult::Token { token, handoff, .. } = runner::command(
+        fresh.path(),
+        &srv.url,
+        None,
+        "laptop",
+        UiCommand::Redeem {
+            code,
+            name: "laptop".into(),
+        },
+    )
+    .await
+    .unwrap() else {
+        panic!("код не погашен");
+    };
+    let cfg = Config {
+        server: srv.url.clone(),
+        token: token.clone(),
+        vault: vault.into(),
+        device_name: "laptop".into(),
+        ..Config::default()
+    };
+    cfg.save(fresh.path()).unwrap();
+    let mut dst = Session::new(fresh.path(), &srv.url, Some(token), "laptop").unwrap();
+    let mut ui_dst = Script::new(vec![]);
+    ui_dst.signal = Some(sig_tx);
+    let got = receive_key(
+        &mut dst,
+        handoff.expect("обязательство источника"),
+        qr.then_some(secret),
+        now_ms() + 3_000,
+        tick,
+        &mut ui_dst,
+    )
+    .await
+    .unwrap();
+    let (given, ui_src) = source.join().unwrap();
+    Handoff {
+        fresh,
+        cfg,
+        given,
+        got,
+        src: ui_src,
+        dst: ui_dst,
+    }
+}
+
+/// Шесть цифр из последней строки с цифрами.
+fn digits(said: &[String]) -> String {
+    let s = said
+        .iter()
+        .rev()
+        .find(|s| s.chars().filter(char::is_ascii_digit).count() >= 6)
+        .expect("цифры");
+    let d: String = s.chars().filter(char::is_ascii_digit).collect();
+    d[d.len() - 6..].to_owned()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn join_hands_key_by_qr() {
+    let srv = server().await;
+    let h = handoff_pair(&srv, "hq", true, true).await;
+    assert!(h.given && h.got, "{:?} {:?}", h.src.said, h.dst.said);
+    assert!(
+        h.src
+            .said
+            .iter()
+            .any(|s| s.contains("подключилось по QR-коду"))
+    );
+    assert!(h.fresh.path().join(".selfsync/key").exists());
+    // Пароль не нужен: ключ уже на устройстве.
+    assert_eq!(sync(h.fresh.path(), &h.cfg).await, Outcome::Synced);
+    assert_eq!(
+        std::fs::read_to_string(h.fresh.path().join("s.md")).unwrap(),
+        "secret\n"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn join_hands_key_by_typed_code_after_digits() {
+    let srv = server().await;
+    let h = handoff_pair(&srv, "hc", false, true).await;
+    assert!(h.given && h.got, "{:?} {:?}", h.src.said, h.dst.said);
+    // Обе стороны показали одни и те же цифры.
+    assert_eq!(digits(&h.src.said), digits(&h.dst.said));
+    assert_eq!(sync(h.fresh.path(), &h.cfg).await, Outcome::Synced);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn join_declined_leaves_password() {
+    let srv = server().await;
+    let h = handoff_pair(&srv, "hn", true, false).await;
+    assert!(!h.given && !h.got);
+    assert!(!h.fresh.path().join(".selfsync/key").exists());
+    assert_eq!(sync(h.fresh.path(), &h.cfg).await, Outcome::NeedPassword);
+}

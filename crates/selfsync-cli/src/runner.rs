@@ -582,25 +582,84 @@ pub async fn command(
     device: &str,
     cmd: UiCommand,
 ) -> anyhow::Result<UiResult> {
-    let exec = Arc::new(Exec::new(dir, server, token)?);
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let cfg = EngineConfig {
-        device_name: device.to_owned(),
-        client: crate::config::CLIENT.to_owned(),
-        ..EngineConfig::default()
-    };
-    let mut lp = Loop::new(cfg, None, exec, tx);
-    lp.feed(Event::Command {
-        req: 1,
-        command: cmd,
-    });
-    loop {
-        if let Some(r) = lp.ui.remove(&1) {
-            return Ok(r);
+    Session::new(dir, server, token, device)?.command(cmd).await
+}
+
+/// Движок без цикла синка для нескольких команд подряд: состояние между ними
+/// (обмен ключом по коду) живёт в ядре. Ключ, который ядро просит запомнить,
+/// пишется в `.selfsync/key`, как у `run`.
+pub struct Session {
+    lp: Loop,
+    rx: mpsc::UnboundedReceiver<Event>,
+    next_req: u64,
+}
+
+impl Session {
+    /// Без индекса и ключа: только запросы к серверу.
+    pub fn new(
+        dir: &Path,
+        server: &str,
+        token: Option<String>,
+        device: &str,
+    ) -> anyhow::Result<Session> {
+        let cfg = EngineConfig {
+            device_name: device.to_owned(),
+            client: crate::config::CLIENT.to_owned(),
+            ..EngineConfig::default()
+        };
+        Session::with(Exec::new(dir, server, token)?, cfg, None)
+    }
+
+    /// Движок подключённой папки: индекс и запомненный ключ (без запуска синка;
+    /// ключ ядро сверит с сервером перед использованием).
+    pub fn for_folder(dir: &Path, cfg: &Config) -> anyhow::Result<Session> {
+        let exec = Exec::new(dir, &cfg.server, Some(cfg.token.clone()))?;
+        let index = std::fs::read(exec.index_path()).ok();
+        let key = std::fs::read(exec.key_path()).ok();
+        let mut s = Session::with(exec, cfg.engine(), index.as_deref())?;
+        if let Some(key) = key {
+            s.lp.feed(Event::UseKey { key });
         }
-        match tokio::time::timeout(Duration::from_secs(120), rx.recv()).await {
-            Ok(Some(ev)) => lp.feed(ev),
-            _ => anyhow::bail!("сервер не ответил"),
+        Ok(s)
+    }
+
+    fn with(exec: Exec, cfg: EngineConfig, index: Option<&[u8]>) -> anyhow::Result<Session> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        Ok(Session {
+            lp: Loop::new(cfg, index, Arc::new(exec), tx),
+            rx,
+            next_req: 1,
+        })
+    }
+
+    /// Событие ядру (пароль и т.п.); дождаться — [`Session::settle`].
+    pub fn feed(&mut self, ev: Event) {
+        self.lp.feed(ev);
+    }
+
+    /// Дождаться, пока ядро закончит начатое (раскрытие ключа паролем).
+    pub async fn settle(&mut self) -> anyhow::Result<()> {
+        while !self.lp.settled() {
+            match tokio::time::timeout(Duration::from_secs(120), self.rx.recv()).await {
+                Ok(Some(ev)) => self.lp.feed(ev),
+                _ => anyhow::bail!("сервер не ответил"),
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn command(&mut self, cmd: UiCommand) -> anyhow::Result<UiResult> {
+        let req = self.next_req;
+        self.next_req += 1;
+        self.lp.feed(Event::Command { req, command: cmd });
+        loop {
+            if let Some(r) = self.lp.ui.remove(&req) {
+                return Ok(r);
+            }
+            match tokio::time::timeout(Duration::from_secs(120), self.rx.recv()).await {
+                Ok(Some(ev)) => self.lp.feed(ev),
+                _ => anyhow::bail!("сервер не ответил"),
+            }
         }
     }
 }

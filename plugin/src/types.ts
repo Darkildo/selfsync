@@ -282,6 +282,7 @@ export type IoAction = Extract<Action, { id: number }>;
 
 export type EngineEvent =
   | { type: "start"; key?: Uint8Array | null }
+  | { type: "useKey"; key: Uint8Array }
   | { type: "tick" }
   | { type: "syncNow" }
   | { type: "changed"; path: string }

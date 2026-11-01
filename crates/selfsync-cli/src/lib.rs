@@ -3,5 +3,6 @@
 
 pub mod config;
 pub mod exec;
+pub mod handoff;
 pub mod hook;
 pub mod runner;

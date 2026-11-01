@@ -4,7 +4,7 @@
 //! пароль как раньше.
 
 use super::api;
-use super::crypto_flow::set_master;
+use super::crypto_flow::{self, set_master};
 use super::ctx::{Ctx, SyncError, SyncResult};
 use super::types::{HandoffStep, LogLevel, UiResult};
 use crate::crypto::{self, MasterKey};
@@ -53,6 +53,10 @@ pub(crate) async fn offer(
     server_minor: u32,
 ) -> SyncResult<Option<(Vec<u8>, SourceHandoff)>> {
     if server_minor < MINOR_HANDOFF || cx.with(|s| s.master.is_none()) {
+        return Ok(None);
+    }
+    // Запомненный ключ (CLI вне синка) ещё не сверен: чужой ключ не предлагать.
+    if crypto_flow::verify_keys(cx).await.is_err() || cx.with(|s| s.master.is_none()) {
         return Ok(None);
     }
     let eph = Ephemeral::generate().map_err(|e| SyncError::Io(e.to_string()))?;

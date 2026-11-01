@@ -122,6 +122,7 @@ impl Engine {
                 }
                 cx.set_status(|st| st.state = SyncState::Idle);
             }
+            Event::UseKey { key } => crypto_flow::set_remembered(&cx, &key),
             Event::Tick => {}
             Event::SyncNow => cx.with_mut(|s| {
                 s.need_full_scan = true;
