@@ -12,6 +12,8 @@ use super::{migrate, now_ms};
 pub const TOKEN_PREFIX: &str = "ns_";
 /// Время жизни кода подключения.
 pub const JOIN_TTL_MS: i64 = 15 * 60 * 1000;
+/// Сколько хранится обмен ключом после входа нового устройства по коду.
+pub const HANDOFF_TTL_MS: i64 = 10 * 60 * 1000;
 /// `last_seen` обновляется не чаще раза в минуту.
 const LAST_SEEN_STEP_MS: i64 = 60 * 1000;
 
@@ -56,6 +58,16 @@ ALTER TABLE devices ADD COLUMN client TEXT NOT NULL DEFAULT '';
     "
 -- Счётчики событий для /metrics: переживают выход сервера по простою.
 CREATE TABLE counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID;
+",
+    "
+-- Передача ключа по коду (1.4): обязательство ключа источника, ключ и MAC нового
+-- устройства (оно — used_by), раскрытый ключ источника и обёртка мастер-ключа.
+ALTER TABLE join_codes ADD COLUMN offer_commit BLOB;
+ALTER TABLE join_codes ADD COLUMN joiner_pk BLOB;
+ALTER TABLE join_codes ADD COLUMN joiner_mac BLOB;
+ALTER TABLE join_codes ADD COLUMN owner_pk BLOB;
+ALTER TABLE join_codes ADD COLUMN wrapped BLOB;
+CREATE INDEX join_codes_used_by ON join_codes(used_by);
 ",
 ];
 
@@ -432,8 +444,177 @@ pub fn redeem_join_code(
         "UPDATE join_codes SET used_at = ?1, used_by = ?2 WHERE code_hash = ?3",
         params![now, id, hash_secret(code)],
     )?;
+    // Источник передаёт ключ: обмену — ещё HANDOFF_TTL_MS с этой минуты.
+    tx.execute(
+        "UPDATE join_codes SET expires_at = ?1 WHERE code_hash = ?2 AND offer_commit IS NOT NULL",
+        params![now + HANDOFF_TTL_MS, hash_secret(code)],
+    )?;
     tx.commit()?;
     Ok(Some((id, token, vault, name)))
+}
+
+/// Источник передаст ключ по этому коду: обязательство его ключа обмена.
+pub fn offer_handoff(c: &Connection, code: &str, commit: &[u8]) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE join_codes SET offer_commit = ?1 WHERE code_hash = ?2 AND used_at IS NULL",
+        params![commit, hash_secret(code)],
+    )?;
+    Ok(())
+}
+
+/// Обмен ключом, в котором `device` — новое устройство: обязательство источника.
+/// `None` — обмена нет или он истёк.
+pub fn joiner_commit(c: &Connection, device: u32) -> rusqlite::Result<Option<Vec<u8>>> {
+    c.query_row(
+        "SELECT offer_commit FROM join_codes
+         WHERE used_by = ?1 AND offer_commit IS NOT NULL AND expires_at > ?2",
+        params![device, now_ms()],
+        |r| r.get(0),
+    )
+    .optional()
+}
+
+/// Новое устройство прислало свой ключ обмена и MAC (из QR). Пишется один раз;
+/// `false` — обмена нет, он истёк или ключ уже прислан.
+pub fn joiner_handoff_put(
+    c: &Connection,
+    device: u32,
+    pk: &[u8],
+    mac: Option<&[u8]>,
+) -> rusqlite::Result<bool> {
+    Ok(c.execute(
+        "UPDATE join_codes SET joiner_pk = ?1, joiner_mac = ?2
+         WHERE used_by = ?3 AND offer_commit IS NOT NULL AND expires_at > ?4
+           AND joiner_pk IS NULL",
+        params![pk, mac, device, now_ms()],
+    )? > 0)
+}
+
+/// Состояние обмена ключом по коду.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Handoff {
+    /// Имя нового устройства (или предложенное в коде, пока оно не вошло).
+    pub name: String,
+    pub joiner_pk: Option<Vec<u8>>,
+    pub joiner_mac: Option<Vec<u8>>,
+    pub owner_pk: Option<Vec<u8>>,
+    pub wrapped: Option<Vec<u8>>,
+}
+
+/// Отказ шага источника.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandoffRefusal {
+    /// Кода нет, он истёк, без обмена или его создало другое устройство.
+    NotFound,
+    /// Раскрытый ключ не совпал с обязательством.
+    BadCommit,
+}
+
+/// Шаг источника (устройство `device` vault'а `vault`, создавшее код): раскрыть
+/// свой ключ (`owner_pk` — когда новое устройство уже прислало свой, и только тот,
+/// которым источник обязался) и отдать обёртку (`wrapped` — когда ключ раскрыт).
+/// Каждое поле пишется один раз, повтор молча не меняет записанного.
+pub fn owner_handoff(
+    c: &Connection,
+    vault: &str,
+    device: u32,
+    code: &str,
+    owner_pk: Option<&[u8]>,
+    wrapped: Option<&[u8]>,
+) -> rusqlite::Result<Result<Handoff, HandoffRefusal>> {
+    let h = hash_secret(code);
+    let now = now_ms();
+    let row: Option<(Vec<u8>, String, Option<u32>)> = c
+        .query_row(
+            "SELECT offer_commit, name, used_by FROM join_codes
+             WHERE code_hash = ?1 AND vault = ?2 AND created_by = ?3 AND expires_at > ?4
+               AND offer_commit IS NOT NULL",
+            params![h, vault, device, now],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let Some((commit, code_name, used_by)) = row else {
+        return Ok(Err(HandoffRefusal::NotFound));
+    };
+    if let Some(pk) = owner_pk {
+        if Sha256::digest(pk).as_slice() != commit.as_slice() {
+            return Ok(Err(HandoffRefusal::BadCommit));
+        }
+        c.execute(
+            "UPDATE join_codes SET owner_pk = ?1
+             WHERE code_hash = ?2 AND joiner_pk IS NOT NULL AND owner_pk IS NULL",
+            params![pk, h],
+        )?;
+    }
+    if let Some(w) = wrapped {
+        c.execute(
+            "UPDATE join_codes SET wrapped = ?1
+             WHERE code_hash = ?2 AND owner_pk IS NOT NULL AND wrapped IS NULL",
+            params![w, h],
+        )?;
+    }
+    // Имя — то, под которым устройство вошло (его могли поменять при подключении).
+    let name: Option<String> = match used_by {
+        Some(id) => c
+            .query_row("SELECT name FROM devices WHERE id = ?1", params![id], |r| {
+                r.get(0)
+            })
+            .optional()?,
+        None => None,
+    };
+    let mut out = c.query_row(
+        "SELECT joiner_pk, joiner_mac, owner_pk, wrapped FROM join_codes WHERE code_hash = ?1",
+        params![h],
+        |r| {
+            Ok(Handoff {
+                name: String::new(),
+                joiner_pk: r.get(0)?,
+                joiner_mac: r.get(1)?,
+                owner_pk: r.get(2)?,
+                wrapped: r.get(3)?,
+            })
+        },
+    )?;
+    out.name = name.unwrap_or(code_name);
+    Ok(Ok(out))
+}
+
+/// Шаг нового устройства: ключ источника и обёртка, когда они есть. Обёртка
+/// отдаётся один раз — затем запись обмена удаляется. `None` — обмена нет.
+pub fn joiner_handoff_get(c: &Connection, device: u32) -> rusqlite::Result<Option<Handoff>> {
+    let row = c
+        .query_row(
+            "SELECT code_hash, owner_pk, wrapped FROM join_codes
+             WHERE used_by = ?1 AND offer_commit IS NOT NULL AND expires_at > ?2",
+            params![device, now_ms()],
+            |r| {
+                Ok((
+                    r.get::<_, Vec<u8>>(0)?,
+                    Handoff {
+                        owner_pk: r.get(1)?,
+                        wrapped: r.get(2)?,
+                        ..Handoff::default()
+                    },
+                ))
+            },
+        )
+        .optional()?;
+    let Some((h, hand)) = row else {
+        return Ok(None);
+    };
+    if hand.wrapped.is_some() {
+        c.execute("DELETE FROM join_codes WHERE code_hash = ?1", params![h])?;
+    }
+    Ok(Some(hand))
+}
+
+/// Истёкшие коды и обмены ключом (`selfsync sweep`): открытые ключи и обёртки не
+/// лежат дольше [`HANDOFF_TTL_MS`]. Возвращает число удалённых строк.
+pub fn sweep_join_codes(c: &Connection, now: i64) -> rusqlite::Result<usize> {
+    c.execute(
+        "DELETE FROM join_codes WHERE expires_at <= ?1",
+        params![now],
+    )
 }
 
 #[cfg(test)]
@@ -500,6 +681,119 @@ mod tests {
                 .is_none()
         );
         assert!(peek_join_code(&c, &code).unwrap().is_none());
+    }
+
+    #[test]
+    fn handoff_steps_once_in_order() {
+        let mut c = db();
+        let (src, _) = add_device(&c, "notes", "laptop", false, 0).unwrap();
+        let (other, _) = add_device(&c, "notes", "tablet", false, 0).unwrap();
+        let (code, _) = create_join_code(&c, "notes", "phone", Some(src), false).unwrap();
+        let owner = b"owner-key";
+        let commit: [u8; 32] = Sha256::digest(owner).into();
+        offer_handoff(&c, &code, &commit).unwrap();
+        // До входа нового устройства раскрывать нечего.
+        let h = owner_handoff(&c, "notes", src, &code, Some(owner), Some(b"early"))
+            .unwrap()
+            .unwrap();
+        assert_eq!((h.joiner_pk, h.owner_pk, h.wrapped), (None, None, None));
+        assert_eq!(h.name, "phone");
+        let (joiner, ..) = redeem_join_code(&mut c, &code, "my phone", &|_| Ok(0))
+            .unwrap()
+            .unwrap();
+        assert_eq!(joiner_commit(&c, joiner).unwrap(), Some(commit.to_vec()));
+        assert_eq!(joiner_commit(&c, src).unwrap(), None);
+        assert!(joiner_handoff_put(&c, joiner, b"joiner", Some(b"mac")).unwrap());
+        assert!(
+            !joiner_handoff_put(&c, joiner, b"again", None).unwrap(),
+            "один раз"
+        );
+        assert_eq!(
+            owner_handoff(&c, "notes", other, &code, None, None).unwrap(),
+            Err(HandoffRefusal::NotFound),
+            "код создало другое устройство"
+        );
+        assert_eq!(
+            owner_handoff(&c, "other", src, &code, None, None).unwrap(),
+            Err(HandoffRefusal::NotFound),
+        );
+        assert_eq!(
+            owner_handoff(&c, "notes", src, &code, Some(b"not-committed"), None).unwrap(),
+            Err(HandoffRefusal::BadCommit),
+        );
+        // Обёртка — только после раскрытия ключа.
+        let h = owner_handoff(&c, "notes", src, &code, None, Some(b"early"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(h.name, "my phone");
+        assert_eq!(
+            (h.joiner_pk.as_deref(), h.joiner_mac.as_deref(), h.wrapped),
+            (Some(&b"joiner"[..]), Some(&b"mac"[..]), None)
+        );
+        let j = joiner_handoff_get(&c, joiner).unwrap().unwrap();
+        assert_eq!((j.owner_pk, j.wrapped), (None, None));
+        let h = owner_handoff(&c, "notes", src, &code, Some(owner), Some(b"wrap"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (h.owner_pk.as_deref(), h.wrapped.as_deref()),
+            (Some(&owner[..]), Some(&b"wrap"[..]))
+        );
+        let h = owner_handoff(&c, "notes", src, &code, None, Some(b"other"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            h.wrapped.as_deref(),
+            Some(&b"wrap"[..]),
+            "обёртка пишется один раз"
+        );
+        // Обёртка отдаётся один раз, затем обмена нет.
+        let j = joiner_handoff_get(&c, joiner).unwrap().unwrap();
+        assert_eq!(j.wrapped.as_deref(), Some(&b"wrap"[..]));
+        assert_eq!(joiner_handoff_get(&c, joiner).unwrap(), None);
+        assert_eq!(
+            owner_handoff(&c, "notes", src, &code, None, None).unwrap(),
+            Err(HandoffRefusal::NotFound)
+        );
+    }
+
+    #[test]
+    fn handoff_expires_and_is_swept() {
+        let mut c = db();
+        let (src, _) = add_device(&c, "notes", "laptop", false, 0).unwrap();
+        // Код без обязательства обмена не начинает.
+        let (plain, _) = create_join_code(&c, "notes", "a", Some(src), false).unwrap();
+        let (id, ..) = redeem_join_code(&mut c, &plain, "", &|_| Ok(0))
+            .unwrap()
+            .unwrap();
+        assert_eq!(joiner_commit(&c, id).unwrap(), None);
+        assert!(!joiner_handoff_put(&c, id, b"pk", None).unwrap());
+        assert_eq!(joiner_handoff_get(&c, id).unwrap(), None);
+        let (code, _) = create_join_code(&c, "notes", "b", Some(src), false).unwrap();
+        offer_handoff(&c, &code, &[1; 32]).unwrap();
+        let (id, ..) = redeem_join_code(&mut c, &code, "", &|_| Ok(0))
+            .unwrap()
+            .unwrap();
+        joiner_handoff_put(&c, id, b"pk", None).unwrap();
+        let exp: i64 = c
+            .query_row(
+                "SELECT expires_at FROM join_codes WHERE used_by = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(exp > now_ms() + HANDOFF_TTL_MS - 60_000 && exp <= now_ms() + HANDOFF_TTL_MS);
+        assert_eq!(
+            sweep_join_codes(&c, now_ms()).unwrap(),
+            0,
+            "живой обмен не трогается"
+        );
+        assert_eq!(
+            sweep_join_codes(&c, exp).unwrap(),
+            1,
+            "истёк — стёрт с ключами"
+        );
+        assert_eq!(joiner_commit(&c, id).unwrap(), None);
     }
 
     #[test]

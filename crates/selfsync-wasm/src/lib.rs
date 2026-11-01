@@ -185,3 +185,86 @@ pub fn check_phrase(phrase: &str) -> Option<String> {
         Err(PhraseError::Checksum) => Some("checksum".to_owned()),
     }
 }
+
+/// Минорная версия протокола, с которой сервер умеет передачу ключа по коду.
+#[wasm_bindgen(js_name = handoffMinor)]
+pub fn handoff_minor() -> u32 {
+    selfsync_core::proto::MINOR_HANDOFF
+}
+
+// Примитивы передачи ключа по коду (`selfsync_core::handoff`) для надстроек:
+// у облака свой обмен (`/account/handoff`) со своей меткой домена (`prefix`),
+// криптография — та же. Секрет пары — 32 байта скаляра; хранит его вызывающий.
+
+fn js_err(e: selfsync_core::crypto::CryptoError) -> JsError {
+    JsError::new(&e.to_string())
+}
+
+fn ephemeral(secret: &[u8]) -> Result<selfsync_core::handoff::Ephemeral, JsError> {
+    let b: &[u8; 32] = secret
+        .try_into()
+        .map_err(|_| JsError::new("секрет пары — 32 байта"))?;
+    selfsync_core::handoff::Ephemeral::from_secret(b).map_err(js_err)
+}
+
+/// Новая пара ключей обмена: секрет (32 байта).
+#[wasm_bindgen(js_name = handoffGenerate)]
+pub fn handoff_generate() -> Result<Vec<u8>, JsError> {
+    let e = selfsync_core::handoff::Ephemeral::generate().map_err(js_err)?;
+    Ok(e.secret_bytes().to_vec())
+}
+
+/// Открытый ключ пары (несжатая точка, 65 байт).
+#[wasm_bindgen(js_name = handoffPublic)]
+pub fn handoff_public(secret: &[u8]) -> Result<Vec<u8>, JsError> {
+    Ok(ephemeral(secret)?.public().to_vec())
+}
+
+#[wasm_bindgen(js_name = handoffValidPublic)]
+pub fn handoff_valid_public(public: &[u8]) -> bool {
+    selfsync_core::handoff::valid_public(public)
+}
+
+/// `sha256(A)`.
+#[wasm_bindgen(js_name = handoffCommit)]
+pub fn handoff_commit(public: &[u8]) -> Vec<u8> {
+    selfsync_core::handoff::commit(public).to_vec()
+}
+
+/// `HMAC-SHA256(секрет из QR, B)`.
+#[wasm_bindgen(js_name = handoffMac)]
+pub fn handoff_mac(link_secret: &[u8], public: &[u8]) -> Vec<u8> {
+    selfsync_core::handoff::link_mac(link_secret, public).to_vec()
+}
+
+/// Шесть цифр для сверки (`a` — ключ источника, `b` — нового устройства).
+#[wasm_bindgen(js_name = handoffSas)]
+pub fn handoff_sas(prefix: &str, a: &[u8], b: &[u8]) -> String {
+    selfsync_core::handoff::sas_digits(&selfsync_core::handoff::Labels::new(prefix), a, b)
+}
+
+/// Источник: обёртка `payload` для нового устройства с ключом `joiner`.
+#[wasm_bindgen(js_name = handoffWrap)]
+pub fn handoff_wrap(
+    prefix: &str,
+    source_secret: &[u8],
+    joiner: &[u8],
+    payload: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    let l = selfsync_core::handoff::Labels::new(prefix);
+    selfsync_core::handoff::wrap(&l, &ephemeral(source_secret)?, joiner, payload).map_err(js_err)
+}
+
+/// Новое устройство: открыть обёртку ключом источника `source`.
+#[wasm_bindgen(js_name = handoffUnwrap)]
+pub fn handoff_unwrap(
+    prefix: &str,
+    joiner_secret: &[u8],
+    source: &[u8],
+    wrapped: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    let l = selfsync_core::handoff::Labels::new(prefix);
+    selfsync_core::handoff::unwrap(&l, &ephemeral(joiner_secret)?, source, wrapped)
+        .map(|k| k.to_vec())
+        .map_err(js_err)
+}

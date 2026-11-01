@@ -84,6 +84,12 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/devices", get(devices::list))
         .route("/v1/devices/{id}", delete(devices::revoke))
         .route("/v1/join", post(devices::join_create))
+        .route(
+            "/v1/join/handoff",
+            post(devices::handoff_source)
+                .put(devices::handoff_joiner_put)
+                .get(devices::handoff_joiner_get),
+        )
         .route_layer(middleware::from_fn_with_state(state.clone(), auth));
 
     Router::new()
@@ -188,7 +194,13 @@ async fn auth(State(st): State<AppState>, mut req: Request, next: Next) -> Respo
     }
     // Правило одно и проверяемое: устройству только для чтения — только GET и HEAD.
     // Отсюда же: ни записи, ни ключа, ни отзыва, ни новых кодов подключения.
-    if dev.read_only && !matches!(*req.method(), http::Method::GET | http::Method::HEAD) {
+    // Исключение — свой ключ обмена (`PUT /v1/join/handoff`), чтобы получить ключ
+    // vault'а при подключении: в vault он ничего не пишет.
+    let receives_key = *req.method() == http::Method::PUT && req.uri().path() == "/v1/join/handoff";
+    if dev.read_only
+        && !receives_key
+        && !matches!(*req.method(), http::Method::GET | http::Method::HEAD)
+    {
         let mut resp = ApiError::new(
             StatusCode::FORBIDDEN,
             "read_only",

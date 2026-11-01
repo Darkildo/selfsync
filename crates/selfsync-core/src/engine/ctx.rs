@@ -3,7 +3,7 @@
 //! Правило: заимствование `RefCell` никогда не держится через `.await`.
 
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use selfsync_proto::v1 as pb;
@@ -194,6 +194,10 @@ pub(crate) struct State {
     /// Запрос сервера на блобы разобран: сколько их было, время `verify` на сервере
     /// и когда разобран (см. `repair`).
     pub wanted_checked: Option<(u32, i64, i64)>,
+    /// Передача ключа по коду, где это устройство — источник: по коду.
+    pub handoffs: BTreeMap<String, super::handoff::SourceHandoff>,
+    /// Передача ключа, где это устройство — новое (временный движок подключения).
+    pub receiving: Option<super::handoff::JoinerHandoff>,
 }
 
 impl State {
@@ -252,6 +256,8 @@ impl State {
             rules_changed: false,
             download_queue: BTreeSet::new(),
             wanted_checked: None,
+            handoffs: BTreeMap::new(),
+            receiving: None,
         };
         // Правила могли смениться между запусками (CLI правят конфиг при
         // остановленной службе): событие Configure тогда не придёт.

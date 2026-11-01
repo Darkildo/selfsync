@@ -326,6 +326,7 @@ async fn read_only_folder_receives_and_keeps_local_edits() {
         UiCommand::CreateJoin {
             name: "x".into(),
             read_only: false,
+            handoff: false,
         },
     )
     .await

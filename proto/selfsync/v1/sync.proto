@@ -297,6 +297,7 @@ message DevicesResponse {
 message JoinCreate {
   string name = 1;           // имя будущего устройства (можно изменить при подключении)
   bool read_only = 2;        // подключить устройство только для чтения
+  bytes commit = 3;          // 1.4: sha256 ключа обмена источника — он передаст ключ vault'а
 }
 
 message JoinCode {
@@ -315,6 +316,37 @@ message JoinToken {
   string vault = 2;
   uint32 device_id = 3;
   string device_name = 4;
+  bytes handoff_commit = 5;  // 1.4: обязательство источника; пусто — обмена ключом не будет
+}
+
+// Передача ключа по коду (1.4), шаг источника: `POST /v1/join/handoff`. Пустые
+// поля — только опрос; `pk` раскрывается после ключа нового устройства, `wrapped` —
+// после раскрытия `pk`. Каждое поле пишется один раз.
+message JoinHandoffSource {
+  string code = 1;
+  bytes pk = 2;              // открытый ключ источника (его sha256 — commit)
+  bytes wrapped = 3;         // nonce ‖ AES-256-GCM(k, мастер-ключ)
+}
+
+message JoinHandoffSourceState {
+  string name = 1;           // имя нового устройства
+  bytes pk = 2;              // ключ нового устройства; пусто — оно ещё не прислало
+  bytes mac = 3;             // HMAC ключа секретом из QR; пусто — код введён руками
+  bool delivered = 4;        // обёртка принята
+}
+
+// Шаг нового устройства: `PUT /v1/join/handoff` своим новым токеном — уже после
+// того, как оно получило commit (иначе сервер подобрал бы свой ключ под цифры).
+message JoinHandoffJoiner {
+  bytes pk = 1;
+  bytes mac = 2;
+}
+
+// `GET /v1/join/handoff`: ключ источника и обёртка, когда они есть. Обёртка
+// отдаётся один раз.
+message JoinHandoffJoinerState {
+  bytes pk = 1;
+  bytes wrapped = 2;
 }
 
 // ---------------------------------------------------------------------------

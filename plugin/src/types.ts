@@ -163,14 +163,25 @@ export interface DeviceView {
   client?: string;
 }
 
+/** Шаг передачи ключа по коду: `confirm` — цифры готовы (у источника — нужно
+ *  согласие; при `qr` сверять их не обязательно), `done` — ключ передан/получен. */
+export interface HandoffView {
+  type: "handoff";
+  step: "waiting" | "confirm" | "done";
+  name: string;
+  sas?: string | null;
+  qr?: boolean;
+}
+
 export type UiResult =
   | { type: "ok" }
   | { type: "error"; code: string; message: string; retryAfter?: number }
   | { type: "deleted"; items: DeletedView[] }
   | { type: "history"; revisions: RevisionView[] }
   | { type: "devices"; vault: string; devices: DeviceView[] }
-  | { type: "join"; code: string; url: string; expiresAt: number }
-  | { type: "token"; token: string; vault: string; deviceId: number; deviceName: string }
+  | { type: "join"; code: string; url: string; expiresAt: number; secret?: string | null }
+  | { type: "token"; token: string; vault: string; deviceId: number; deviceName: string; handoff?: Uint8Array | null }
+  | HandoffView
   | { type: "retention"; days: number }
   | {
       type: "stats";
@@ -207,8 +218,12 @@ export type UiCommand =
   | { type: "purgeHistory"; path: string; beforeRev: number }
   | { type: "devices" }
   | { type: "revokeDevice"; id: number }
-  | { type: "createJoin"; name: string; readOnly?: boolean }
+  | { type: "createJoin"; name: string; readOnly?: boolean; handoff?: boolean }
+  | { type: "joinHandoff"; code: string; confirm?: string | null }
+  | { type: "cancelHandoff"; code: string }
   | { type: "redeem"; code: string; name: string }
+  | { type: "receiveKey"; commit: Uint8Array; linkSecret?: string | null }
+  | { type: "receivePoll" }
   | { type: "getRetention" }
   | { type: "setRetention"; days: number }
   | { type: "stats" }

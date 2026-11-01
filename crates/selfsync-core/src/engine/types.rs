@@ -713,11 +713,38 @@ pub enum UiCommand {
         /// Подключить новое устройство только для чтения.
         #[serde(default)]
         read_only: bool,
+        /// Предложить передать ключ шифрования по этому коду (протокол 1.4): если
+        /// ключ здесь раскрыт и сервер умеет, в ответе — секрет для QR, дальше —
+        /// `JoinHandoff`, пока не придёт `done`.
+        #[serde(default)]
+        handoff: bool,
+    },
+    /// Шаг передачи ключа источником (опрос раз в 1–2 с, пока открыто окно кода).
+    /// `confirm` — цифры из ответа `confirm`: пользователь согласился отдать ключ
+    /// (и сверил цифры с экраном нового устройства, если не `qr`).
+    JoinHandoff {
+        code: String,
+        #[serde(default)]
+        confirm: Option<String>,
+    },
+    /// Забыть обмен по коду (окно закрыто).
+    CancelHandoff {
+        code: String,
     },
     Redeem {
         code: String,
         name: String,
     },
+    /// Новое устройство (движком с токеном из `Token`): начать получение ключа.
+    /// `commit` — `Token.handoff`, `link_secret` — `m=` из ссылки QR.
+    ReceiveKey {
+        #[serde(with = "serde_bytes")]
+        commit: Vec<u8>,
+        #[serde(default)]
+        link_secret: Option<String>,
+    },
+    /// Опрос получения ключа; `done` — ключ раскрыт и запомнен (`RememberKey`).
+    ReceivePoll,
     GetRetention,
     SetRetention {
         days: u32,
@@ -768,6 +795,18 @@ pub enum UiCommand {
     RemoveLocal {
         path: String,
     },
+}
+
+/// Где передача ключа по коду.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HandoffStep {
+    /// Ждём другое устройство.
+    Waiting,
+    /// Цифры готовы: у источника — сверить и подтвердить, у нового — показать.
+    Confirm,
+    /// Ключ передан (источник) или получен и запомнен (новое устройство).
+    Done,
 }
 
 /// Файл, не скачанный из-за лимита размера.
@@ -862,12 +901,28 @@ pub enum UiResult {
         code: String,
         url: String,
         expires_at: i64,
+        /// Секрет для ссылки в QR (`m=`), если ключ будет передан по коду.
+        #[serde(default)]
+        secret: Option<String>,
     },
     Token {
         token: String,
         vault: String,
         device_id: u32,
         device_name: String,
+        /// Источник передаст ключ: его обязательство (для `ReceiveKey`).
+        #[serde(default, with = "serde_bytes")]
+        handoff: Option<Vec<u8>>,
+    },
+    /// Шаг передачи ключа по коду. `name` — имя нового устройства (у источника),
+    /// `sas` — шесть цифр для сверки, `qr` — ключ нового устройства подтверждён
+    /// секретом из QR (цифры сверять не нужно, согласие — нужно).
+    Handoff {
+        step: HandoffStep,
+        name: String,
+        sas: Option<String>,
+        #[serde(default)]
+        qr: bool,
     },
     Retention {
         days: u32,

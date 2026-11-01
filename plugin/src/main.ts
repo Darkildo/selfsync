@@ -6,6 +6,7 @@ import { FileSystemAdapter, type Menu, moment, Notice, Platform, Plugin, request
 import wasmBytes from "selfsync-wasm-bytes";
 import { initWasm, Runner } from "./engine.ts";
 import { Executor } from "./executor.ts";
+import { HANDOFF_WAIT_MS, isHandoff, pollHandoff } from "./handoff.ts";
 import { noticeText, setLanguage, stateText, t } from "./i18n.ts";
 import { AdapterBackend } from "./io/adapter.ts";
 import type { FileBackend } from "./io/backend.ts";
@@ -13,7 +14,7 @@ import { ObsidianHttp } from "./io/http.ts";
 import { NodeBackend } from "./io/node.ts";
 import { buildRules, DEFAULT_CONFIG_SYNC, inConfigDir, migrateUserExcludes } from "./configsync.ts";
 import { DEFAULT_SETTINGS, normalizeServer, SelfsyncSettingTab, type Settings } from "./settings.ts";
-import type { DiagCheck, EngineConfig, LogLevel, NameRules, Notice as EngineNotice, SyncStatus } from "./types.ts";
+import type { DiagCheck, EngineConfig, LogLevel, NameRules, Notice as EngineNotice, SyncStatus, UiResult } from "./types.ts";
 import { ConflictsModal } from "./ui/conflicts.ts";
 import { ConnectModal } from "./ui/connect.ts";
 import { DeletedModal } from "./ui/deleted.ts";
@@ -26,6 +27,15 @@ import { PhraseModal, RecoverModal } from "./ui/recovery.ts";
 
 const KEY_STORAGE = "selfsync-master-key";
 const LOG_LINES = 500;
+
+/** Окно подключения ждёт ключ шифрования от устройства, где открыт код. */
+export interface KeyReceiver {
+  /** `m=` из ссылки QR: с ним источнику не нужно сверять цифры. */
+  secret?: string;
+  onResult(r: UiResult): void;
+  /** Ждать перестали (окно закрыто, «ввести пароль»). */
+  stopped(): boolean;
+}
 
 export default class SelfsyncPlugin extends Plugin {
   override settings: Settings = { ...DEFAULT_SETTINGS };
@@ -102,7 +112,7 @@ export default class SelfsyncPlugin extends Plugin {
   protected registerConnect(): void {
     this.addCommand({ id: "connect", name: t("cmd.connect"), callback: () => this.openConnect() });
     this.registerObsidianProtocolHandler("selfsync-connect", (p) => {
-      new ConnectModal(this.app, this, p.server ?? "", p.code ?? "").open();
+      new ConnectModal(this.app, this, p.server ?? "", p.code ?? "", undefined, p.m).open();
     });
   }
 
@@ -263,23 +273,61 @@ export default class SelfsyncPlugin extends Plugin {
   }
 
   /** Обменять одноразовый код на токен. Ошибка: текст и `offline` — сервер не
-   *  ответил (тогда стоит проверить соединение). `null` — подключено. */
-  async redeem(server: string, code: string, device: string): Promise<{ message: string; offline: boolean } | null> {
+   *  ответил (тогда стоит проверить соединение). `null` — подключено. С `receive`
+   *  и кодом, по которому источник передаёт ключ, сначала ждёт ключ шифрования
+   *  (не пришёл — пароль спросят как раньше). */
+  async redeem(
+    server: string,
+    code: string,
+    device: string,
+    receive?: KeyReceiver,
+  ): Promise<{ message: string; offline: boolean } | null> {
     if (!server || !code) return { message: "server/code", offline: false };
     // Временный движок без токена: команда redeem — только HTTP, синк не запускается.
     const tmp = new Runner({ deviceName: device }, null, this.executor(server), { log: (l, m) => this.addLog(l, m) });
+    let r: UiResult;
     try {
-      const r = await tmp.command({ type: "redeem", code, name: device });
-      if (r.type === "error" && r.code === "rate_limited") return { message: t("connect.rateLimited", { n: r.retryAfter ?? 0 }), offline: false };
-      if (r.type === "error") return { message: r.message, offline: r.code === "offline" || r.code === "error" };
-      if (r.type !== "token") return { message: r.type, offline: false };
-      await this.forgetVault(server, r.vault);
-      this.settings.server = server;
-      this.settings.token = r.token;
-      this.settings.vault = r.vault;
-      this.settings.deviceName = r.deviceName || device;
+      r = await tmp.command({ type: "redeem", code, name: device });
+    } finally {
+      tmp.stop();
+    }
+    if (r.type === "error" && r.code === "rate_limited") return { message: t("connect.rateLimited", { n: r.retryAfter ?? 0 }), offline: false };
+    if (r.type === "error") return { message: r.message, offline: r.code === "offline" || r.code === "error" };
+    if (r.type !== "token") return { message: r.type, offline: false };
+    await this.forgetVault(server, r.vault);
+    this.settings.server = server;
+    this.settings.token = r.token;
+    this.settings.vault = r.vault;
+    this.settings.deviceName = r.deviceName || device;
+    if (!r.handoff || !receive) {
       await this.saveSettings({ restart: true });
       return null;
+    }
+    // Токен сохранён сразу: устройство подключено, даже если ключ не придёт.
+    await this.saveSettings();
+    await this.receiveKey(server, r.token, r.handoff, receive);
+    await this.start();
+    return null;
+  }
+
+  /** Получить ключ шифрования обменом с источником; ключ запоминается здесь
+   *  (`rememberKey`). `true` — получен. */
+  private async receiveKey(server: string, token: string, commit: Uint8Array, receive: KeyReceiver): Promise<boolean> {
+    const tmp = new Runner({ deviceName: this.settings.deviceName }, null, this.executor(server, token), {
+      log: (l, m) => this.addLog(l, m),
+      rememberKey: (k) => this.app.saveLocalStorage(KEY_STORAGE, toBase64(k)),
+    });
+    try {
+      const first = await tmp.command({ type: "receiveKey", commit, linkSecret: receive.secret ?? null });
+      receive.onResult(first);
+      if (!isHandoff(first)) return false;
+      const last = await pollHandoff({
+        step: () => tmp.command({ type: "receivePoll" }),
+        onResult: (x) => receive.onResult(x),
+        stopped: () => receive.stopped(),
+        deadline: Date.now() + HANDOFF_WAIT_MS,
+      });
+      return last !== null && isHandoff(last) && last.step === "done";
     } finally {
       tmp.stop();
     }

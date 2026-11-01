@@ -359,16 +359,63 @@ pub async fn health(cx: &Ctx) -> SyncResult<()> {
     call_empty(cx, r).await.map(|_| ())
 }
 
-pub async fn join_create(cx: &Ctx, name: String, read_only: bool) -> SyncResult<pb::JoinCode> {
+/// `commit` — обязательство ключа обмена (пусто — ключ по коду не передаётся).
+pub async fn join_create(
+    cx: &Ctx,
+    name: String,
+    read_only: bool,
+    commit: Vec<u8>,
+) -> SyncResult<pb::JoinCode> {
     call(
         cx,
         proto_req(
             "POST",
             "/v1/join".into(),
-            &pb::JoinCreate { name, read_only },
+            &pb::JoinCreate {
+                name,
+                read_only,
+                commit,
+            },
         ),
     )
     .await
+}
+
+/// Шаг источника обмена ключом: опрос (пустые `pk`, `wrapped`), раскрытие ключа,
+/// обёртка.
+pub async fn handoff_source(
+    cx: &Ctx,
+    code: String,
+    pk: Vec<u8>,
+    wrapped: Vec<u8>,
+) -> SyncResult<pb::JoinHandoffSourceState> {
+    call(
+        cx,
+        proto_req(
+            "POST",
+            "/v1/join/handoff".into(),
+            &pb::JoinHandoffSource { code, pk, wrapped },
+        ),
+    )
+    .await
+}
+
+/// Шаг нового устройства: свой ключ обмена и MAC из QR.
+pub async fn handoff_joiner_put(cx: &Ctx, pk: Vec<u8>, mac: Vec<u8>) -> SyncResult<()> {
+    call_empty(
+        cx,
+        proto_req(
+            "PUT",
+            "/v1/join/handoff".into(),
+            &pb::JoinHandoffJoiner { pk, mac },
+        ),
+    )
+    .await
+    .map(|_| ())
+}
+
+pub async fn handoff_joiner_get(cx: &Ctx) -> SyncResult<pb::JoinHandoffJoinerState> {
+    call(cx, req("GET", "/v1/join/handoff".into(), vec![], None)).await
 }
 
 pub async fn join_redeem(cx: &Ctx, code: String, name: String) -> SyncResult<pb::JoinToken> {
@@ -419,9 +466,48 @@ pub fn base64url(data: &[u8]) -> String {
     out
 }
 
+/// Обратное к [`base64url`]; паддинг и пробелы по краям допускаются.
+pub fn base64url_decode(s: &str) -> Option<Vec<u8>> {
+    let s = s.trim().trim_end_matches('=');
+    let val = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'-' | b'+' => 62,
+            b'_' | b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    if s.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    for chunk in s.as_bytes().chunks(4) {
+        let mut n = 0u32;
+        for (i, &c) in chunk.iter().enumerate() {
+            n |= val(c)? << (18 - 6 * i);
+        }
+        let bytes = n.to_be_bytes();
+        out.extend_from_slice(&bytes[1..chunk.len()]);
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base64url_decodes_what_it_encodes() {
+        for len in 0..40 {
+            let data: Vec<u8> = (0..len).map(|i| (i * 37 + 11) as u8).collect();
+            assert_eq!(base64url_decode(&base64url(&data)), Some(data));
+        }
+        assert_eq!(base64url_decode("Zm9vYg=="), Some(b"foob".to_vec()));
+        assert_eq!(base64url_decode("Zm9v!"), None);
+        assert_eq!(base64url_decode("Z"), None);
+    }
 
     #[test]
     fn base64url_matches_reference() {
