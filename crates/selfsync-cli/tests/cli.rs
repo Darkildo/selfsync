@@ -1131,7 +1131,8 @@ impl selfsync_cli::handoff::Prompt for Script {
     async fn ask(&mut self, question: &str) -> selfsync_cli::handoff::Answer {
         use selfsync_cli::handoff::Answer;
         self.note(question);
-        if let Some(w) = &self.wait {
+        // Сигнала ждёт только первый вопрос («передать?»).
+        if let Some(w) = self.wait.take() {
             w.recv_timeout(Duration::from_secs(5))
                 .expect("цифры на новом устройстве");
         }
@@ -1164,7 +1165,7 @@ struct Handoff {
 /// «передать?» ждёт, пока новое устройство покажет цифры). `qr` — у нового
 /// устройства ссылка из QR (`m=`, `h=`), `give` и `agree` — ответы источника и
 /// нового устройства.
-async fn handoff_pair(srv: &Server, vault: &str, qr: bool, give: bool, agree: bool) -> Handoff {
+async fn handoff_pair(srv: &Server, vault: &str, qr: bool, give: &[bool], agree: bool) -> Handoff {
     use selfsync_cli::handoff::{give_key, receive_key};
     use selfsync_cli::runner::Session;
     const PW: &str = "correct horse battery staple";
@@ -1179,6 +1180,7 @@ async fn handoff_pair(srv: &Server, vault: &str, qr: bool, give: bool, agree: bo
         Outcome::Synced
     );
     let tick = Duration::from_millis(30);
+    let give = give.to_vec();
     let (code_tx, code_rx) = std::sync::mpsc::channel();
     let (sig_tx, sig_rx) = std::sync::mpsc::channel();
     let source = std::thread::spawn(move || {
@@ -1214,7 +1216,7 @@ async fn handoff_pair(srv: &Server, vault: &str, qr: bool, give: bool, agree: bo
                     check.expect("h"),
                 ))
                 .unwrap();
-            let mut ui = Script::new(vec![give]);
+            let mut ui = Script::new(give);
             ui.wait = Some(sig_rx);
             let given = give_key(&mut src, &code, expires_at, tick, &mut ui)
                 .await
@@ -1286,7 +1288,7 @@ fn digits(said: &[String]) -> String {
 async fn join_hands_key_by_qr() {
     use selfsync_cli::handoff::Exchange;
     let srv = server().await;
-    let h = handoff_pair(&srv, "hq", true, true, true).await;
+    let h = handoff_pair(&srv, "hq", true, &[true], true).await;
     assert_eq!(
         (h.given, h.got),
         (Exchange::Done, Exchange::Done),
@@ -1315,7 +1317,7 @@ async fn join_hands_key_by_qr() {
 async fn join_hands_key_by_typed_code_after_digits() {
     use selfsync_cli::handoff::Exchange;
     let srv = server().await;
-    let h = handoff_pair(&srv, "hc", false, true, true).await;
+    let h = handoff_pair(&srv, "hc", false, &[true], true).await;
     assert_eq!(
         (h.given, h.got),
         (Exchange::Done, Exchange::Done),
@@ -1334,7 +1336,7 @@ async fn join_hands_key_by_typed_code_after_digits() {
 async fn join_typed_code_needs_confirm_on_new_device() {
     use selfsync_cli::handoff::Exchange;
     let srv = server().await;
-    let h = handoff_pair(&srv, "hd", false, true, false).await;
+    let h = handoff_pair(&srv, "hd", false, &[true], false).await;
     assert_eq!(h.got, Exchange::Refused, "{:?}", h.dst.said);
     assert!(!h.fresh.path().join(".selfsync/key").exists());
     assert_eq!(sync(h.fresh.path(), &h.cfg).await, Outcome::NeedPassword);
@@ -1344,8 +1346,32 @@ async fn join_typed_code_needs_confirm_on_new_device() {
 async fn join_declined_leaves_password() {
     use selfsync_cli::handoff::Exchange;
     let srv = server().await;
-    let h = handoff_pair(&srv, "hn", true, false, true).await;
+    let h = handoff_pair(&srv, "hn", true, &[false], true).await;
     assert_eq!((h.given, h.got), (Exchange::Refused, Exchange::Refused));
     assert!(!h.fresh.path().join(".selfsync/key").exists());
     assert_eq!(sync(h.fresh.path(), &h.cfg).await, Outcome::NeedPassword);
+}
+
+/// «Не передавать» и «отозвать»: подключившееся устройство теряет доступ.
+#[tokio::test(flavor = "multi_thread")]
+async fn join_declined_then_revoked() {
+    use selfsync_cli::handoff::Exchange;
+    let srv = server().await;
+    let h = handoff_pair(&srv, "hr", true, &[false, true], true).await;
+    assert_eq!((h.given, h.got), (Exchange::Refused, Exchange::Refused));
+    assert!(
+        h.src.said.iter().any(|s| s.contains("отозвано")),
+        "{:?}",
+        h.src.said
+    );
+    assert!(
+        // Обмен отменён (404) или устройство уже отозвано (401) — смотря что раньше.
+        h.dst.said.iter().any(|s| s.starts_with("ключ не пришёл")),
+        "отказ дошёл до нового устройства: {:?}",
+        h.dst.said
+    );
+    assert!(matches!(
+        sync(h.fresh.path(), &h.cfg).await,
+        Outcome::Blocked(_)
+    ));
 }

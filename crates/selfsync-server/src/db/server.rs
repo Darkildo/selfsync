@@ -481,13 +481,43 @@ pub fn joiner_handoff_put(
     device: u32,
     pk: &[u8],
     mac: Option<&[u8]>,
-) -> rusqlite::Result<bool> {
-    Ok(c.execute(
+) -> rusqlite::Result<HandoffPut> {
+    let now = now_ms();
+    if c.execute(
         "UPDATE join_codes SET joiner_pk = ?1, joiner_mac = ?2
          WHERE used_by = ?3 AND offer_commit IS NOT NULL AND expires_at > ?4
            AND joiner_pk IS NULL",
-        params![pk, mac, device, now_ms()],
-    )? > 0)
+        params![pk, mac, device, now],
+    )? > 0
+    {
+        return Ok(HandoffPut::Stored);
+    }
+    // Повтор того же запроса (ответ потерялся) — не ошибка; другой ключ — да.
+    let row: Option<(Vec<u8>, Option<Vec<u8>>)> = c
+        .query_row(
+            "SELECT joiner_pk, joiner_mac FROM join_codes
+             WHERE used_by = ?1 AND offer_commit IS NOT NULL AND expires_at > ?2
+               AND joiner_pk IS NOT NULL",
+            params![device, now],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    Ok(match row {
+        None => HandoffPut::NotFound,
+        Some((p, m)) if p == pk && m.as_deref() == mac => HandoffPut::Stored,
+        Some(_) => HandoffPut::Conflict,
+    })
+}
+
+/// Ключ нового устройства на сервере.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandoffPut {
+    /// Записан (или уже был тем же — повтор).
+    Stored,
+    /// Записан другой ключ: пишется один раз.
+    Conflict,
+    /// Обмена нет или он истёк.
+    NotFound,
 }
 
 /// Состояние обмена ключом по коду.
@@ -495,6 +525,8 @@ pub fn joiner_handoff_put(
 pub struct Handoff {
     /// Имя нового устройства (или предложенное в коде, пока оно не вошло).
     pub name: String,
+    /// Новое устройство (когда код погашен) — источник может его отозвать.
+    pub device: Option<u32>,
     pub joiner_pk: Option<Vec<u8>>,
     pub joiner_mac: Option<Vec<u8>>,
     pub owner_pk: Option<Vec<u8>>,
@@ -568,6 +600,7 @@ pub fn owner_handoff(
         |r| {
             Ok(Handoff {
                 name: String::new(),
+                device: None,
                 joiner_pk: r.get(0)?,
                 joiner_mac: r.get(1)?,
                 owner_pk: r.get(2)?,
@@ -576,6 +609,7 @@ pub fn owner_handoff(
         },
     )?;
     out.name = name.unwrap_or(code_name);
+    out.device = used_by;
     Ok(Ok(out))
 }
 
@@ -725,10 +759,24 @@ mod tests {
             .unwrap();
         assert_eq!(joiner_commit(&c, joiner).unwrap(), Some(commit.to_vec()));
         assert_eq!(joiner_commit(&c, src).unwrap(), None);
-        assert!(joiner_handoff_put(&c, joiner, b"joiner", Some(b"mac")).unwrap());
-        assert!(
-            !joiner_handoff_put(&c, joiner, b"again", None).unwrap(),
-            "один раз"
+        assert_eq!(
+            joiner_handoff_put(&c, joiner, b"joiner", Some(b"mac")).unwrap(),
+            HandoffPut::Stored
+        );
+        assert_eq!(
+            joiner_handoff_put(&c, joiner, b"joiner", Some(b"mac")).unwrap(),
+            HandoffPut::Stored,
+            "повтор того же — не ошибка"
+        );
+        assert_eq!(
+            joiner_handoff_put(&c, joiner, b"again", None).unwrap(),
+            HandoffPut::Conflict,
+            "другой ключ — один раз"
+        );
+        assert_eq!(
+            joiner_handoff_put(&c, joiner, b"joiner", None).unwrap(),
+            HandoffPut::Conflict,
+            "тот же ключ без MAC — другой запрос"
         );
         assert_eq!(
             owner_handoff(&c, "notes", other, &code, None, None).unwrap(),
@@ -811,7 +859,10 @@ mod tests {
         let (id, ..) = redeem_join_code(&mut c, &code, "", &|_| Ok(0))
             .unwrap()
             .unwrap();
-        assert!(joiner_handoff_put(&c, id, b"pk", None).unwrap());
+        assert_eq!(
+            joiner_handoff_put(&c, id, b"pk", None).unwrap(),
+            HandoffPut::Stored
+        );
         assert!(owner_handoff_cancel(&c, "notes", src, &code).unwrap());
         assert_eq!(joiner_handoff_get(&c, id).unwrap(), None);
         assert!(!joiner_handoff_delete(&c, id).unwrap());
@@ -827,7 +878,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(joiner_commit(&c, id).unwrap(), None);
-        assert!(!joiner_handoff_put(&c, id, b"pk", None).unwrap());
+        assert_eq!(
+            joiner_handoff_put(&c, id, b"pk", None).unwrap(),
+            HandoffPut::NotFound
+        );
         assert_eq!(joiner_handoff_get(&c, id).unwrap(), None);
         let (code, _) = create_join_code(&c, "notes", "b", Some(src), false).unwrap();
         offer_handoff(&c, &code, &[1; 32]).unwrap();

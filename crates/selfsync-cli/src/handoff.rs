@@ -279,9 +279,21 @@ pub async fn give_key(
                 ..
             } => {
                 ui.say(&format!(
-                    "ключ шифрования отправлен «{name}»; проверьте на новом устройстве, что он принят"
+                    "ключ шифрования мог быть отправлен «{name}» — проверьте на новом \
+                     устройстве, что он принят"
                 ));
                 return Ok(Exchange::Done);
+            }
+            UiResult::Handoff {
+                step: HandoffStep::Rejected,
+                name,
+                device,
+                ..
+            } => {
+                ui.say(&format!(
+                    "ключ «{name}» не совпал с QR-кодом — возможна подмена, ключ не передан"
+                ));
+                return offer_revoke(sess, &name, device, ui).await;
             }
             UiResult::Handoff {
                 step: HandoffStep::Confirm,
@@ -289,6 +301,7 @@ pub async fn give_key(
                 sas: Some(sas),
                 qr,
                 offline,
+                device,
             } if confirm.as_deref() != Some(sas.as_str()) => {
                 let question = if qr {
                     format!(
@@ -315,7 +328,7 @@ pub async fn give_key(
                             return Ok(Exchange::Interrupted);
                         }
                         ui.say("ключ не передан: на новом устройстве понадобится пароль");
-                        return Ok(Exchange::Refused);
+                        return offer_revoke(sess, &name, device, ui).await;
                     }
                 }
                 confirm = Some(sas);
@@ -344,6 +357,32 @@ pub async fn give_key(
     }
     cancel(sess, code).await;
     ui.say("новое устройство не пришло за отведённое время");
+    Ok(Exchange::Refused)
+}
+
+/// Ключ не передан: предложить отозвать подключившееся устройство (токен у него
+/// уже есть). Ответ «да» — `DELETE /v1/devices/{id}`.
+async fn offer_revoke(
+    sess: &mut Session,
+    name: &str,
+    device: u32,
+    ui: &mut impl Prompt,
+) -> anyhow::Result<Exchange> {
+    if device == 0 {
+        return Ok(Exchange::Refused);
+    }
+    match ui
+        .ask(&format!("Отозвать подключившееся устройство «{name}»?"))
+        .await
+    {
+        Answer::Yes => match sess.command(UiCommand::RevokeDevice { id: device }).await? {
+            UiResult::Ok => ui.say(&format!("устройство «{name}» отозвано")),
+            UiResult::Error { message, .. } => ui.say(&format!("не отозвано: {message}")),
+            other => anyhow::bail!("неожиданный ответ: {other:?}"),
+        },
+        Answer::No => {}
+        Answer::Interrupted => return Ok(Exchange::Interrupted),
+    }
     Ok(Exchange::Refused)
 }
 

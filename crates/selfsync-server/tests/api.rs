@@ -1773,9 +1773,16 @@ async fn join_handoff_flow() {
     )
     .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
+    // Повтор (ответ потерялся) — 204, другой запрос — 409.
+    let r = put(
+        b.public().to_vec(),
+        handoff::link_mac(&m, b.public()).to_vec(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
     assert_eq!(
         put(b.public().to_vec(), vec![]).await.error().code,
-        "no_handoff"
+        "handoff_key_set"
     );
     let joiner_get = || async { s.get("/v1/join/handoff", &tok.token).await };
     let j: pb::JoinHandoffJoinerState = joiner_get().await.proto();
@@ -1783,6 +1790,7 @@ async fn join_handoff_flow() {
 
     let st: pb::JoinHandoffSourceState = poll(&laptop, vec![], vec![]).await.proto();
     assert_eq!(st.name, "my tablet");
+    assert_eq!(st.device_id, tok.device_id);
     assert_eq!(st.pk, b.public());
     assert!(handoff::check_mac(&m, &st.pk, &st.mac));
     let r = poll(&laptop, b.public().to_vec(), vec![]).await;

@@ -550,6 +550,14 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                     cfg.use_wait = use_wait;
                     cfg.save(&dir)?;
                     println!("подключено к vault «{vault}» как «{}»", cfg.device_name);
+                    if commit.is_none() && check.is_some() {
+                        // QR обещал обмен, а сервер обязательства не прислал: ключ так
+                        // или иначе не примется — нейтрально, без догадок.
+                        eprintln!(
+                            "обмен ключом недоступен: введите пароль при run. Если на \
+                             устройстве с кодом обмен не отменяли — возможна подмена"
+                        );
+                    }
                     if let Some(commit) = commit {
                         if no_handoff || !handoff::interactive() {
                             eprintln!(

@@ -49,6 +49,8 @@ export class JoinModal extends Modal {
   private closed = false;
   /** Цифры, на которых пользователь согласился отдать ключ. */
   private confirm: string | null = null;
+  /** «Не передавать»: опрос остановлен, обмен отменён. */
+  private declined = false;
 
   constructor(
     app: App,
@@ -80,7 +82,7 @@ export class JoinModal extends Modal {
       void pollHandoff({
         step: () => h.runner.command({ type: "joinHandoff", code: this.join.code, confirm: this.confirm }),
         onResult: (r) => this.render(status, r),
-        stopped: () => this.closed,
+        stopped: () => this.closed || this.declined,
         deadline: this.join.expiresAt + HANDOFF_WAIT_MS,
       });
     }
@@ -106,6 +108,11 @@ export class JoinModal extends Modal {
       el.createEl("p", { text: t("handoff.sentUnconfirmed", { name: r.name }) });
       return;
     }
+    if (r.step === "rejected") {
+      el.createEl("p", { text: t("handoff.rejected", { name: r.name }) });
+      this.offerRevoke(el, r.name, r.device ?? 0);
+      return;
+    }
     const sas = r.sas ?? "";
     if (this.confirm === sas) {
       el.createEl("p", { text: t("handoff.sending") });
@@ -114,7 +121,15 @@ export class JoinModal extends Modal {
     el.createEl("p", { text: t(r.qr ? "handoff.confirmQr" : "handoff.confirmSas", { name: r.name }) });
     if (!r.qr) el.createEl("p", { text: formatSas(sas), cls: "selfsync-sas" });
     new Setting(el)
-      .addButton((b) => b.setButtonText(t("handoff.decline")).onClick(() => this.close()))
+      .addButton((b) =>
+        b.setButtonText(t("handoff.decline")).onClick(() => {
+          this.declined = true;
+          void this.handoff?.runner.command({ type: "cancelHandoff", code: this.join.code });
+          el.empty();
+          el.createEl("p", { text: t("handoff.declined") });
+          this.offerRevoke(el, r.name, r.device ?? 0);
+        }),
+      )
       .addButton((b) =>
         b
           .setButtonText(t("handoff.send"))
@@ -123,6 +138,25 @@ export class JoinModal extends Modal {
             this.confirm = sas;
             el.empty();
             el.createEl("p", { text: t("handoff.sending") });
+          }),
+      );
+  }
+
+  /** Ключ не передан, а токен у подключившегося устройства уже есть: отозвать. */
+  private offerRevoke(el: HTMLElement, name: string, device: number): void {
+    const h = this.handoff;
+    if (!h || !device) return;
+    new Setting(el)
+      .addButton((b) => b.setButtonText(t("handoff.keep")).onClick(() => this.close()))
+      .addButton((b) =>
+        b
+          .setButtonText(t("handoff.revoke", { name }))
+          .setDestructive()
+          .onClick(async () => {
+            b.setDisabled(true);
+            const r = await h.runner.command({ type: "revokeDevice", id: device });
+            el.empty();
+            el.createEl("p", { text: r.type === "error" ? t("handoff.revokeFailed", { message: r.message }) : t("handoff.revoked", { name }) });
           }),
       );
   }

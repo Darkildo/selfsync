@@ -303,6 +303,11 @@ export default class SelfsyncPlugin extends Plugin {
     this.settings.token = r.token;
     this.settings.vault = r.vault;
     this.settings.deviceName = r.deviceName || device;
+    if (!r.handoff && receive?.check) {
+      // QR обещал обмен, а сервер обязательства не прислал: ключ так или иначе не
+      // примется — нейтрально, без догадок.
+      new Notice(t("handoff.unavailable"));
+    }
     if (!r.handoff || !receive) {
       await this.saveSettings({ restart: true });
       return null;

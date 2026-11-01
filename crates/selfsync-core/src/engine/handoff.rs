@@ -28,6 +28,8 @@ pub(crate) struct SourceHandoff {
     sas: Option<String>,
     qr: bool,
     revealed: bool,
+    /// Подключившееся устройство (0 — ещё нет): его предлагают отозвать.
+    device: u32,
     /// Обёртку уже отправляли: если потом обмена на сервере нет (404), новое
     /// устройство её забрало и закрыло обмен — ключ отправлен.
     wrap_sent: bool,
@@ -80,6 +82,7 @@ fn result(step: HandoffStep, name: String, sas: Option<String>, qr: bool) -> UiR
         sas,
         qr,
         offline: false,
+        device: 0,
     }
 }
 
@@ -95,6 +98,7 @@ fn offline(sas: Option<String>, name: String, qr: bool) -> UiResult {
         sas,
         qr,
         offline: true,
+        device: 0,
     }
 }
 
@@ -123,6 +127,7 @@ pub(crate) async fn offer(
             sas: None,
             qr: false,
             revealed: false,
+            device: 0,
             wrap_sent: false,
         },
     )))
@@ -163,6 +168,20 @@ pub(crate) async fn source_step(
         ),
         r => r,
     };
+    let mut res = res;
+    if let Ok(UiResult::Handoff { device, .. }) = &mut res {
+        *device = h.device;
+    }
+    // Подмена: обмен закрыть на сервере, чтобы новое устройство не ждало.
+    if matches!(
+        res,
+        Ok(UiResult::Handoff {
+            step: HandoffStep::Rejected,
+            ..
+        })
+    ) {
+        let _ = api::handoff_source_cancel(cx, code.clone()).await;
+    }
     let ongoing = matches!(
         res,
         Ok(UiResult::Handoff {
@@ -196,6 +215,7 @@ async fn source_advance(
     }
     let st = api::handoff_source(cx, code.to_owned(), vec![], vec![]).await?;
     h.name = st.name.clone();
+    h.device = st.device_id;
     if st.delivered {
         return Ok(result(HandoffStep::Done, st.name, None, h.qr));
     }
@@ -205,10 +225,11 @@ async fn source_advance(
     // Сервер пишет ключ один раз; другой ключ при следующем опросе — подмена.
     match &h.joiner_pk {
         Some(b) if *b != st.pk => {
-            return fail(
-                "handoff_key_changed",
+            cx.log(
+                LogLevel::Warn,
                 "ключ нового устройства сменился — обмен прерван",
             );
+            return Ok(result(HandoffStep::Rejected, st.name, None, false));
         }
         Some(_) => {}
         None => {
@@ -228,10 +249,11 @@ async fn source_advance(
     // успел первым, получил бы ключ сам. Пользователь видит имя и подтверждает.
     let qr = !st.mac.is_empty();
     if qr && !handoff::check_mac(&h.link_secret, &st.pk, &st.mac) {
-        return fail(
-            "handoff_mac_mismatch",
+        cx.log(
+            LogLevel::Warn,
             "ключ нового устройства не совпал с QR-кодом — обмен прерван",
         );
+        return Ok(result(HandoffStep::Rejected, st.name, None, false));
     }
     h.sas = Some(sas.clone());
     h.qr = qr;
@@ -268,7 +290,11 @@ async fn send_wrap(
 /// новое устройство получает 404 и переходит к паролю. Код, по которому ещё не
 /// подключились, остаётся рабочим — без передачи ключа.
 pub(crate) async fn source_cancel(cx: &Ctx, code: String) -> SyncResult<UiResult> {
-    if cx.with_mut(|s| s.handoffs.remove(&code)).is_some() {
+    // Обёртку уже пытались отправить: отмена на сервере стёрла бы, возможно, уже
+    // доставленный ключ — только забыть здесь.
+    if let Some(h) = cx.with_mut(|s| s.handoffs.remove(&code))
+        && !h.wrap_sent
+    {
         // Сеть недоступна — обмен истечёт сам.
         let _ = api::handoff_source_cancel(cx, code).await;
     }
@@ -367,7 +393,12 @@ async fn receive_advance(
 ) -> SyncResult<UiResult> {
     let labels = Labels::selfsync();
     if !h.pk_sent {
-        api::handoff_joiner_put(cx, h.eph.public().to_vec(), h.mac.clone()).await?;
+        match api::handoff_joiner_put(cx, h.eph.public().to_vec(), h.mac.clone()).await {
+            // PUT может только это устройство: «уже записан» — наш же запрос, ответ
+            // на который потерялся.
+            Ok(()) | Err(SyncError::Http { status: 409, .. }) => {}
+            Err(e) => return Err(e),
+        }
         h.pk_sent = true;
     }
     let st = api::handoff_joiner_get(cx).await?;

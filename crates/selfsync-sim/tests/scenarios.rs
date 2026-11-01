@@ -2907,16 +2907,114 @@ mod handoff {
         p.secret = "AAAAAAAAAAAAAAAAAAAAAA".into();
         start(&mut p, By::Qr);
         let r = source(&mut p.w, &p.code, None, 10);
-        assert!(
-            matches!(&r, UiResult::Error { code, .. } if code == "handoff_mac_mismatch"),
-            "{r:?}"
-        );
+        // Ключ не передан, источник знает, какое устройство отозвать.
+        let UiResult::Handoff {
+            step: HandoffStep::Rejected,
+            device,
+            ..
+        } = r
+        else {
+            panic!("ждали отказ: {r:?}");
+        };
+        let joiner = {
+            let pool = p.w.state.server_pool().unwrap();
+            let c = pool.get().unwrap();
+            selfsync_server::db::server::authenticate(&c, &p.w.clients[1].token)
+                .unwrap()
+                .unwrap()
+                .id
+        };
+        assert_eq!(device, joiner);
         let r = source(&mut p.w, &p.code, None, 11);
+        assert_eq!(err_code(&r), "no_handoff");
+        // Обмен закрыт и на сервере: новое устройство не ждёт до срока.
+        assert_eq!(err_code(&poll(&mut p.w, None, 12)), "handoff_gone");
+        assert!(p.w.clients[1].remembered_key.is_none());
+        let r = ui_result(&mut p.w, 0, 13, UiCommand::RevokeDevice { id: device });
+        assert!(matches!(r, UiResult::Ok), "{r:?}");
+    }
+
+    /// Источник закрыл окно после попытки отправить обёртку (подтверждение
+    /// потерялось): отмена — только у него, обёртка на сервере остаётся.
+    #[test]
+    fn cancel_after_wrap_keeps_key() {
+        let mut p = pair();
+        redeem(&mut p);
+        start(&mut p, By::Qr);
+        let sas = sas_of(&source(&mut p.w, &p.code, None, 10));
+        p.w.planned_faults
+            .push_back(("POST /v1/join/handoff".into(), true));
+        assert!(is_offline(&source(&mut p.w, &p.code, Some(sas), 11)));
+        let r = ui_result(
+            &mut p.w,
+            0,
+            12,
+            UiCommand::CancelHandoff {
+                code: p.code.clone(),
+            },
+        );
+        assert!(matches!(r, UiResult::Ok), "{r:?}");
+        let r = poll(&mut p.w, None, 13);
         assert!(
-            matches!(&r, UiResult::Error { code, .. } if code == "no_handoff"),
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Done,
+                    ..
+                }
+            ),
             "{r:?}"
         );
-        assert!(p.w.clients[1].remembered_key.is_none());
+        let note = p.note.clone();
+        finish(&mut p.w, &note);
+    }
+
+    /// Ответ на PUT ключа нового устройства потерялся: повтор того же — не отмена.
+    #[test]
+    fn lost_put_response_is_retried() {
+        let mut p = pair();
+        redeem(&mut p);
+        p.w.planned_faults
+            .push_back(("PUT /v1/join/handoff".into(), true));
+        let r = start(&mut p, By::Qr);
+        assert!(is_offline(&r), "{r:?}");
+        let r = poll(&mut p.w, None, 10);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Waiting,
+                    offline: false,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        let sas = sas_of(&source(&mut p.w, &p.code, None, 11));
+        let r = source(&mut p.w, &p.code, Some(sas), 12);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Done,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        let r = poll(&mut p.w, None, 13);
+        assert!(
+            matches!(
+                r,
+                UiResult::Handoff {
+                    step: HandoffStep::Done,
+                    ..
+                }
+            ),
+            "{r:?}"
+        );
+        let note = p.note.clone();
+        finish(&mut p.w, &note);
     }
 
     fn err_code(r: &UiResult) -> &str {

@@ -42,7 +42,7 @@ export interface PollOptions {
   interval?: number;
 }
 
-/** Опрашивать до `done`/`sent`, ошибки, остановки или срока. Без связи
+/** Опрашивать до `done`/`sent`/`rejected`, ошибки, остановки или срока. Без связи
  *  (`offline`) пауза растёт вдвое до 15 с. Возвращает последний ответ (`null` —
  *  остановлено или срок вышел). */
 export async function pollHandoff(o: PollOptions): Promise<UiResult | null> {
@@ -54,7 +54,7 @@ export async function pollHandoff(o: PollOptions): Promise<UiResult | null> {
     const r = await o.step();
     if (o.stopped()) return null;
     o.onResult(r);
-    if (!isHandoff(r) || r.step === "done" || r.step === "sent") return r;
+    if (!isHandoff(r) || r.step === "done" || r.step === "sent" || r.step === "rejected") return r;
     wait = r.offline ? Math.min(wait * 2, Math.max(HANDOFF_BACKOFF_MAX_MS, base)) : base;
     await sleep(wait);
   }

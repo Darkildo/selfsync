@@ -238,6 +238,7 @@ pub async fn handoff_source(
         tracing::info!(device, "ключ vault'а передан по коду");
     }
     Ok(Proto(pb::JoinHandoffSourceState {
+        device_id: h.device.unwrap_or(0),
         name: h.name,
         pk: h.joiner_pk.unwrap_or_default(),
         mac: h.joiner_mac.unwrap_or_default(),
@@ -257,16 +258,19 @@ pub async fn handoff_joiner_put(
         return Err(ApiError::bad_request("bad_mac", "MAC — 32 байта"));
     }
     let device = a.device_id;
-    let ok = st
+    let put = st
         .server_db(move |c| {
             let mac = (!req.mac.is_empty()).then_some(req.mac.as_slice());
             Ok(server::joiner_handoff_put(c, device, &req.pk, mac)?)
         })
         .await?;
-    if ok {
-        Ok(StatusCode::NO_CONTENT)
-    } else {
-        Err(ApiError::not_found("no_handoff"))
+    match put {
+        server::HandoffPut::Stored => Ok(StatusCode::NO_CONTENT),
+        server::HandoffPut::Conflict => Err(ApiError::conflict(
+            "handoff_key_set",
+            "ключ обмена уже прислан другой",
+        )),
+        server::HandoffPut::NotFound => Err(ApiError::not_found("no_handoff")),
     }
 }
 
