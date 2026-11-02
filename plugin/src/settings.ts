@@ -109,6 +109,8 @@ export class SelfsyncSettingTab extends PluginSettingTab {
         name: r.name,
         desc: r.desc,
         render: (s: Setting) => {
+          // Несколько кнопок в строке на телефоне переносятся (styles.css).
+          s.settingEl.addClass("selfsync-actions");
           const cleanup = r.build(s);
           return typeof cleanup === "function" ? (cleanup as () => void) : undefined;
         },

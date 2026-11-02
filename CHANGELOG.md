@@ -2,6 +2,10 @@
 
 Release notes for each version; earlier versions are described on the [releases page](https://github.com/Darkildo/selfsync/releases).
 
+## 0.5.1
+
+- **Plugin.** On a phone, settings rows and dialogs with several buttons wrap them onto the next line instead of pushing the last one off the screen. The desktop layout is unchanged.
+
 ## 0.5.0
 
 Protocol 1.4. Server, plugin and `selfsync-cli` 0.5.0 work with older counterparts as before; the new feature needs 0.5.0 on the server and on both devices.

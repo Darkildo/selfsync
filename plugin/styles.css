@@ -13,6 +13,13 @@
   margin: 0.5em 0;
 }
 
+/* Телефон: кнопки строки переносятся, а не уходят за край экрана. На десктопе
+   раскладка Obsidian как есть: перенос там сжимал бы кнопки рядом с длинным описанием. */
+.is-mobile .selfsync-actions .setting-item-control {
+  flex-wrap: wrap;
+  row-gap: var(--size-4-2);
+}
+
 .selfsync-device-revoked .setting-item-name {
   text-decoration: line-through;
   opacity: 0.6;

@@ -26,6 +26,7 @@ export class PasswordModal extends Modal {
   }
 
   override onOpen(): void {
+    this.modalEl.addClass("selfsync-actions");
     const { contentEl } = this;
     this.setTitle(this.opts.title);
     contentEl.createEl("p", { text: this.opts.desc });
@@ -83,6 +84,7 @@ export class ChangePasswordModal extends Modal {
   }
 
   override onOpen(): void {
+    this.modalEl.addClass("selfsync-actions");
     const { contentEl } = this;
     this.setTitle(t("encryption.changeTitle"));
     const hint = contentEl.createEl("p", { cls: "setting-item-description" });

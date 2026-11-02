@@ -139,6 +139,7 @@ export class PluginSettingTab {
 }
 
 export class Modal {
+  modalEl = new El();
   contentEl = new El();
   constructor(public app: unknown) {}
   open(): void {}

@@ -18,6 +18,7 @@ export class HistoryModal extends Modal {
   }
 
   override onOpen(): void {
+    this.modalEl.addClass("selfsync-actions");
     this.setTitle(t("history.title", { path: this.path }));
     void this.render();
   }

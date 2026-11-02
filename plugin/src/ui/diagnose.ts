@@ -25,6 +25,7 @@ export class DiagnoseModal extends Modal {
   }
 
   override onOpen(): void {
+    this.modalEl.addClass("selfsync-actions");
     this.setTitle(t("diag.title"));
     void this.render(this.checks);
   }

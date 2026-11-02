@@ -16,6 +16,7 @@ export class ConflictsModal extends Modal {
   }
 
   override onOpen(): void {
+    this.modalEl.addClass("selfsync-actions");
     this.setTitle(t("conflicts.title"));
     void this.render();
   }
