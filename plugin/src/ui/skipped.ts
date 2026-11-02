@@ -15,6 +15,7 @@ export class SkippedModal extends Modal {
   }
 
   override onOpen(): void {
+    this.modalEl.addClass("selfsync-actions");
     this.setTitle(t("skipped.title"));
     void this.render();
   }

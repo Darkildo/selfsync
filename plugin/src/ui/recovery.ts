@@ -31,6 +31,7 @@ export class PhraseModal extends Modal {
   }
 
   override onOpen(): void {
+    this.modalEl.addClass("selfsync-actions");
     const { contentEl } = this;
     this.setTitle(t("recovery.title"));
     contentEl.createEl("p", { text: t("recovery.showDesc") });
@@ -87,6 +88,7 @@ export class RecoverModal extends Modal {
   }
 
   override onOpen(): void {
+    this.modalEl.addClass("selfsync-actions");
     const { contentEl } = this;
     this.setTitle(t("recovery.recoverTitle"));
     contentEl.createEl("p", { text: t("recovery.recoverDesc") });

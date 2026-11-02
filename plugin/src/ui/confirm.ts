@@ -18,6 +18,7 @@ class ConfirmModal extends Modal {
   }
 
   override onOpen(): void {
+    this.modalEl.addClass("selfsync-actions");
     this.contentEl.createEl("p", { text: this.text });
     new Setting(this.contentEl)
       .addButton((b) => b.setButtonText(t("common.cancel")).onClick(() => this.close()))

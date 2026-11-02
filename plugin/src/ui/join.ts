@@ -61,6 +61,7 @@ export class JoinModal extends Modal {
   }
 
   override onOpen(): void {
+    this.modalEl.addClass("selfsync-actions");
     const { contentEl } = this;
     this.setTitle(t("join.title"));
     contentEl.createEl("p", { text: t("join.desc") });

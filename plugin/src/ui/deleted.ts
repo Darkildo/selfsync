@@ -19,6 +19,7 @@ export class DeletedModal extends Modal {
   }
 
   override onOpen(): void {
+    this.modalEl.addClass("selfsync-actions");
     this.setTitle(t("deleted.title"));
     void this.render();
   }

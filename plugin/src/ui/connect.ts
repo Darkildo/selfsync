@@ -34,6 +34,7 @@ export class ConnectModal extends Modal {
   }
 
   override onOpen(): void {
+    this.modalEl.addClass("selfsync-actions");
     const { contentEl } = this;
     let device = this.plugin.settings.deviceName;
     this.setTitle(t("connect.title"));
