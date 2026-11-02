@@ -68,6 +68,19 @@ export class FileSystemAdapter {
   getFullPath(p: string): string {
     return join(this.base, p);
   }
+  async exists(p: string): Promise<boolean> {
+    return fsp.stat(join(this.base, p)).then(
+      () => true,
+      () => false,
+    );
+  }
+  async read(p: string): Promise<string> {
+    return fsp.readFile(join(this.base, p), "utf8");
+  }
+  async write(p: string, data: string): Promise<void> {
+    await fsp.mkdir(join(this.base, p, ".."), { recursive: true });
+    await fsp.writeFile(join(this.base, p), data);
+  }
   async trashSystem(): Promise<boolean> {
     return false;
   }

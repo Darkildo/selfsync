@@ -7,6 +7,7 @@ const no: Dict = {
   "status.syncing": "Synkroniserer",
   "status.offline": "Serveren kan ikke nås",
   "status.error": "Synkroniseringsfeil",
+  "status.restarting": "Synkroniseringsfeil, starter på nytt…",
   "status.needPassword": "Passord kreves",
   "status.blocked": "Synkronisering stoppet",
   "status.rateLimited": "For mange forsøk, neste kl. {time}",
@@ -50,6 +51,7 @@ const no: Dict = {
   "notice.indexReset": "Synkroniseringsindeksen var skadet — en sikker full avstemming er startet",
   "notice.encryptionMismatch": "Hvelvet er kryptert her, men ikke på serveren — synkronisering stoppet",
   "notice.error": "Synkronisering: {message}",
+  "notice.engineStopped": "selfsync: synkroniseringsmotoren feilet {n} ganger på rad og er stoppet. Kjør «{cmd}» for å prøve igjen; detaljene står i synkroniseringsloggen.",
 
   "settings.connection": "Tilkobling",
   "settings.connectedTo": "Koblet til hvelvet «{vault}» som «{device}»",

@@ -7,6 +7,7 @@ const am: Dict = {
   "status.syncing": "በማመሳሰል ላይ",
   "status.offline": "አገልጋዩ አይደረስም",
   "status.error": "የማመሳሰል ስህተት",
+  "status.restarting": "የማመሳሰል ስህተት፣ እንደገና በመጀመር ላይ…",
   "status.needPassword": "የይለፍ ቃል ያስፈልጋል",
   "status.blocked": "ማመሳሰል ቆሟል",
   "status.rateLimited": "በጣም ብዙ ሙከራዎች፣ ቀጣዩ በ{time}",
@@ -50,6 +51,7 @@ const am: Dict = {
   "notice.indexReset": "የማመሳሰል ማውጫው ተበላሽቷል — ደህንነቱ የተጠበቀ ሙሉ ማስታረቅ ተጀምሯል",
   "notice.encryptionMismatch": "ቮልቱ እዚህ የተመሰጠረ ነው ነገር ግን በአገልጋዩ ላይ አይደለም — ማመሳሰል ቆሟል",
   "notice.error": "ማመሳሰል: {message}",
+  "notice.engineStopped": "selfsync: የማመሳሰል ሞተሩ {n} ጊዜ በተከታታይ አልተሳካም እና ቆሟል። እንደገና ለመሞከር «{cmd}»ን ያሂዱ፤ ዝርዝሩ በማመሳሰል መዝገብ ውስጥ አለ።",
 
   "settings.connection": "ግንኙነት",
   "settings.connectedTo": "ከቮልት «{vault}» ጋር እንደ «{device}» ተገናኝቷል",

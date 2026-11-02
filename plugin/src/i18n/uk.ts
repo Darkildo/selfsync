@@ -7,6 +7,7 @@ const uk: Dict = {
   "status.syncing": "Синхронізація",
   "status.offline": "Сервер недоступний",
   "status.error": "Помилка синхронізації",
+  "status.restarting": "Помилка синхронізації, перезапуск…",
   "status.needPassword": "Потрібен пароль",
   "status.blocked": "Синхронізацію зупинено",
   "status.rateLimited": "Забагато спроб, наступна о {time}",
@@ -50,6 +51,7 @@ const uk: Dict = {
   "notice.indexReset": "Індекс синхронізації пошкоджено — розпочато безпечну повну звірку",
   "notice.encryptionMismatch": "Тут сховище зашифроване, а на сервері ні — синхронізацію зупинено",
   "notice.error": "Синхронізація: {message}",
+  "notice.engineStopped": "selfsync: ядро синхронізації {n} рази поспіль завершилося з помилкою і зупинене. Виконайте «{cmd}», щоб спробувати знову; подробиці — в журналі синхронізації.",
 
   "settings.connection": "Підключення",
   "settings.connectedTo": "Підключено до сховища «{vault}» як «{device}»",

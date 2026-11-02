@@ -7,6 +7,7 @@ const tr: Dict = {
   "status.syncing": "Senkronize ediliyor",
   "status.offline": "Sunucuya ulaşılamıyor",
   "status.error": "Senkronizasyon hatası",
+  "status.restarting": "Senkronizasyon hatası, yeniden başlatılıyor…",
   "status.needPassword": "Parola gerekli",
   "status.blocked": "Senkronizasyon durduruldu",
   "status.rateLimited": "Çok fazla deneme, sonraki deneme: {time}",
@@ -50,6 +51,7 @@ const tr: Dict = {
   "notice.indexReset": "Senkronizasyon dizini bozulmuştu — güvenli bir tam karşılaştırma başlatıldı",
   "notice.encryptionMismatch": "Kasa burada şifreli ama sunucuda değil — senkronizasyon durduruldu",
   "notice.error": "Senkronizasyon: {message}",
+  "notice.engineStopped": "selfsync: senkronizasyon motoru art arda {n} kez çöktü ve durduruldu. Yeniden denemek için “{cmd}” komutunu çalıştırın; ayrıntılar senkronizasyon günlüğünde.",
 
   "settings.connection": "Bağlantı",
   "settings.connectedTo": "“{vault}” kasasına “{device}” olarak bağlı",

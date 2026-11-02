@@ -7,6 +7,7 @@ const zhTw: Dict = {
   "status.syncing": "同步中",
   "status.offline": "無法連線至伺服器",
   "status.error": "同步錯誤",
+  "status.restarting": "同步錯誤，正在重新啟動…",
   "status.needPassword": "需要密碼",
   "status.blocked": "同步已停止",
   "status.rateLimited": "嘗試次數過多，下次嘗試時間：{time}",
@@ -50,6 +51,7 @@ const zhTw: Dict = {
   "notice.indexReset": "同步索引已損毀——已開始安全的完整核對",
   "notice.encryptionMismatch": "此處的儲存庫已加密，但伺服器上的沒有——同步已停止",
   "notice.error": "同步：{message}",
+  "notice.engineStopped": "selfsync：同步引擎連續 {n} 次發生錯誤，已停止。執行「{cmd}」再試一次；詳情請見同步紀錄。",
 
   "settings.connection": "連線",
   "settings.connectedTo": "已以「{device}」身分連線至儲存庫「{vault}」",

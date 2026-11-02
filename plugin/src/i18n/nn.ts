@@ -7,6 +7,7 @@ const nn: Dict = {
   "status.syncing": "Synkroniserer",
   "status.offline": "Tenaren er utilgjengeleg",
   "status.error": "Synkroniseringsfeil",
+  "status.restarting": "Synkroniseringsfeil, startar på nytt…",
   "status.needPassword": "Treng passord",
   "status.blocked": "Synkroniseringa er stoppa",
   "status.rateLimited": "For mange forsøk, neste klokka {time}",
@@ -50,6 +51,7 @@ const nn: Dict = {
   "notice.indexReset": "Synkroniseringsindeksen var skadd — ei trygg full avstemming har starta",
   "notice.encryptionMismatch": "Kvelven er kryptert her, men ikkje på tenaren — synkroniseringa er stoppa",
   "notice.error": "Synkronisering: {message}",
+  "notice.engineStopped": "selfsync: synkroniseringsmotoren feila {n} gonger på rad og er stoppa. Køyr «{cmd}» for å prøve igjen; detaljane står i synkroniseringsloggen.",
 
   "settings.connection": "Tilkopling",
   "settings.connectedTo": "Tilkopla kvelven «{vault}» som «{device}»",

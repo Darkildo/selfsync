@@ -7,6 +7,7 @@ const sa: Dict = {
   "status.syncing": "समकालीकरणं प्रचलति",
   "status.offline": "सेवकयन्त्रं न प्राप्यते",
   "status.error": "समकालीकरणे दोषः",
+  "status.restarting": "समकालीकरणे दोषः, पुनः आरभ्यते…",
   "status.needPassword": "गुप्तशब्दः आवश्यकः",
   "status.blocked": "समकालीकरणं स्थगितम्",
   "status.rateLimited": "अतिबहवः प्रयासाः, अग्रिमः प्रयासः {time} समये",
@@ -50,6 +51,7 @@ const sa: Dict = {
   "notice.indexReset": "समकालीकरण-सूची क्षतिग्रस्ता आसीत् — सुरक्षितं पूर्णं समन्वयनम् आरब्धम्",
   "notice.encryptionMismatch": "अत्र तिजोरी गूढलिखिता अस्ति किन्तु सेवकयन्त्रे न — समकालीकरणं स्थगितम्",
   "notice.error": "समकालीकरणम्: {message}",
+  "notice.engineStopped": "selfsync: समकालीकरण-यन्त्रं क्रमशः {n} वारं विफलं जातम्, स्थगितं च। पुनः प्रयत्नाय “{cmd}” चालयतु; विवरणं समकालीकरण-पञ्जिकायाम् अस्ति।",
 
   "settings.connection": "सम्बन्धः",
   "settings.connectedTo": "“{vault}” तिजोर्या सह “{device}” इति रूपेण सम्बद्धम्",

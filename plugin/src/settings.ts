@@ -73,7 +73,12 @@ export interface Row {
   build: (s: Setting) => unknown;
 }
 
+/** Секции ядра: надстройки выбирают нужные по `id`, а не по переведённому заголовку. */
+export type SectionId = "connection" | "sync" | "configSync" | "encryption" | "devices";
+
 export interface Section {
+  /** Постоянное имя секции ядра (у секций надстроек — любое или нет). */
+  id?: SectionId | (string & {});
   heading: string;
   rows: Row[];
   /** Команды серверу — только у подключённого устройства. */
@@ -132,11 +137,12 @@ export class SelfsyncSettingTab extends PluginSettingTab {
 
   protected sections(): Section[] {
     return [
-      { heading: t("settings.connection"), rows: this.connectionRows() },
-      { heading: t("settings.sync"), rows: this.syncRows() },
-      { heading: t("configSync.heading"), rows: this.configSyncRows() },
-      { heading: t("encryption.heading"), rows: [this.encryptionRow(), this.recoveryRow()], needsRunner: true },
+      { id: "connection", heading: t("settings.connection"), rows: this.connectionRows() },
+      { id: "sync", heading: t("settings.sync"), rows: this.syncRows() },
+      { id: "configSync", heading: t("configSync.heading"), rows: this.configSyncRows() },
+      { id: "encryption", heading: t("encryption.heading"), rows: [this.encryptionRow(), this.recoveryRow()], needsRunner: true },
       {
+        id: "devices",
         heading: t("devices.heading"),
         rows: [this.readOnlyRow(), this.quotaRow(), this.storageRow(), this.retentionRow(), this.joinRow(), this.joinReadOnlyRow(), this.devicesRow()],
         needsRunner: true,

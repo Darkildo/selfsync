@@ -7,6 +7,7 @@ const ky: Dict = {
   "status.syncing": "Шайкештирилүүдө",
   "status.offline": "Сервер жеткиликсиз",
   "status.error": "Шайкештирүү катасы",
+  "status.restarting": "Шайкештирүү катасы, кайра иштетилүүдө…",
   "status.needPassword": "Сырсөз керек",
   "status.blocked": "Шайкештирүү токтотулду",
   "status.rateLimited": "Аракеттер өтө көп, кийинкиси {time}",
@@ -50,6 +51,7 @@ const ky: Dict = {
   "notice.indexReset": "Шайкештирүү индекси бузулган — коопсуз толук салыштыруу башталды",
   "notice.encryptionMismatch": "Сактагыч бул жерде шифрленген, бирок серверде шифрленген эмес — шайкештирүү токтотулду",
   "notice.error": "Шайкештирүү: {message}",
+  "notice.engineStopped": "selfsync: шайкештирүү кыймылдаткычы катары менен {n} жолу иштебей калып, токтотулду. Кайра аракет кылуу үчүн «{cmd}» буйругун аткарыңыз; чоо-жайы шайкештирүү журналында.",
 
   "settings.connection": "Туташуу",
   "settings.connectedTo": "«{vault}» сактагычына «{device}» катары туташкан",

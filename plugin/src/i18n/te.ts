@@ -7,6 +7,7 @@ const te: Dict = {
   "status.syncing": "సింక్ అవుతోంది",
   "status.offline": "సర్వర్ అందుబాటులో లేదు",
   "status.error": "సింక్ లోపం",
+  "status.restarting": "సింక్ లోపం, మళ్లీ ప్రారంభిస్తోంది…",
   "status.needPassword": "పాస్‌వర్డ్ అవసరం",
   "status.blocked": "సింక్ ఆపివేయబడింది",
   "status.rateLimited": "చాలా ఎక్కువ ప్రయత్నాలు, తదుపరిది {time}కి",
@@ -50,6 +51,7 @@ const te: Dict = {
   "notice.indexReset": "సింక్ ఇండెక్స్ దెబ్బతింది — సురక్షితమైన పూర్తి పోలిక సరిచూడటం ప్రారంభమైంది",
   "notice.encryptionMismatch": "వాల్ట్ ఇక్కడ ఎన్‌క్రిప్ట్ చేయబడింది కానీ సర్వర్‌లో కాదు — సింక్ ఆపివేయబడింది",
   "notice.error": "సింక్: {message}",
+  "notice.engineStopped": "selfsync: సింక్ ఇంజిన్ వరుసగా {n} సార్లు విఫలమై ఆపివేయబడింది. మళ్లీ ప్రయత్నించడానికి “{cmd}” నడపండి; వివరాలు సింక్ లాగ్‌లో ఉన్నాయి.",
 
   "settings.connection": "కనెక్షన్",
   "settings.connectedTo": "“{vault}” వాల్ట్‌కు “{device}”గా కనెక్ట్ అయింది",

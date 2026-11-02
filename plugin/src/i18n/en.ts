@@ -6,6 +6,7 @@ export const en = {
   "status.syncing": "Syncing",
   "status.offline": "Server unreachable",
   "status.error": "Sync error",
+  "status.restarting": "Sync error, restarting…",
   "status.needPassword": "Password needed",
   "status.blocked": "Sync stopped",
   "status.rateLimited": "Too many attempts, next one at {time}",
@@ -49,6 +50,7 @@ export const en = {
   "notice.indexReset": "Sync index was damaged — a safe full reconciliation started",
   "notice.encryptionMismatch": "The vault is encrypted here but not on the server — sync stopped",
   "notice.error": "Sync: {message}",
+  "notice.engineStopped": "selfsync: the sync engine failed {n} times in a row and was stopped. Run “{cmd}” to try again; the details are in the sync log.",
 
   "settings.connection": "Connection",
   "settings.connectedTo": "Connected to vault «{vault}» as «{device}»",

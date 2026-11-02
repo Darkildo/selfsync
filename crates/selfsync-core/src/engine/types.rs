@@ -39,6 +39,11 @@ pub struct EngineConfig {
     pub use_wait: bool,
     /// Полное сканирование vault'а не реже, мс (ловит правки вне событий Obsidian).
     pub full_scan_ms: u64,
+    /// Возврат приложения на экран запускает полное сканирование, только если
+    /// последнее было не ближе этого, мс. 0 — всегда (мобильные: там правки вне
+    /// Obsidian, пока он спал, иначе не увидеть). На десктопе события vault'а идут и
+    /// в свёрнутом окне, так что частый полный обход там лишний.
+    pub visible_scan_min_ms: u64,
     /// Лимит размера файла на клиенте.
     pub max_file_size: u64,
     /// Не скачивать серверные файлы больше этого размера, если их здесь нет
@@ -55,6 +60,11 @@ pub struct EngineConfig {
     /// принимать; ожидающее включение шифрования — до первой отправки, а не после
     /// неё: сервер не видит ни одного открытого байта.
     pub require_encryption: bool,
+    /// Предупреждать «сервер старее плагина» в проверке соединения, если его
+    /// минорная версия протокола меньше этой. `null` — не предупреждать (надстройки
+    /// со своим сервером, которому новые возможности ядра не нужны). По умолчанию —
+    /// минорная версия самого клиента.
+    pub server_minor_warn: Option<u32>,
 }
 
 fn default_kdf() -> KdfParams {
@@ -76,12 +86,14 @@ impl Default for EngineConfig {
             poll_idle_max_ms: 300_000,
             use_wait: false,
             full_scan_ms: 10 * 60_000,
+            visible_scan_min_ms: 0,
             max_file_size: 512 * 1024 * 1024,
             max_download_size: 0,
             kdf: KdfParams::DEFAULT,
             base_cache_bytes: 32 * 1024 * 1024,
             tz_offset_min: 0,
             require_encryption: false,
+            server_minor_warn: Some(selfsync_proto::PROTO_MINOR),
         }
     }
 }

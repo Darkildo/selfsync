@@ -7,6 +7,7 @@ const or: Dict = {
   "status.syncing": "ସିଙ୍କ ହେଉଛି",
   "status.offline": "ସର୍ଭରରେ ପହଞ୍ଚିହେଉନାହିଁ",
   "status.error": "ସିଙ୍କ ତ୍ରୁଟି",
+  "status.restarting": "ସିଙ୍କ ତ୍ରୁଟି, ପୁଣି ଆରମ୍ଭ ହେଉଛି…",
   "status.needPassword": "ପାସୱାର୍ଡ ଆବଶ୍ୟକ",
   "status.blocked": "ସିଙ୍କ ବନ୍ଦ ହୋଇଛି",
   "status.rateLimited": "ଅତ୍ୟଧିକ ପ୍ରୟାସ, ପରବର୍ତ୍ତୀଟି {time}ରେ",
@@ -50,6 +51,7 @@ const or: Dict = {
   "notice.indexReset": "ସିଙ୍କ ଇଣ୍ଡେକ୍ସ କ୍ଷତିଗ୍ରସ୍ତ ହୋଇଥିଲା — ସୁରକ୍ଷିତ ସମ୍ପୂର୍ଣ୍ଣ ମିଳାଣ ଆରମ୍ଭ ହୋଇଛି",
   "notice.encryptionMismatch": "ଭଲ୍ଟ ଏଠାରେ ଏନକ୍ରିପ୍ଟ ହୋଇଛି କିନ୍ତୁ ସର୍ଭରରେ ନୁହେଁ — ସିଙ୍କ ବନ୍ଦ ହୋଇଛି",
   "notice.error": "ସିଙ୍କ: {message}",
+  "notice.engineStopped": "selfsync: ସିଙ୍କ ଇଞ୍ଜିନ କ୍ରମାଗତ {n} ଥର ବିଫଳ ହୋଇ ବନ୍ଦ ହୋଇଛି। ପୁଣି ଚେଷ୍ଟା କରିବାକୁ “{cmd}” ଚଲାନ୍ତୁ; ବିବରଣୀ ସିଙ୍କ ଲଗରେ ଅଛି।",
 
   "settings.connection": "ସଂଯୋଗ",
   "settings.connectedTo": "“{vault}” ଭଲ୍ଟ ସହ “{device}” ଭାବେ ସଂଯୁକ୍ତ",

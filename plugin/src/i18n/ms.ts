@@ -7,6 +7,7 @@ const ms: Dict = {
   "status.syncing": "Menyegerakkan",
   "status.offline": "Pelayan tidak dapat dicapai",
   "status.error": "Ralat penyegerakan",
+  "status.restarting": "Ralat penyegerakan, memulakan semula…",
   "status.needPassword": "Kata laluan diperlukan",
   "status.blocked": "Penyegerakan dihentikan",
   "status.rateLimited": "Terlalu banyak percubaan, percubaan seterusnya pada {time}",
@@ -50,6 +51,7 @@ const ms: Dict = {
   "notice.indexReset": "Indeks penyegerakan rosak — penyelarasan penuh yang selamat telah dimulakan",
   "notice.encryptionMismatch": "Peti nota disulitkan di sini tetapi tidak di pelayan — penyegerakan dihentikan",
   "notice.error": "Penyegerakan: {message}",
+  "notice.engineStopped": "selfsync: enjin penyegerakan gagal {n} kali berturut-turut dan telah dihentikan. Jalankan “{cmd}” untuk mencuba lagi; butirannya ada dalam log penyegerakan.",
 
   "settings.connection": "Sambungan",
   "settings.connectedTo": "Disambungkan ke peti nota “{vault}” sebagai “{device}”",

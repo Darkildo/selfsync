@@ -7,6 +7,7 @@ const ptBr: Dict = {
   "status.syncing": "Sincronizando",
   "status.offline": "Servidor inacessível",
   "status.error": "Erro de sincronização",
+  "status.restarting": "Erro de sincronização, reiniciando…",
   "status.needPassword": "Senha necessária",
   "status.blocked": "Sincronização interrompida",
   "status.rateLimited": "Tentativas demais, a próxima às {time}",
@@ -50,6 +51,7 @@ const ptBr: Dict = {
   "notice.indexReset": "O índice de sincronização estava danificado — iniciada uma reconciliação completa segura",
   "notice.encryptionMismatch": "O cofre está criptografado aqui, mas não no servidor — sincronização interrompida",
   "notice.error": "Sincronização: {message}",
+  "notice.engineStopped": "selfsync: o mecanismo de sincronização falhou {n} vezes seguidas e foi parado. Execute “{cmd}” para tentar de novo; os detalhes estão no registro de sincronização.",
 
   "settings.connection": "Conexão",
   "settings.connectedTo": "Conectado ao cofre “{vault}” como “{device}”",

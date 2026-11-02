@@ -7,6 +7,7 @@ const lv: Dict = {
   "status.syncing": "Sinhronizē",
   "status.offline": "Serveris nav sasniedzams",
   "status.error": "Sinhronizācijas kļūda",
+  "status.restarting": "Sinhronizācijas kļūda, restartē…",
   "status.needPassword": "Nepieciešama parole",
   "status.blocked": "Sinhronizācija apturēta",
   "status.rateLimited": "Pārāk daudz mēģinājumu, nākamais {time}",
@@ -50,6 +51,7 @@ const lv: Dict = {
   "notice.indexReset": "Sinhronizācijas indekss bija bojāts — sākta droša pilna salīdzināšana",
   "notice.encryptionMismatch": "Šeit krātuve ir šifrēta, bet serverī nav — sinhronizācija apturēta",
   "notice.error": "Sinhronizācija: {message}",
+  "notice.engineStopped": "selfsync: sinhronizācijas dzinējs {n} reizes pēc kārtas avarēja un ir apturēts. Izpildiet „{cmd}“, lai mēģinātu vēlreiz; sīkāka informācija ir sinhronizācijas žurnālā.",
 
   "settings.connection": "Savienojums",
   "settings.connectedTo": "Savienots ar krātuvi „{vault}“ kā „{device}“",

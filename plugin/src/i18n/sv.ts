@@ -7,6 +7,7 @@ const sv: Dict = {
   "status.syncing": "Synkroniserar",
   "status.offline": "Servern kan inte nås",
   "status.error": "Synkroniseringsfel",
+  "status.restarting": "Synkroniseringsfel, startar om…",
   "status.needPassword": "Lösenord krävs",
   "status.blocked": "Synkroniseringen stoppad",
   "status.rateLimited": "För många försök, nästa kl. {time}",
@@ -50,6 +51,7 @@ const sv: Dict = {
   "notice.indexReset": "Synkroniseringsindexet var skadat — en säker fullständig avstämning har startats",
   "notice.encryptionMismatch": "Valvet är krypterat här men inte på servern — synkroniseringen stoppad",
   "notice.error": "Synkronisering: {message}",
+  "notice.engineStopped": "selfsync: synkroniseringsmotorn misslyckades {n} gånger i rad och har stoppats. Kör ”{cmd}” för att försöka igen; detaljerna finns i synkroniseringsloggen.",
 
   "settings.connection": "Anslutning",
   "settings.connectedTo": "Ansluten till valvet ”{vault}” som ”{device}”",

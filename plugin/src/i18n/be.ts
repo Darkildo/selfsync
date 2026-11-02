@@ -7,6 +7,7 @@ const be: Dict = {
   "status.syncing": "Сінхранізацыя",
   "status.offline": "Сервер недаступны",
   "status.error": "Памылка сінхранізацыі",
+  "status.restarting": "Памылка сінхранізацыі, перазапуск…",
   "status.needPassword": "Патрэбны пароль",
   "status.blocked": "Сінхранізацыя спынена",
   "status.rateLimited": "Занадта шмат спроб, наступная а {time}",
@@ -50,6 +51,7 @@ const be: Dict = {
   "notice.indexReset": "Індэкс сінхранізацыі пашкоджаны — пачата бяспечная поўная зверка",
   "notice.encryptionMismatch": "Тут сховішча зашыфравана, а на серверы не — сінхранізацыя спынена",
   "notice.error": "Сінхранізацыя: {message}",
+  "notice.engineStopped": "selfsync: ядро сінхранізацыі {n} разы запар завяршылася з памылкай і спынена. Выканайце «{cmd}», каб паспрабаваць зноў; падрабязнасці — у журнале сінхранізацыі.",
 
   "settings.connection": "Падключэнне",
   "settings.connectedTo": "Падключана да сховішча «{vault}» як «{device}»",

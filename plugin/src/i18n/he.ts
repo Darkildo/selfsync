@@ -7,6 +7,7 @@ const he: Dict = {
   "status.syncing": "מסנכרן",
   "status.offline": "השרת אינו זמין",
   "status.error": "שגיאת סנכרון",
+  "status.restarting": "שגיאת סנכרון, מופעל מחדש…",
   "status.needPassword": "נדרשת סיסמה",
   "status.blocked": "הסנכרון הופסק",
   "status.rateLimited": "יותר מדי ניסיונות, הניסיון הבא ב־{time}",
@@ -50,6 +51,7 @@ const he: Dict = {
   "notice.indexReset": "אינדקס הסנכרון נפגם — החלה השוואה מלאה ובטוחה",
   "notice.encryptionMismatch": "הכספת מוצפנת כאן אך לא בשרת — הסנכרון הופסק",
   "notice.error": "סנכרון: {message}",
+  "notice.engineStopped": "selfsync: מנוע הסנכרון נכשל {n} פעמים ברציפות ונעצר. הפעל את \"{cmd}\" כדי לנסות שוב; הפרטים ביומן הסנכרון.",
 
   "settings.connection": "חיבור",
   "settings.connectedTo": "מחובר לכספת \"{vault}\" בתור \"{device}\"",

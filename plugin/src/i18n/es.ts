@@ -7,6 +7,7 @@ const es: Dict = {
   "status.syncing": "Sincronizando",
   "status.offline": "Servidor inaccesible",
   "status.error": "Error de sincronización",
+  "status.restarting": "Error de sincronización, reiniciando…",
   "status.needPassword": "Se necesita la contraseña",
   "status.blocked": "Sincronización detenida",
   "status.rateLimited": "Demasiados intentos, el siguiente a las {time}",
@@ -50,6 +51,7 @@ const es: Dict = {
   "notice.indexReset": "El índice de sincronización estaba dañado — se inició una conciliación completa segura",
   "notice.encryptionMismatch": "La bóveda está cifrada aquí pero no en el servidor — sincronización detenida",
   "notice.error": "Sincronización: {message}",
+  "notice.engineStopped": "selfsync: el motor de sincronización falló {n} veces seguidas y se detuvo. Ejecuta «{cmd}» para volver a intentarlo; los detalles están en el registro de sincronización.",
 
   "settings.connection": "Conexión",
   "settings.connectedTo": "Conectado a la bóveda «{vault}» como «{device}»",

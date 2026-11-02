@@ -7,6 +7,7 @@ const kab: Dict = {
   "status.syncing": "Amtawa iteddu",
   "status.offline": "Aqeddac ulac-it",
   "status.error": "Tuccḍa n umtawa",
+  "status.restarting": "Tuccḍa n umtawa, allus n usenker…",
   "status.needPassword": "Yesra awal n uɛeddi",
   "status.blocked": "Amtawa yeḥbes",
   "status.rateLimited": "Aṭas n yineɛruḍen, win d-iteddun ɣef {time}",
@@ -50,6 +51,7 @@ const kab: Dict = {
   "notice.indexReset": "Amatar n umtawa yexser — yebda useɣti ummid aɣelsan",
   "notice.encryptionMismatch": "Akaram n weḥraz yettwawgelhen da maca mačči ɣef uqeddac — amtawa yeḥbes",
   "notice.error": "Amtawa: {message}",
+  "notice.engineStopped": "selfsync: amsedday n umtawa yeccḍ {n} n tikkal yemḍafaren, yettwaḥbes. Sedde “{cmd}” akken ad tɛerḍeḍ tikkelt-nniḍen; talqayt tella deg uɣmis n umtawa.",
 
   "settings.connection": "Tuqqna",
   "settings.connectedTo": "Yeqqen ɣer ukaram n weḥraz “{vault}” am “{device}”",

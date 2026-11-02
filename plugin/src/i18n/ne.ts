@@ -7,6 +7,7 @@ const ne: Dict = {
   "status.syncing": "सिंक हुँदैछ",
   "status.offline": "सर्भरमा पुग्न सकिँदैन",
   "status.error": "सिंक त्रुटि",
+  "status.restarting": "सिंक त्रुटि, पुनः सुरु हुँदैछ…",
   "status.needPassword": "पासवर्ड चाहिन्छ",
   "status.blocked": "सिंक रोकियो",
   "status.rateLimited": "धेरै प्रयासहरू, अर्को प्रयास {time} मा",
@@ -50,6 +51,7 @@ const ne: Dict = {
   "notice.indexReset": "सिंक इन्डेक्स बिग्रिएको थियो — सुरक्षित पूर्ण मिलान सुरु भयो",
   "notice.encryptionMismatch": "भल्ट यहाँ इन्क्रिप्ट गरिएको छ तर सर्भरमा छैन — सिंक रोकियो",
   "notice.error": "सिंक: {message}",
+  "notice.engineStopped": "selfsync: सिंक इन्जिन लगातार {n} पटक असफल भयो र रोकियो। फेरि प्रयास गर्न “{cmd}” चलाउनुहोस्; विवरण सिंक लगमा छ।",
 
   "settings.connection": "जडान",
   "settings.connectedTo": "भल्ट “{vault}” मा “{device}” को रूपमा जडान भएको",

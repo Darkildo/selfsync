@@ -7,6 +7,7 @@ const sw: Dict = {
   "status.syncing": "Inasawazisha",
   "status.offline": "Seva haifikiki",
   "status.error": "Hitilafu ya usawazishaji",
+  "status.restarting": "Hitilafu ya usawazishaji, inaanzishwa upya…",
   "status.needPassword": "Nenosiri linahitajika",
   "status.blocked": "Usawazishaji umesimamishwa",
   "status.rateLimited": "Majaribio mengi mno, linalofuata saa {time}",
@@ -50,6 +51,7 @@ const sw: Dict = {
   "notice.indexReset": "Faharasa ya usawazishaji iliharibika — ulinganisho kamili salama umeanza",
   "notice.encryptionMismatch": "Hazina imesimbwa kwa njia fiche hapa lakini si kwenye seva — usawazishaji umesimamishwa",
   "notice.error": "Usawazishaji: {message}",
+  "notice.engineStopped": "selfsync: injini ya usawazishaji imeshindwa mara {n} mfululizo na imesimamishwa. Endesha “{cmd}” ili ujaribu tena; maelezo yako kwenye kumbukumbu ya usawazishaji.",
 
   "settings.connection": "Muunganisho",
   "settings.connectedTo": "Imeunganishwa na hazina “{vault}” kama “{device}”",

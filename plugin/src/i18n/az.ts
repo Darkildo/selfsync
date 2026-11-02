@@ -7,6 +7,7 @@ const az: Dict = {
   "status.syncing": "Sinxronlaşdırılır",
   "status.offline": "Server əlçatan deyil",
   "status.error": "Sinxronizasiya xətası",
+  "status.restarting": "Sinxronizasiya xətası, yenidən başladılır…",
   "status.needPassword": "Parol lazımdır",
   "status.blocked": "Sinxronizasiya dayandırılıb",
   "status.rateLimited": "Həddən çox cəhd, növbəti cəhd: {time}",
@@ -50,6 +51,7 @@ const az: Dict = {
   "notice.indexReset": "Sinxronizasiya indeksi zədələnmişdi — təhlükəsiz tam tutuşdurma başladı",
   "notice.encryptionMismatch": "Anbar burada şifrələnib, serverdə isə yox — sinxronizasiya dayandırıldı",
   "notice.error": "Sinxronizasiya: {message}",
+  "notice.engineStopped": "selfsync: sinxronizasiya mühərriki ardıcıl {n} dəfə uğursuz oldu və dayandırıldı. Yenidən cəhd etmək üçün «{cmd}» əmrini işə salın; təfərrüatlar sinxronizasiya jurnalındadır.",
 
   "settings.connection": "Qoşulma",
   "settings.connectedTo": "«{vault}» anbarına «{device}» kimi qoşulub",

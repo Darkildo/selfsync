@@ -20,13 +20,37 @@ export interface RunnerHooks {
   log?(level: LogLevel, message: string): void;
   rememberKey?(key: Uint8Array): void;
   forgetKey?(): void;
+  /** Ядро упало (паника WASM): Runner уже остановлен, движок надо создать заново. */
+  fatal?(error: unknown): void;
+}
+
+/** То, чем Runner пользуется у движка (в тестах подменяется). */
+export interface EngineLike {
+  handle(now: number, ev: EngineEvent): unknown;
+  nextWake(): number | undefined;
+  status(): unknown;
+  hasPending(): boolean;
+  free(): void;
+}
+
+function wasmEngine(config: EngineConfig, index: Uint8Array | null): EngineLike {
+  return new WasmEngine(config, index ?? undefined);
+}
+
+/**
+ * Паника в ядре: WASM собран с `panic = "abort"`, и паника — это ловушка
+ * `unreachable`. Состояние движка после неё не определено (занятые RefCell), так
+ * что каждое следующее событие падало бы снова, а статус застыл бы.
+ */
+function isTrap(e: unknown): boolean {
+  return typeof WebAssembly !== "undefined" && e instanceof WebAssembly.RuntimeError;
 }
 
 /** Самый длинный интервал, который принимает setTimeout. */
 const MAX_DELAY = 2 ** 31 - 1;
 
 export class Runner {
-  private engine: WasmEngine;
+  private engine: EngineLike;
   private timer: number | undefined;
   private timerAt = 0;
   private inflight = 0;
@@ -41,8 +65,9 @@ export class Runner {
     private exec: Executor,
     private hooks: RunnerHooks = {},
     private clock: () => number = Date.now,
+    make: (config: EngineConfig, index: Uint8Array | null) => EngineLike = wasmEngine,
   ) {
-    this.engine = new WasmEngine(config, index ?? undefined);
+    this.engine = make(config, index);
   }
 
   /** Передать событие ядру и запустить полученные действия. */
@@ -52,9 +77,16 @@ export class Runner {
     try {
       actions = this.engine.handle(this.clock(), ev) as Action[];
     } catch (e) {
-      this.hooks.log?.("error", `ядро отклонило событие ${ev.type}: ${String(e)}`);
       // Иначе ждущий ответа на команду (окно интерфейса) повис бы навсегда.
       if (ev.type === "command") this.reply(ev.req, { type: "error", code: "rejected", message: String(e) });
+      // Команду с негодными данными ядро отвергает, не ломаясь; прочее — сбой ядра.
+      if (ev.type === "command" && !isTrap(e)) {
+        this.hooks.log?.("warn", `ядро отклонило команду: ${String(e)}`);
+        return;
+      }
+      this.hooks.log?.("error", `сбой ядра на событии ${ev.type}: ${String(e)}`);
+      this.stop();
+      this.hooks.fatal?.(e);
       return;
     }
     for (const a of actions) this.run(a);
@@ -144,6 +176,11 @@ export class Runner {
     return this.engine.status() as SyncStatus;
   }
 
+  /** Остановлен (вручную или после сбоя ядра). */
+  get isStopped(): boolean {
+    return this.stopped;
+  }
+
   hasPending(): boolean {
     return this.engine.hasPending();
   }
@@ -156,7 +193,11 @@ export class Runner {
     this.timer = undefined;
     for (const w of this.waiting.values()) w({ type: "error", code: "stopped", message: "синк остановлен" });
     this.waiting.clear();
-    this.engine.free();
+    try {
+      this.engine.free();
+    } catch {
+      // После сбоя ядра освобождение тоже может упасть: движок всё равно брошен.
+    }
     this.checkIdle();
   }
 }

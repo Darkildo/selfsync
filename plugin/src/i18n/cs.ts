@@ -7,6 +7,7 @@ const cs: Dict = {
   "status.syncing": "Synchronizace",
   "status.offline": "Server je nedostupný",
   "status.error": "Chyba synchronizace",
+  "status.restarting": "Chyba synchronizace, restartuje se…",
   "status.needPassword": "Je potřeba heslo",
   "status.blocked": "Synchronizace zastavena",
   "status.rateLimited": "Příliš mnoho pokusů, další v {time}",
@@ -50,6 +51,7 @@ const cs: Dict = {
   "notice.indexReset": "Index synchronizace byl poškozen — spuštěno bezpečné úplné porovnání",
   "notice.encryptionMismatch": "Trezor je zde šifrovaný, ale na serveru ne — synchronizace zastavena",
   "notice.error": "Synchronizace: {message}",
+  "notice.engineStopped": "selfsync: jádro synchronizace selhalo {n}× po sobě a bylo zastaveno. Spusťte „{cmd}“ a zkuste to znovu; podrobnosti jsou v protokolu synchronizace.",
 
   "settings.connection": "Připojení",
   "settings.connectedTo": "Připojeno k trezoru „{vault}“ jako „{device}“",

@@ -5,6 +5,7 @@ import { FileSystemAdapter, getLanguage, type Menu, Notice, Platform, Plugin, re
 
 import wasmBytes from "selfsync-wasm-bytes";
 import { initWasm, Runner } from "./engine.ts";
+import { LOG_FILE, SyncLog } from "./log.ts";
 import { Executor } from "./executor.ts";
 import { HANDOFF_WAIT_MS, isHandoff, pollHandoff } from "./handoff.ts";
 import { formatTime, noticeText, setLanguage, stateText, t } from "./i18n.ts";
@@ -26,7 +27,13 @@ import { confirm } from "./ui/confirm.ts";
 import { PhraseModal, RecoverModal } from "./ui/recovery.ts";
 
 const KEY_STORAGE = "selfsync-master-key";
-const LOG_LINES = 500;
+/** После скольких сбоев ядра подряд перестать его перезапускать. */
+const MAX_CRASHES = 3;
+/** Ядро проработало без сбоев столько — счёт сбоев заново. */
+const CRASH_RESET_MS = 10 * 60_000;
+/** На десктопе события vault'а идут и в свёрнутом окне: полный обход при
+ *  возврате на экран — не чаще. */
+const DESKTOP_VISIBLE_SCAN_MS = 10 * 60_000;
 
 /** Окно подключения ждёт ключ шифрования от устройства, где открыт код. */
 export interface KeyReceiver {
@@ -49,11 +56,13 @@ export default class SelfsyncPlugin extends Plugin {
   private statusIconEl!: HTMLElement;
   private statusTextEl!: HTMLElement;
   private status: SyncStatus | null = null;
-  private log: string[] = [];
+  private log = new SyncLog(null);
   private migrationNotice: Notice | undefined;
 
   override async onload(): Promise<void> {
     setLanguage(getLanguage());
+    this.log = new SyncLog(this.logStore());
+    void this.log.load();
     await this.loadSettings();
     initWasm(wasmBytes);
     registerIcons();
@@ -128,8 +137,26 @@ export default class SelfsyncPlugin extends Plugin {
   override onunload(): void {
     // Запуск, который ещё читает индекс, не должен создать Runner после выгрузки.
     this.generation++;
+    this.cancelRestart();
     this.runner?.stop();
     this.runner = undefined;
+    void this.log.flush();
+  }
+
+  /** Файл журнала в каталоге плагина; адаптер без чтения и записи — журнал в памяти. */
+  private logStore(): { read(): Promise<string | null>; write(text: string): Promise<void> } | null {
+    const a = this.app.vault.adapter as Partial<{
+      exists(p: string): Promise<boolean>;
+      read(p: string): Promise<string>;
+      write(p: string, d: string): Promise<void>;
+    }>;
+    const { exists, read, write } = a;
+    if (!exists || !read || !write) return null;
+    const file = `${this.pluginDir}/${LOG_FILE}`;
+    return {
+      read: async () => ((await exists.call(a, file)) ? read.call(a, file) : null),
+      write: (text) => write.call(a, file, text),
+    };
   }
 
   async loadSettings(): Promise<void> {
@@ -202,6 +229,8 @@ export default class SelfsyncPlugin extends Plugin {
       useWait: this.settings.useWait,
       maxDownloadSize: Math.round(this.settings.maxDownloadMb * 1024 * 1024),
       tzOffsetMin: -new Date().getTimezoneOffset(),
+      // На мобильном правки вне Obsidian, пока он спал, видны только полным обходом.
+      visibleScanMinMs: Platform.isMobile ? 0 : DESKTOP_VISIBLE_SCAN_MS,
     };
   }
 
@@ -239,10 +268,53 @@ export default class SelfsyncPlugin extends Plugin {
   private generation = 0;
   /** Синк не запустился (индекс не прочитан): строка состояния показывает ошибку. */
   private startError = false;
+  /** Ядро упало, перезапуск запланирован. */
+  private restarting = false;
+  private restartTimer: number | undefined;
+  /** Сбоев ядра подряд и когда был последний. */
+  private crashes = 0;
+  private crashAt = 0;
+  /** Первая пауза перед перезапуском ядра (тесты ставят меньше). */
+  protected restartBaseMs = 5000;
+
+  private cancelRestart(): void {
+    if (this.restartTimer !== undefined) window.clearTimeout(this.restartTimer);
+    this.restartTimer = undefined;
+    this.restarting = false;
+  }
+
+  /** Ядро упало: движок пересоздаётся из сохранённого индекса с паузой, после
+   *  нескольких сбоев подряд — стоп и уведомление. */
+  private engineFailed(gen: number): void {
+    if (gen !== this.generation) return;
+    this.runner = undefined;
+    this.status = null;
+    const now = Date.now();
+    if (now - this.crashAt > CRASH_RESET_MS) this.crashes = 0;
+    this.crashAt = now;
+    this.crashes++;
+    this.cancelRestart();
+    if (this.crashes >= MAX_CRASHES) {
+      this.startError = true;
+      this.addLog("error", `ядро упало ${this.crashes} раза подряд — синк остановлен`);
+      new Notice(t("notice.engineStopped", { n: this.crashes, cmd: t("cmd.syncNow") }), 0);
+      this.renderStatus();
+      return;
+    }
+    const delay = Math.min(5 * 60_000, this.restartBaseMs * 2 ** (this.crashes - 1));
+    this.addLog("warn", `перезапуск ядра через ${Math.round(delay / 1000)} с`);
+    this.restarting = true;
+    this.restartTimer = window.setTimeout(() => {
+      this.restartTimer = undefined;
+      if (gen === this.generation) void this.start();
+    }, delay);
+    this.renderStatus();
+  }
 
   /** (Пере)запуск синка с текущими настройками. */
   async start(): Promise<void> {
     const gen = ++this.generation;
+    this.cancelRestart();
     this.runner?.stop();
     this.runner = undefined;
     this.status = null;
@@ -284,6 +356,7 @@ export default class SelfsyncPlugin extends Plugin {
       log: (level, m) => this.addLog(level, m),
       rememberKey: (k) => this.app.saveLocalStorage(KEY_STORAGE, toBase64(k)),
       forgetKey: () => this.app.saveLocalStorage(KEY_STORAGE, null),
+      fatal: () => this.engineFailed(gen),
     });
     const saved = this.app.loadLocalStorage(KEY_STORAGE) as string | null;
     this.runner.send({ type: "start", key: saved ? fromBase64(saved) : null });
@@ -296,6 +369,8 @@ export default class SelfsyncPlugin extends Plugin {
 
   syncNow(): void {
     if (this.runner) this.runner.send({ type: "syncNow" });
+    // Подключено, но синк стоит (ядро упало, индекс не прочитан): попробовать снова.
+    else if (this.settings.server && this.settings.token) void this.start();
     else this.openConnect();
   }
 
@@ -442,13 +517,14 @@ export default class SelfsyncPlugin extends Plugin {
 
   private renderStatus(): void {
     const s = this.status;
-    const kind: StatusKind = this.startError ? "error" : !s ? "none" : s.readOnly && s.state === "idle" ? "readOnly" : s.state;
+    const failed = this.startError || this.restarting;
+    const kind: StatusKind = failed ? "error" : !s ? "none" : s.readOnly && s.state === "idle" ? "readOnly" : s.state;
     if (kind !== this.statusKind) {
       this.statusKind = kind;
       setIcon(this.statusIconEl, statusIcon(kind));
       this.statusEl.setAttribute("data-state", kind);
     }
-    const parts = [this.startError ? t("status.error") : stateText(s)];
+    const parts = [this.restarting ? t("status.restarting") : this.startError ? t("status.error") : stateText(s)];
     if (s?.state === "syncing" && s.total > 0) parts.push(`${s.done}/${s.total}`);
     else if (s && s.pending > 0) parts.push(t(s.readOnly ? "status.readOnlyPending" : "status.pending", { n: s.pending }));
     if (s && s.conflicts > 0) parts.push(t("status.conflicts", { n: s.conflicts }));
@@ -506,15 +582,17 @@ export default class SelfsyncPlugin extends Plugin {
 
   private addLog(level: LogLevel, message: string): void {
     if (level === "debug") return;
-    this.log.push(`${new Date().toISOString()} ${level} ${message}`);
-    if (this.log.length > LOG_LINES) this.log.splice(0, this.log.length - LOG_LINES);
+    this.log.add(`${new Date().toISOString()} ${level} ${message}`);
     if (level === "error" || level === "warn") console.warn(`selfsync: ${message}`);
   }
 
+  /** Журнал с прошлых запусков тоже: он в файле каталога плагина. */
   private showLog(): void {
-    const text = this.log.slice(-50).join("\n") || "—";
-    void navigator.clipboard?.writeText(this.log.join("\n"));
-    new Notice(text, 15000);
+    void this.log.load().then(() => {
+      const text = this.log.tail(50).join("\n") || "—";
+      void navigator.clipboard?.writeText(this.log.tail().join("\n"));
+      new Notice(text, 15000);
+    });
   }
 }
 

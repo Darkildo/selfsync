@@ -7,6 +7,7 @@ const oc: Dict = {
   "status.syncing": "Sincronizacion",
   "status.offline": "Servidor inaccessible",
   "status.error": "Error de sincronizacion",
+  "status.restarting": "Error de sincronizacion, reaviada…",
   "status.needPassword": "Cal lo senhal",
   "status.blocked": "Sincronizacion arrestada",
   "status.rateLimited": "Tròp d’ensages, lo seguent a {time}",
@@ -50,6 +51,7 @@ const oc: Dict = {
   "notice.indexReset": "L’indèx de sincronizacion èra damatjat — una conciliacion completa e segura a començat",
   "notice.encryptionMismatch": "Lo còfre es chifrat aquí mas pas sul servidor — sincronizacion arrestada",
   "notice.error": "Sincronizacion : {message}",
+  "notice.engineStopped": "selfsync : lo motor de sincronizacion a fracassat {n} còps de seguida e es estat arrestat. Executatz « {cmd} » per tornar ensajar ; los detalhs son dins lo jornal de sincronizacion.",
 
   "settings.connection": "Connexion",
   "settings.connectedTo": "Connectat al còfre « {vault} » coma « {device} »",

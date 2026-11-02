@@ -7,6 +7,7 @@ const ur: Dict = {
   "status.syncing": "سنک ہو رہا ہے",
   "status.offline": "سرور تک رسائی نہیں",
   "status.error": "سنک میں خرابی",
+  "status.restarting": "سنک میں خرابی، دوبارہ شروع ہو رہا ہے…",
   "status.needPassword": "پاس ورڈ درکار ہے",
   "status.blocked": "سنک روک دیا گیا",
   "status.rateLimited": "بہت زیادہ کوششیں، اگلی کوشش {time} پر",
@@ -50,6 +51,7 @@ const ur: Dict = {
   "notice.indexReset": "سنک انڈیکس خراب ہو گیا تھا — محفوظ مکمل موازنہ شروع ہو گیا",
   "notice.encryptionMismatch": "والٹ یہاں خفیہ کردہ ہے لیکن سرور پر نہیں — سنک روک دیا گیا",
   "notice.error": "سنک: {message}",
+  "notice.engineStopped": "selfsync: سنک انجن لگاتار {n} بار ناکام ہوا اور روک دیا گیا۔ دوبارہ کوشش کے لیے \"{cmd}\" چلائیں؛ تفصیل سنک لاگ میں ہے۔",
 
   "settings.connection": "کنکشن",
   "settings.connectedTo": "والٹ “{vault}” سے “{device}” کے طور پر منسلک",

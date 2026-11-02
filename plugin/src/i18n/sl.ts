@@ -7,6 +7,7 @@ const sl: Dict = {
   "status.syncing": "Sinhronizacija",
   "status.offline": "Strežnik ni dosegljiv",
   "status.error": "Napaka sinhronizacije",
+  "status.restarting": "Napaka sinhronizacije, ponovni zagon…",
   "status.needPassword": "Potrebno je geslo",
   "status.blocked": "Sinhronizacija ustavljena",
   "status.rateLimited": "Preveč poskusov, naslednji ob {time}",
@@ -50,6 +51,7 @@ const sl: Dict = {
   "notice.indexReset": "Indeks sinhronizacije je bil poškodovan — začela se je varna popolna uskladitev",
   "notice.encryptionMismatch": "Sef je tukaj šifriran, na strežniku pa ne — sinhronizacija ustavljena",
   "notice.error": "Sinhronizacija: {message}",
+  "notice.engineStopped": "selfsync: sinhronizacijski pogon je {n}-krat zapored odpovedal in je bil ustavljen. Zaženite „{cmd}“ za ponoven poskus; podrobnosti so v dnevniku sinhronizacije.",
 
   "settings.connection": "Povezava",
   "settings.connectedTo": "Povezano s sefom „{vault}“ kot „{device}“",

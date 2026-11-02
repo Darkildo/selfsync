@@ -7,6 +7,7 @@ const vi: Dict = {
   "status.syncing": "Đang đồng bộ",
   "status.offline": "Không kết nối được máy chủ",
   "status.error": "Lỗi đồng bộ",
+  "status.restarting": "Lỗi đồng bộ, đang khởi động lại…",
   "status.needPassword": "Cần mật khẩu",
   "status.blocked": "Đã dừng đồng bộ",
   "status.rateLimited": "Quá nhiều lần thử, lần tiếp theo lúc {time}",
@@ -50,6 +51,7 @@ const vi: Dict = {
   "notice.indexReset": "Chỉ mục đồng bộ bị hỏng — đã bắt đầu đối chiếu toàn bộ an toàn",
   "notice.encryptionMismatch": "Kho được mã hóa ở đây nhưng không được mã hóa trên máy chủ — đã dừng đồng bộ",
   "notice.error": "Đồng bộ: {message}",
+  "notice.engineStopped": "selfsync: bộ máy đồng bộ đã lỗi {n} lần liên tiếp và bị dừng. Chạy “{cmd}” để thử lại; chi tiết có trong nhật ký đồng bộ.",
 
   "settings.connection": "Kết nối",
   "settings.connectedTo": "Đã kết nối với kho “{vault}” dưới tên “{device}”",

@@ -7,6 +7,7 @@ const sr: Dict = {
   "status.syncing": "Синхронизација",
   "status.offline": "Сервер није доступан",
   "status.error": "Грешка синхронизације",
+  "status.restarting": "Грешка синхронизације, поновно покретање…",
   "status.needPassword": "Потребна је лозинка",
   "status.blocked": "Синхронизација је заустављена",
   "status.rateLimited": "Превише покушаја, следећи у {time}",
@@ -50,6 +51,7 @@ const sr: Dict = {
   "notice.indexReset": "Индекс синхронизације је био оштећен — покренуто је безбедно потпуно усаглашавање",
   "notice.encryptionMismatch": "Трезор је шифрован овде, али не и на серверу — синхронизација је заустављена",
   "notice.error": "Синхронизација: {message}",
+  "notice.engineStopped": "selfsync: механизам синхронизације отказао је {n} пута заредом и заустављен је. Покрените „{cmd}“ за нови покушај; детаљи су у дневнику синхронизације.",
 
   "settings.connection": "Веза",
   "settings.connectedTo": "Повезано са трезором „{vault}“ као „{device}“",

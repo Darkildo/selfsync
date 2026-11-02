@@ -7,6 +7,7 @@ const th: Dict = {
   "status.syncing": "กำลังซิงค์",
   "status.offline": "ติดต่อเซิร์ฟเวอร์ไม่ได้",
   "status.error": "การซิงค์ผิดพลาด",
+  "status.restarting": "การซิงค์ผิดพลาด กำลังเริ่มใหม่…",
   "status.needPassword": "ต้องใช้รหัสผ่าน",
   "status.blocked": "หยุดการซิงค์แล้ว",
   "status.rateLimited": "พยายามหลายครั้งเกินไป ครั้งถัดไปเวลา {time}",
@@ -50,6 +51,7 @@ const th: Dict = {
   "notice.indexReset": "ดัชนีการซิงค์เสียหาย — เริ่มการตรวจทานทั้งหมดอย่างปลอดภัยแล้ว",
   "notice.encryptionMismatch": "ห้องนิรภัยถูกเข้ารหัสที่นี่แต่ไม่ได้เข้ารหัสบนเซิร์ฟเวอร์ — หยุดการซิงค์แล้ว",
   "notice.error": "การซิงค์: {message}",
+  "notice.engineStopped": "selfsync: เอนจินการซิงค์ล้มเหลว {n} ครั้งติดต่อกันและถูกหยุดแล้ว เรียกใช้ “{cmd}” เพื่อลองอีกครั้ง รายละเอียดอยู่ในบันทึกการซิงค์",
 
   "settings.connection": "การเชื่อมต่อ",
   "settings.connectedTo": "เชื่อมต่อกับห้องนิรภัย “{vault}” ในชื่อ “{device}”",

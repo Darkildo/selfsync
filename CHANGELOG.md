@@ -2,6 +2,16 @@
 
 Release notes for each version; earlier versions are described on the [releases page](https://github.com/Darkildo/selfsync/releases).
 
+## 0.7.0
+
+- **Plugin, desktop and mobile.** Fewer directory reads: the real name of a file (its letter case on macOS, Windows, iOS and Android) is looked up in a short-lived listing of its folder instead of reading the folder on every check, and a written file takes one check instead of three. Downloading many files into one folder no longer reads that folder 3–4 times per file.
+- **Plugin, mobile.** A full scan of the vault checks up to 12 files at a time instead of one after another.
+- **Core.** On the desktop, coming back to the window no longer starts a full scan of the vault if the last one was less than 10 minutes ago: Obsidian reports changes there even while the window is in the background. On mobile every return still scans, as before (`visibleScanMinMs` in the engine config).
+- **Plugin, fix.** If the sync engine crashes (a panic in the WebAssembly core), sync no longer stops silently with a frozen status: the engine is recreated from the last saved index after 5 s, 10 s, … (up to 5 min). After 3 crashes in a row sync stops with a notice; “Sync now” or a click on the status bar tries again.
+- **Plugin.** The sync log is kept in `sync.log` in the plugin folder (up to about 100 KB, written at most every few seconds), so after a restart of Obsidian the “Show sync log” command still shows what happened before. Settings sync never transfers this file.
+- **For extensions.** `plugin/src/ext.ts` is the stable entry point for plugins built on top of selfsync (like selfsync-cloud): what it exports changes only with a note here. Sections of the settings tab have a stable `id` (`connection`, `sync`, `configSync`, `encryption`, `devices`), so an extension no longer has to pick them by their translated heading. The engine config takes `serverMinorWarn`: the protocol version below which the connection check warns that the server is older than the plugin, or `null` for no warning (an extension with its own server). CI builds and tests selfsync-cloud against every change of the core.
+- Server and protocol are unchanged.
+
 ## 0.6.2
 
 - **Core.** The sync index is written only when it changed. Before, every sync cycle rewrote it (with `fsync`) even when nothing happened — several writes a minute in idle time.

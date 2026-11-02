@@ -7,6 +7,7 @@ const hi: Dict = {
   "status.syncing": "सिंक हो रहा है",
   "status.offline": "सर्वर उपलब्ध नहीं",
   "status.error": "सिंक त्रुटि",
+  "status.restarting": "सिंक त्रुटि, फिर से शुरू हो रहा है…",
   "status.needPassword": "पासवर्ड चाहिए",
   "status.blocked": "सिंक रोका गया",
   "status.rateLimited": "बहुत अधिक प्रयास, अगला प्रयास {time} पर",
@@ -50,6 +51,7 @@ const hi: Dict = {
   "notice.indexReset": "सिंक इंडेक्स क्षतिग्रस्त था — सुरक्षित पूरा मिलान शुरू हुआ",
   "notice.encryptionMismatch": "वॉल्ट यहाँ एन्क्रिप्टेड है, लेकिन सर्वर पर नहीं — सिंक रोका गया",
   "notice.error": "सिंक: {message}",
+  "notice.engineStopped": "selfsync: सिंक इंजन लगातार {n} बार विफल हुआ और रोक दिया गया। फिर से कोशिश करने के लिए “{cmd}” चलाएँ; विवरण सिंक लॉग में है।",
 
   "settings.connection": "कनेक्शन",
   "settings.connectedTo": "वॉल्ट “{vault}” से “{device}” के रूप में कनेक्टेड",

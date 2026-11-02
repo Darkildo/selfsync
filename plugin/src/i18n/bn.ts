@@ -7,6 +7,7 @@ const bn: Dict = {
   "status.syncing": "সিঙ্ক হচ্ছে",
   "status.offline": "সার্ভারে পৌঁছানো যাচ্ছে না",
   "status.error": "সিঙ্ক ত্রুটি",
+  "status.restarting": "সিঙ্ক ত্রুটি, আবার চালু হচ্ছে…",
   "status.needPassword": "পাসওয়ার্ড প্রয়োজন",
   "status.blocked": "সিঙ্ক বন্ধ করা হয়েছে",
   "status.rateLimited": "অনেক বেশি চেষ্টা, পরের চেষ্টা {time}-এ",
@@ -50,6 +51,7 @@ const bn: Dict = {
   "notice.indexReset": "সিঙ্ক ইনডেক্স নষ্ট হয়েছিল — নিরাপদ সম্পূর্ণ মিলিয়ে দেখা শুরু হয়েছে",
   "notice.encryptionMismatch": "ভল্টটি এখানে এনক্রিপ্ট করা, কিন্তু সার্ভারে নয় — সিঙ্ক বন্ধ করা হয়েছে",
   "notice.error": "সিঙ্ক: {message}",
+  "notice.engineStopped": "selfsync: সিঙ্ক ইঞ্জিন পরপর {n} বার ব্যর্থ হয়েছে এবং থামানো হয়েছে। আবার চেষ্টা করতে “{cmd}” চালান; বিস্তারিত সিঙ্ক লগে আছে।",
 
   "settings.connection": "সংযোগ",
   "settings.connectedTo": "ভল্ট “{vault}”-এ “{device}” হিসেবে সংযুক্ত",

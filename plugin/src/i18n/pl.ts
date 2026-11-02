@@ -7,6 +7,7 @@ const pl: Dict = {
   "status.syncing": "Synchronizacja",
   "status.offline": "Serwer niedostępny",
   "status.error": "Błąd synchronizacji",
+  "status.restarting": "Błąd synchronizacji, ponowne uruchamianie…",
   "status.needPassword": "Wymagane hasło",
   "status.blocked": "Synchronizacja zatrzymana",
   "status.rateLimited": "Zbyt wiele prób, następna o {time}",
@@ -50,6 +51,7 @@ const pl: Dict = {
   "notice.indexReset": "Indeks synchronizacji był uszkodzony — rozpoczęto bezpieczne pełne uzgadnianie",
   "notice.encryptionMismatch": "Sejf jest tutaj zaszyfrowany, a na serwerze nie — synchronizacja zatrzymana",
   "notice.error": "Synchronizacja: {message}",
+  "notice.engineStopped": "selfsync: silnik synchronizacji zawiódł {n} razy z rzędu i został zatrzymany. Uruchom „{cmd}”, aby spróbować ponownie; szczegóły są w dzienniku synchronizacji.",
 
   "settings.connection": "Połączenie",
   "settings.connectedTo": "Połączono z sejfem „{vault}” jako „{device}”",

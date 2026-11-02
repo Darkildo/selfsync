@@ -33,8 +33,8 @@ export const PRESET_PATHS: Record<Preset, string[]> = {
   editor: ["app.json", "graph.json", "types.json"],
 };
 
-/** Не синхронизируются никогда: раскладка окон этого устройства, кэши. */
-export const ALWAYS_EXCLUDED = ["workspace.json", "workspace-mobile.json", "workspaces.json", "cache/", "**/*.lock"];
+/** Не синхронизируются никогда: раскладка окон этого устройства, кэши, журналы синка. */
+export const ALWAYS_EXCLUDED = ["workspace.json", "workspace-mobile.json", "workspaces.json", "cache/", "**/*.lock", "plugins/*/sync.log"];
 
 /** Итоговые правила исключений для ядра. */
 export function buildRules(configDir: string, presets: ConfigSync, user: string[]): string[] {

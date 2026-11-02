@@ -7,6 +7,7 @@ const nl: Dict = {
   "status.syncing": "Synchroniseren",
   "status.offline": "Server onbereikbaar",
   "status.error": "Synchronisatiefout",
+  "status.restarting": "Synchronisatiefout, opnieuw starten…",
   "status.needPassword": "Wachtwoord nodig",
   "status.blocked": "Synchronisatie gestopt",
   "status.rateLimited": "Te veel pogingen, volgende om {time}",
@@ -50,6 +51,7 @@ const nl: Dict = {
   "notice.indexReset": "De synchronisatie-index was beschadigd — een veilige volledige afstemming is gestart",
   "notice.encryptionMismatch": "De kluis is hier versleuteld, maar niet op de server — synchronisatie gestopt",
   "notice.error": "Synchronisatie: {message}",
+  "notice.engineStopped": "selfsync: de synchronisatie-engine is {n} keer achter elkaar mislukt en gestopt. Voer “{cmd}” uit om het opnieuw te proberen; de details staan in het synchronisatielogboek.",
 
   "settings.connection": "Verbinding",
   "settings.connectedTo": "Verbonden met kluis “{vault}” als “{device}”",

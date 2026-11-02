@@ -7,6 +7,7 @@ const eo: Dict = {
   "status.syncing": "Sinkronigado",
   "status.offline": "Servilo neatingebla",
   "status.error": "Sinkroniga eraro",
+  "status.restarting": "Sinkroniga eraro, relanĉado…",
   "status.needPassword": "Pasvorto necesas",
   "status.blocked": "Sinkronigo haltis",
   "status.rateLimited": "Tro da provoj, la sekva je {time}",
@@ -50,6 +51,7 @@ const eo: Dict = {
   "notice.indexReset": "La sinkroniga indekso estis difektita — sekura plena reakordigo komenciĝis",
   "notice.encryptionMismatch": "La trezorejo estas ĉifrita ĉi tie sed ne en la servilo — sinkronigo haltis",
   "notice.error": "Sinkronigo: {message}",
+  "notice.engineStopped": "selfsync: la sinkroniga motoro malsukcesis {n} fojojn sinsekve kaj estis haltigita. Rulu “{cmd}” por reprovi; detaloj estas en la sinkroniga protokolo.",
 
   "settings.connection": "Konekto",
   "settings.connectedTo": "Konektita al trezorejo “{vault}” kiel “{device}”",

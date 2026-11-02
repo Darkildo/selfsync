@@ -8,7 +8,7 @@
 type FsPromises = typeof import("node:fs/promises");
 
 import type { FileMeta } from "../types.ts";
-import { type FileBackend, joinPath, nameOf, parentOf, realName } from "./backend.ts";
+import { DirNames, type FileBackend, joinPath, nameOf, parentOf, realName } from "./backend.ts";
 
 const TEMP_SUFFIX = ".selfsync-tmp";
 
@@ -20,6 +20,9 @@ export interface NodeBackendOptions {
 }
 
 export class NodeBackend implements FileBackend {
+  /** Листинги каталогов для настоящего имени (регистронезависимые ФС). */
+  private names = new DirNames();
+
   constructor(
     /** Абсолютный путь к vault'у. */
     private root: string,
@@ -41,6 +44,7 @@ export class NodeBackend implements FileBackend {
     const out: FileMeta[] = [];
     const walk = async (rel: string): Promise<void> => {
       const entries = await this.fsp.readdir(this.abs(rel), { withFileTypes: true });
+      this.names.put(rel, entries.map((e) => e.name));
       await Promise.all(
         entries.map(async (e) => {
           const path = joinPath(rel, e.name);
@@ -65,7 +69,7 @@ export class NodeBackend implements FileBackend {
     let real = path;
     if (!this.opts.caseSensitive && path !== "") {
       const parent = parentOf(path);
-      const entries = await this.fsp.readdir(this.abs(parent)).catch(() => [] as string[]);
+      const entries = await this.names.get(parent, () => this.fsp.readdir(this.abs(parent)).catch(() => [] as string[]));
       real = joinPath(parent, realName(entries, nameOf(path)) ?? nameOf(path));
     }
     return st.isDirectory()
@@ -81,25 +85,33 @@ export class NodeBackend implements FileBackend {
     await this.fsp.mkdir(this.abs(parentOf(path)), { recursive: true });
     await writeDurable(this.fsp, this.abs(path) + TEMP_SUFFIX, data);
     await this.fsp.rename(this.abs(path) + TEMP_SUFFIX, this.abs(path));
+    this.names.added(path);
     return (await this.stat(path)) ?? { path, size: data.length, mtime: 0, dir: false };
   }
 
   async rename(from: string, to: string): Promise<void> {
     await this.fsp.mkdir(this.abs(parentOf(to)), { recursive: true });
     await this.fsp.rename(this.abs(from), this.abs(to));
+    this.names.removed(from);
+    this.names.added(to);
   }
 
   async mkdir(path: string): Promise<void> {
     await this.fsp.mkdir(this.abs(path), { recursive: true });
+    this.names.added(path);
   }
 
   async rmdir(path: string): Promise<boolean> {
     try {
       await this.fsp.rmdir(this.abs(path));
+      this.names.removed(path);
       return true;
     } catch (e) {
       const code = (e as { code?: string }).code;
-      if (code === "ENOENT") return true;
+      if (code === "ENOENT") {
+        this.names.removed(path);
+        return true;
+      }
       if (code === "ENOTEMPTY" || code === "EEXIST") return false;
       throw e;
     }
@@ -107,9 +119,11 @@ export class NodeBackend implements FileBackend {
 
   async remove(path: string): Promise<void> {
     await this.fsp.unlink(this.abs(path));
+    this.names.removed(path);
   }
 
   async trash(path: string): Promise<void> {
+    this.names.removed(path);
     if (this.opts.trash) return this.opts.trash(path);
     const dir = this.stored("trash");
     await this.fsp.mkdir(dir, { recursive: true });
@@ -146,6 +160,7 @@ export class NodeBackend implements FileBackend {
   async tempCommit(name: string, path: string): Promise<FileMeta> {
     await this.fsp.mkdir(this.abs(parentOf(path)), { recursive: true });
     await this.fsp.rename(this.stored(`tmp/${name}`), this.abs(path));
+    this.names.added(path);
     return (await this.stat(path)) ?? { path, size: 0, mtime: 0, dir: false };
   }
 

@@ -7,6 +7,7 @@ const da: Dict = {
   "status.syncing": "Synkroniserer",
   "status.offline": "Serveren kan ikke nås",
   "status.error": "Synkroniseringsfejl",
+  "status.restarting": "Synkroniseringsfejl, genstarter…",
   "status.needPassword": "Adgangskode påkrævet",
   "status.blocked": "Synkronisering stoppet",
   "status.rateLimited": "For mange forsøg, næste kl. {time}",
@@ -50,6 +51,7 @@ const da: Dict = {
   "notice.indexReset": "Synkroniseringsindekset var beskadiget — en sikker fuld afstemning er startet",
   "notice.encryptionMismatch": "Boksen er krypteret her, men ikke på serveren — synkronisering stoppet",
   "notice.error": "Synkronisering: {message}",
+  "notice.engineStopped": "selfsync: synkroniseringsmotoren fejlede {n} gange i træk og er stoppet. Kør »{cmd}« for at prøve igen; detaljerne står i synkroniseringsloggen.",
 
   "settings.connection": "Forbindelse",
   "settings.connectedTo": "Forbundet til boksen »{vault}« som »{device}«",

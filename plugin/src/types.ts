@@ -17,6 +17,8 @@ export interface EngineConfig {
   pollIdleMaxMs?: number;
   useWait?: boolean;
   fullScanMs?: number;
+  /** Возврат на экран запускает полный обход, только если прошлый был не ближе (мс); 0 — всегда. */
+  visibleScanMinMs?: number;
   maxFileSize?: number;
   /** Не скачивать серверные файлы больше (байт), если их здесь нет; 0 — без лимита. */
   maxDownloadSize?: number;
@@ -24,6 +26,12 @@ export interface EngineConfig {
   tzOffsetMin?: number;
   /** Без ключа vault'а ничего не отправлять; включение шифрования — до первой отправки. */
   requireEncryption?: boolean;
+  /**
+   * Предупреждать «сервер старее плагина», если минорная версия протокола сервера
+   * меньше этой; `null` — не предупреждать (надстройка со своим сервером). Не задано —
+   * минорная версия самого ядра.
+   */
+  serverMinorWarn?: number | null;
 }
 
 export type NameRules = "any" | "fat" | "windows";

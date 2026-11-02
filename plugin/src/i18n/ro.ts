@@ -7,6 +7,7 @@ const ro: Dict = {
   "status.syncing": "Se sincronizează",
   "status.offline": "Server inaccesibil",
   "status.error": "Eroare de sincronizare",
+  "status.restarting": "Eroare de sincronizare, se repornește…",
   "status.needPassword": "Este necesară parola",
   "status.blocked": "Sincronizare oprită",
   "status.rateLimited": "Prea multe încercări, următoarea la {time}",
@@ -50,6 +51,7 @@ const ro: Dict = {
   "notice.indexReset": "Indexul de sincronizare a fost deteriorat — a început o reconciliere completă sigură",
   "notice.encryptionMismatch": "Seiful este criptat aici, dar nu și pe server — sincronizare oprită",
   "notice.error": "Sincronizare: {message}",
+  "notice.engineStopped": "selfsync: motorul de sincronizare a eșuat de {n} ori la rând și a fost oprit. Rulați „{cmd}” pentru a încerca din nou; detaliile sunt în jurnalul de sincronizare.",
 
   "settings.connection": "Conexiune",
   "settings.connectedTo": "Conectat la seiful „{vault}” ca „{device}”",

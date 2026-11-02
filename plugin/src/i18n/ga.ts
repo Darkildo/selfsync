@@ -7,6 +7,7 @@ const ga: Dict = {
   "status.syncing": "Á shioncrónú",
   "status.offline": "Ní féidir teacht ar an bhfreastalaí",
   "status.error": "Earráid sioncrónaithe",
+  "status.restarting": "Earráid sioncrónaithe, á atosú…",
   "status.needPassword": "Pasfhocal ag teastáil",
   "status.blocked": "Sioncrónú stoptha",
   "status.rateLimited": "An iomarca iarrachtaí, an chéad cheann eile ag {time}",
@@ -50,6 +51,7 @@ const ga: Dict = {
   "notice.indexReset": "Bhí innéacs an tsioncrónaithe damáistithe — tosaíodh réiteach iomlán sábháilte",
   "notice.encryptionMismatch": "Tá an boghta criptithe anseo ach ní ar an bhfreastalaí — stopadh an sioncrónú",
   "notice.error": "Sioncrónú: {message}",
+  "notice.engineStopped": "selfsync: theip ar an inneall sioncrónaithe {n} uair as a chéile agus stopadh é. Rith “{cmd}” chun triail eile a bhaint as; tá na sonraí i logchomhad an tsioncrónaithe.",
 
   "settings.connection": "Ceangal",
   "settings.connectedTo": "Ceangailte leis an mboghta “{vault}” mar “{device}”",

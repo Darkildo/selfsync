@@ -7,6 +7,7 @@ const ml: Dict = {
   "status.syncing": "സിങ്ക് ചെയ്യുന്നു",
   "status.offline": "സെർവറിലേക്ക് എത്താനാകുന്നില്ല",
   "status.error": "സിങ്ക് പിശക്",
+  "status.restarting": "സിങ്ക് പിശക്, പുനരാരംഭിക്കുന്നു…",
   "status.needPassword": "പാസ്‌വേഡ് ആവശ്യമാണ്",
   "status.blocked": "സിങ്ക് നിർത്തി",
   "status.rateLimited": "വളരെയധികം ശ്രമങ്ങൾ, അടുത്തത് {time}-ന്",
@@ -50,6 +51,7 @@ const ml: Dict = {
   "notice.indexReset": "സിങ്ക് ഇൻഡക്സ് കേടായി — സുരക്ഷിതമായ പൂർണ്ണ ഒത്തുനോക്കൽ ആരംഭിച്ചു",
   "notice.encryptionMismatch": "വോൾട്ട് ഇവിടെ എൻക്രിപ്റ്റ് ചെയ്തിരിക്കുന്നു, പക്ഷേ സെർവറിൽ അല്ല — സിങ്ക് നിർത്തി",
   "notice.error": "സിങ്ക്: {message}",
+  "notice.engineStopped": "selfsync: സിങ്ക് എഞ്ചിൻ തുടർച്ചയായി {n} തവണ പരാജയപ്പെട്ടതിനാൽ നിർത്തി. വീണ്ടും ശ്രമിക്കാൻ “{cmd}” പ്രവർത്തിപ്പിക്കുക; വിശദാംശങ്ങൾ സിങ്ക് ലോഗിൽ ഉണ്ട്.",
 
   "settings.connection": "കണക്ഷൻ",
   "settings.connectedTo": "“{vault}” വോൾട്ടിലേക്ക് “{device}” ആയി കണക്റ്റ് ചെയ്തു",
