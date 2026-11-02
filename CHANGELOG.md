@@ -2,6 +2,14 @@
 
 Release notes for each version; earlier versions are described on the [releases page](https://github.com/Darkildo/selfsync/releases).
 
+## 0.6.1
+
+- **Plugin, fix.** The settings tab no longer shows a stale state when opened. Obsidian 1.13+ keeps the rows from `getSettingDefinitions()` and draws the stored rows when the tab opens; the plugin now asks Obsidian to recompute them on every change, even with settings closed (calls in a row are merged into one). Before, a change made while settings were closed (for example, an account or status that finished loading) was not visible until something else redrew the tab.
+- **Core, fix.** If the server answers `hash_mismatch` to a small file (the body arrived different from its hash), the file no longer stops the whole upload: other files are sent, this one is retried in the next round. After 3 failures in a row for the same version the version is set aside until the file changes, with a notice naming the file and a line in the sync log.
+- **Server.** Database connections of a running server stay open instead of closing after 5 minutes of idle time. Closing the last connection removed the SQLite WAL, and the first write after idle recreated it with an `fsync`; on a sleeping disk (an HDD in a USB dock) that took 8–30 s while holding the write lock, and other requests failed with `database is locked`. CGI, commands and checks still close connections after idle time.
+- **Server.** The request log line carries the error code of 4xx answers (`code="…"`), and `hash_mismatch` also the number of bytes received (`detail="received=N"`).
+- Protocol is unchanged.
+
 ## 0.6.0
 
 - **Plugin.** The interface follows the language of Obsidian: English, Russian and the 70 other languages of Obsidian's list. Translations other than English and Russian are machine translations; corrections are welcome as pull requests (`plugin/src/i18n/TRANSLATING.md`). The language is picked from `getLanguage()`: the exact code (`zh-tw`, `pt-br`), then the base language, then English; a string missing in a translation is shown in English.

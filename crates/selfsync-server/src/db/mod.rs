@@ -43,11 +43,19 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
 
 /// Пул соединений к файлу БД. Соединения создаются лениво.
 ///
+/// `keep_open`: соединения не закрываются по простою и возрасту (иначе — через
+/// 5 минут простоя). Когда закрывается последнее соединение, SQLite удаляет WAL,
+/// и первая запись после простоя создаёт его заново с `fsync` файла и каталога.
+/// Если диск успел уснуть (HDD в USB-доке), этот `fsync` ждёт раскрутки 8–30 с,
+/// держа блокировку записи: остальные писатели падают по `busy_timeout` с
+/// `database is locked`. `min_idle = 1` не спасает: r2d2 закрывает старое
+/// соединение до того, как откроет замену.
+///
 /// Планировщик фоновых задач пула (открытие соединений, уборка простаивающих) по
 /// умолчанию при уничтожении пула ждёт запланированного запуска уборки — до 30 с
 /// живут три потока на пул. Здесь отложенные задачи отбрасываются, и потоки
 /// завершаются сразу: важно, когда пулы открываются и закрываются часто.
-pub fn pool(path: &Path, max_size: u32) -> Pool {
+pub fn pool(path: &Path, max_size: u32, keep_open: bool) -> Pool {
     let workers = ScheduledThreadPool::builder()
         .num_threads(3)
         .thread_name_pattern("r2d2-worker-{}")
@@ -58,7 +66,8 @@ pub fn pool(path: &Path, max_size: u32) -> Pool {
         .thread_pool(Arc::new(workers))
         .max_size(max_size)
         .min_idle(Some(0))
-        .idle_timeout(Some(Duration::from_secs(300)))
+        .idle_timeout((!keep_open).then_some(Duration::from_secs(300)))
+        .max_lifetime(None)
         .connection_timeout(Duration::from_secs(30))
         .build_unchecked(manager)
 }

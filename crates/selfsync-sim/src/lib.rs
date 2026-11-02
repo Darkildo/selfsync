@@ -282,6 +282,9 @@ pub struct World {
     pub hide_read_only: bool,
     /// Изображать сервер 0.1.x: ответы без заголовка версии протокола.
     pub hide_proto_header: bool,
+    /// Портить тело `PUT /v1/blobs/…` не короче стольких байт (сервер ответит
+    /// `hash_mismatch`): тело по дороге подменили.
+    pub corrupt_blob_puts: Option<usize>,
 }
 
 /// Номер запроса команды смены ключа в случайных прогонах.
@@ -328,6 +331,7 @@ impl World {
             planned_faults: VecDeque::new(),
             hide_read_only: false,
             hide_proto_header: false,
+            corrupt_blob_puts: None,
         };
         for i in 0..cfg.clients {
             w.add_client(i);
@@ -491,7 +495,14 @@ impl World {
         self.start_client(c);
     }
 
-    fn http(&mut self, c: usize, req: HttpRequest) -> IoResult {
+    fn http(&mut self, c: usize, mut req: HttpRequest) -> IoResult {
+        if req.method == "PUT"
+            && req.path.starts_with("/v1/blobs/")
+            && self.corrupt_blob_puts.is_some_and(|n| req.body.len() >= n)
+            && let Some(last) = req.body.last_mut()
+        {
+            *last ^= 0xff;
+        }
         let mut b = http::Request::builder()
             .method(req.method.as_str())
             .uri(&req.path);

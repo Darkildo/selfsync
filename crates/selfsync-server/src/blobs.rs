@@ -22,8 +22,8 @@ pub struct BlobStore {
 pub enum WriteOutcome {
     /// Записано и проверено.
     Stored { created: bool },
-    /// Хэш не совпал.
-    HashMismatch,
+    /// Хэш не совпал; `received` — сколько байт пришло (для журнала).
+    HashMismatch { received: u64 },
     /// Тело больше лимита.
     TooLarge,
 }
@@ -162,7 +162,7 @@ impl BlobStore {
             Ok(None) => {
                 if hasher.finish() != *h {
                     let _ = tokio::fs::remove_file(&tmp).await;
-                    return Ok(WriteOutcome::HashMismatch);
+                    return Ok(WriteOutcome::HashMismatch { received: total });
                 }
                 let store = self.clone();
                 let hh = *h;
@@ -373,7 +373,7 @@ mod tests {
         let other = Hash::of(b"x");
         assert_eq!(
             s.put_stream(&other, stream(vec![b"y"]), 100).await.unwrap(),
-            WriteOutcome::HashMismatch
+            WriteOutcome::HashMismatch { received: 1 }
         );
         assert!(!s.exists(&other));
         assert_eq!(

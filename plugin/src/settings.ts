@@ -13,7 +13,6 @@ import { JoinModal } from "./ui/join.ts";
 import { confirm } from "./ui/confirm.ts";
 import { ChangePasswordModal, PasswordModal } from "./ui/password.ts";
 import { PhraseModal } from "./ui/recovery.ts";
-import { ShownRows } from "./ui/shown.ts";
 import { SkippedModal } from "./ui/skipped.ts";
 
 export interface Settings {
@@ -88,8 +87,8 @@ export interface Section {
 export class SelfsyncSettingTab extends PluginSettingTab {
   /** Следующая ссылка подключения — для устройства только для чтения. */
   private joinReadOnly = false;
-  /** Строки последней отрисовки — по ним видно, открыта ли вкладка. */
-  private shown = new ShownRows();
+  /** Пересчёт строк уже запрошен (refresh склеивает частые вызовы). */
+  private refreshQueued = false;
 
   constructor(
     app: App,
@@ -99,11 +98,18 @@ export class SelfsyncSettingTab extends PluginSettingTab {
   }
 
   /**
-   * Перерисовать, если вкладка сейчас открыта. Строки из getSettingDefinitions()
-   * Obsidian рисует не в containerEl, поэтому смотрим и на сами строки.
+   * Пересчитать строки. Obsidian хранит результат getSettingDefinitions() и при
+   * открытии вкладки рисует сохранённое, не спрашивая заново; update() пересчитывает
+   * и перерисовывает, только если вкладка открыта. Поэтому зовём его всегда, даже
+   * при закрытых настройках, а частые вызовы склеиваем в один.
    */
   refresh(): void {
-    if (this.containerEl.isConnected || this.shown.any()) this.update();
+    if (this.refreshQueued) return;
+    this.refreshQueued = true;
+    queueMicrotask(() => {
+      this.refreshQueued = false;
+      this.update();
+    });
   }
 
   override getSettingDefinitions(): SettingDefinitionItem[] {
@@ -117,7 +123,6 @@ export class SelfsyncSettingTab extends PluginSettingTab {
         render: (s: Setting) => {
           // Несколько кнопок в строке на телефоне переносятся (styles.css).
           s.settingEl.addClass("selfsync-actions");
-          this.shown.add(s.settingEl);
           const cleanup = r.build(s);
           return typeof cleanup === "function" ? (cleanup as () => void) : undefined;
         },

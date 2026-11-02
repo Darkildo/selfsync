@@ -130,10 +130,11 @@ pub async fn put_blob(
             }
             .into_response())
         }
-        WriteOutcome::HashMismatch => Err(ApiError::bad_request(
+        WriteOutcome::HashMismatch { received } => Err(ApiError::bad_request(
             "hash_mismatch",
             "содержимое не совпадает с хэшем",
-        )),
+        )
+        .log_detail(format!("received={received}"))),
         WriteOutcome::TooLarge if room.quota < file_limit => Err(quota::vault_full()),
         WriteOutcome::TooLarge if file_limit < limit => {
             Err(ApiError::too_large("файл больше лимита vault'а"))
@@ -489,10 +490,10 @@ pub async fn upload_commit(
     if actual != h {
         let _ = tokio::fs::remove_file(&path).await;
         remove_row(&a, id).await?;
-        return Err(ApiError::bad_request(
-            "hash_mismatch",
-            "содержимое не совпадает с хэшем",
-        ));
+        return Err(
+            ApiError::bad_request("hash_mismatch", "содержимое не совпадает с хэшем")
+                .log_detail(format!("received={len}")),
+        );
     }
     let store = a.vault.blobs.clone();
     if tokio::task::spawn_blocking(move || store.finalize(&path, &h)).await?? {

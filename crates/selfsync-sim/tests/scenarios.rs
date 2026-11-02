@@ -3263,3 +3263,61 @@ mod handoff {
         assert_eq!(handoff, None);
     }
 }
+
+fn mismatch_notices(w: &World, c: usize, path: &str) -> usize {
+    w.clients[c]
+        .notices
+        .iter()
+        .filter(|n| matches!(n, Notice::Rejected { path: p, code } if p == path && code == "hash_mismatch"))
+        .count()
+}
+
+/// Сервер не сходится с хэшем маленького блоба (тело подменяют по дороге): файл
+/// не стопорит отправку остальных; после нескольких попыток версия отклоняется до
+/// правки, пользователю — уведомление с путём; правка файла снимает отказ.
+#[test]
+fn hash_mismatch_skips_file_and_rejects_after_retries() {
+    let mut w = World::new(quiet(2));
+    let mut big = b"big\n".to_vec();
+    big.extend(w.rng.bytes(6000));
+    w.user_write(0, "big.bin", big);
+    base_note(&mut w, 0, "small.md");
+    w.corrupt_blob_puts = Some(4000);
+    for _ in 0..5 {
+        w.sync(0);
+    }
+    w.sync(1);
+    assert!(
+        w.clients[1].fs.read_file("small.md").is_some(),
+        "остальное ушло"
+    );
+    assert!(w.clients[1].fs.read_file("big.bin").is_none());
+    assert_eq!(
+        mismatch_notices(&w, 0, "big.bin"),
+        1,
+        "{:?}",
+        w.clients[0].notices
+    );
+    assert_ne!(
+        w.clients[0].status.as_ref().unwrap().state,
+        selfsync_core::engine::SyncState::Error,
+        "синк не в ошибке"
+    );
+    // Отклонённая версия больше не отправляется.
+    w.trace.clear();
+    w.sync(0);
+    assert!(
+        !w.trace.iter().any(|l| l.contains("HTTP PUT /v1/blobs")),
+        "{:?}",
+        w.trace
+    );
+    // Правка файла снимает отказ.
+    w.corrupt_blob_puts = None;
+    let mut fixed = b"fixed\n".to_vec();
+    fixed.extend(w.rng.bytes(6000));
+    w.user_write(0, "big.bin", fixed.clone());
+    w.sync(0);
+    w.sync(1);
+    assert_eq!(read(&w, 1, "big.bin"), fixed);
+    finish(&mut w);
+}
