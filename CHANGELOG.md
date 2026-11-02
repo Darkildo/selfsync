@@ -7,6 +7,7 @@ Release notes for each version; earlier versions are described on the [releases 
 - **Plugin.** The interface follows the language of Obsidian: English, Russian and the 70 other languages of Obsidian's list. Translations other than English and Russian are machine translations; corrections are welcome as pull requests (`plugin/src/i18n/TRANSLATING.md`). The language is picked from `getLanguage()`: the exact code (`zh-tw`, `pt-br`), then the base language, then English; a string missing in a translation is shown in English.
 - **Plugin.** Dates, times and size units follow the chosen language. In Arabic, Hebrew, Persian, Urdu and Dhivehi the verification digits, the recovery phrase, addresses, tokens, codes and file paths stay left-to-right.
 - **Plugin.** `main.js` grows by about 2 MB because of the translations.
+- **Plugin, fix.** On Obsidian 1.13+ the settings tab redraws itself again after a connection, a password, a device change and other actions finish; before, it kept showing the old state until reopened.
 - Server, protocol and `selfsync-cli` are unchanged.
 
 ## 0.5.1

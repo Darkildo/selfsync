@@ -13,6 +13,7 @@ import { JoinModal } from "./ui/join.ts";
 import { confirm } from "./ui/confirm.ts";
 import { ChangePasswordModal, PasswordModal } from "./ui/password.ts";
 import { PhraseModal } from "./ui/recovery.ts";
+import { ShownRows } from "./ui/shown.ts";
 import { SkippedModal } from "./ui/skipped.ts";
 
 export interface Settings {
@@ -87,6 +88,8 @@ export interface Section {
 export class SelfsyncSettingTab extends PluginSettingTab {
   /** Следующая ссылка подключения — для устройства только для чтения. */
   private joinReadOnly = false;
+  /** Строки последней отрисовки — по ним видно, открыта ли вкладка. */
+  private shown = new ShownRows();
 
   constructor(
     app: App,
@@ -95,9 +98,12 @@ export class SelfsyncSettingTab extends PluginSettingTab {
     super(app, plugin);
   }
 
-  /** Перерисовать, если вкладка сейчас открыта. */
+  /**
+   * Перерисовать, если вкладка сейчас открыта. Строки из getSettingDefinitions()
+   * Obsidian рисует не в containerEl, поэтому смотрим и на сами строки.
+   */
   refresh(): void {
-    if (this.containerEl.isConnected) this.update();
+    if (this.containerEl.isConnected || this.shown.any()) this.update();
   }
 
   override getSettingDefinitions(): SettingDefinitionItem[] {
@@ -111,6 +117,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
         render: (s: Setting) => {
           // Несколько кнопок в строке на телефоне переносятся (styles.css).
           s.settingEl.addClass("selfsync-actions");
+          this.shown.add(s.settingEl);
           const cleanup = r.build(s);
           return typeof cleanup === "function" ? (cleanup as () => void) : undefined;
         },

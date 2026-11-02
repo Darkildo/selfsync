@@ -44,7 +44,7 @@ interface LoadedPlugin {
     command(c: unknown): Promise<{ type: string; code?: string }>;
   };
   statusBar: { text: string };
-  settingTab: { getSettingDefinitions(): { items: { render(s: unknown): unknown }[] }[] };
+  settingTab: { getSettingDefinitions(): { items: { render(s: unknown): unknown }[] }[]; refresh(): void; updates: number };
 }
 
 /** Кнопки и строки, которые рисует вкладка настроек (с ответами сервера). */
@@ -139,6 +139,24 @@ test("main.js: устройство только для чтения — ста�
   ro.onunload();
   await fsp.rm(rwVault, { recursive: true, force: true });
   await fsp.rm(roVault, { recursive: true, force: true });
+});
+
+test("main.js: вкладка из getSettingDefinitions перерисовывается, пока её строки на экране", async () => {
+  const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-refresh-"));
+  const plugin = await loadPlugin(vault, server.token("refresh", "laptop"));
+  const tab = plugin.settingTab;
+  const before = tab.updates;
+  tab.refresh();
+  assert.equal(tab.updates, before, "вкладку не открывали — перерисовывать нечего");
+  const rows = await renderSettings(plugin);
+  tab.refresh();
+  assert.equal(tab.updates, before + 1, "Obsidian 1.13+: containerEl не в DOM, но строки на экране");
+  for (const r of obsidian.settings) r.settingEl.isConnected = false;
+  tab.refresh();
+  assert.equal(tab.updates, before + 1, "окно настроек закрыли");
+  assert.ok(rows.length > 0);
+  plugin.onunload();
+  await fsp.rm(vault, { recursive: true, force: true });
 });
 
 test("main.js: сервер старее 0.2.1 — ссылки «только для чтения» нет", async () => {

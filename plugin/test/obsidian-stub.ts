@@ -135,10 +135,15 @@ export class Plugin {
 
 export class PluginSettingTab {
   containerEl = new El();
+  /** Сколько раз вкладка просила Obsidian перерисовать её. */
+  updates = 0;
   constructor(
     public app: unknown,
     public plugin: unknown,
   ) {}
+  update(): void {
+    this.updates++;
+  }
 }
 
 export class Modal {
@@ -192,6 +197,8 @@ export class Setting {
   toggles = 0;
   hidden = false;
   settingEl = {
+    /** Строка на экране: так её видит refresh() вкладки. */
+    isConnected: true,
     hide: (): void => {
       this.hidden = true;
     },
