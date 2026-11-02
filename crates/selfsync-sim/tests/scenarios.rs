@@ -3321,3 +3321,106 @@ fn hash_mismatch_skips_file_and_rejects_after_retries() {
     assert_eq!(read(&w, 1, "big.bin"), fixed);
     finish(&mut w);
 }
+
+// Аудит 0.6.2: запись индекса и long-poll.
+
+#[test]
+fn idle_cycles_do_not_rewrite_index() {
+    let mut w = World::new(quiet(1));
+    base_note(&mut w, 0, "a.md");
+    w.sync(0);
+    w.sync(0);
+    let before = w.clients[0].index_saves;
+    for _ in 0..5 {
+        w.now += 20_000;
+        w.sync(0);
+    }
+    assert_eq!(
+        w.clients[0].index_saves, before,
+        "цикл без изменений не пишет индекс"
+    );
+    // Правка — снова пишет.
+    edit_line(&mut w, 0, "a.md", 1);
+    w.sync(0);
+    assert!(w.clients[0].index_saves > before);
+    finish(&mut w);
+}
+
+/// Скачать `n` новых файлов вторым клиентом; вернуть число записей индекса.
+fn pull_many(n: usize) -> (World, u64) {
+    let mut w = World::new(quiet(2));
+    for i in 0..n {
+        base_note(&mut w, 0, &format!("n{i:03}.md"));
+    }
+    w.sync(0);
+    w.sync(1);
+    let before = w.clients[1].index_saves;
+    for i in 0..n {
+        base_note(&mut w, 0, &format!("m{i:03}.md"));
+    }
+    w.sync(0);
+    w.sync(1);
+    let saves = w.clients[1].index_saves - before;
+    (w, saves)
+}
+
+#[test]
+fn pull_saves_index_in_batches() {
+    let (mut w, saves) = pull_many(120);
+    // 120 файлов: пачки по 50 плюс конец, а не по записи на файл.
+    assert!(saves <= 6, "записей индекса: {saves}");
+    finish(&mut w);
+}
+
+#[test]
+fn killed_mid_pull_between_index_saves() {
+    let mut w = World::new(quiet(2));
+    for i in 0..80 {
+        base_note(&mut w, 0, &format!("n{i:03}.md"));
+    }
+    w.sync(0);
+    w.deliver(1, Event::SyncNow);
+    // Убить после 70-й записи: последние ~20 файлов записаны, но не в индексе.
+    let mut writes = 0;
+    while let Some(l) = w.pump_one(1) {
+        if l.starts_with("Write n") || l.starts_with("CommitTemp n") {
+            writes += 1;
+            if writes == 70 {
+                break;
+            }
+        }
+    }
+    assert_eq!(writes, 70);
+    w.kill(1);
+    finish(&mut w);
+    assert!(
+        conflict_copies(&w).is_empty(),
+        "записанные файлы распознаны как свои: {:?}",
+        conflict_copies(&w)
+    );
+}
+
+#[test]
+fn long_poll_survives_network_error() {
+    let mut w = World::new(quiet(1));
+    base_note(&mut w, 0, "a.md");
+    w.sync(0);
+    let mut cfg = w.clients[0].cfg.clone();
+    cfg.use_wait = true;
+    w.clients[0].cfg = cfg.clone();
+    w.planned_faults.push_back(("GET /v1/wait".into(), false));
+    w.deliver(0, Event::Configure { config: cfg });
+    w.drain(0);
+    assert_eq!(w.clients[0].wait_requests, 1, "первый long-poll оборван");
+    // Через бэкофф — новая попытка, а не отключение до перезапуска.
+    for _ in 0..10 {
+        w.now += 1_000;
+        w.tick(0);
+        w.drain(0);
+    }
+    assert!(
+        w.clients[0].wait_requests >= 2,
+        "long-poll повторён: {}",
+        w.clients[0].wait_requests
+    );
+}

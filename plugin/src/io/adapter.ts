@@ -4,7 +4,7 @@
 // протоколу из контракта Action::Write: X.selfsync-tmp → X.commit.selfsync-tmp
 // (записан целиком) → удалить X → переименовать в X. Прерванную на любом шаге
 // запись ядро доведёт или повторит. readBinary читает файл целиком — отсюда
-// лимит размера файла на мобильных (README).
+// лимит размера файла на мобильных (README) и кэш файла, читаемого по частям.
 
 import type { FileMeta } from "../types.ts";
 import { type FileBackend, joinPath, nameOf, parentOf, realName } from "./backend.ts";
@@ -33,7 +33,20 @@ function buffer(data: Uint8Array): ArrayBuffer {
   return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
 }
 
+/** Файл, который сейчас читается по частям. */
+interface Cached {
+  path: string;
+  size: number;
+  mtime: number;
+  data: Uint8Array;
+}
+
 export class AdapterBackend implements FileBackend {
+  /** readBinary читает файл целиком, а ядро читает большие файлы кусками по 4 МБ:
+   *  без кэша файл в 200 МБ перечитывался бы целиком на каждый кусок. Держим один
+   *  недочитанный файл; любая запись в бэкенд его сбрасывает. */
+  private cached: Cached | null = null;
+
   constructor(
     private a: AdapterLike,
     /** Каталог плагина относительно vault'а (`.obsidian/plugins/selfsync`). */
@@ -79,13 +92,28 @@ export class AdapterBackend implements FileBackend {
   }
 
   async read(path: string, offset: number, len?: number): Promise<Uint8Array | null> {
-    if (!(await this.a.exists(path))) return null;
-    const all = new Uint8Array(await this.a.readBinary(path));
+    return this.readPart(path, offset, len);
+  }
+
+  /** Часть файла; файл, дочитанный не до конца, остаётся в кэше до следующего куска. */
+  private async readPart(path: string, offset: number, len?: number): Promise<Uint8Array | null> {
+    const st = await this.a.stat(path);
+    if (!st) return null;
+    const c = this.cached;
+    const hit = c !== null && c.path === path && c.size === st.size && c.mtime === st.mtime;
+    const all = hit ? c.data : new Uint8Array(await this.a.readBinary(path));
     const start = Math.min(offset, all.length);
-    return all.slice(start, len === undefined ? all.length : Math.min(all.length, start + len));
+    const end = len === undefined ? all.length : Math.min(all.length, start + len);
+    this.cached = end < all.length ? { path, size: st.size, mtime: st.mtime, data: all } : null;
+    return all.slice(start, end);
+  }
+
+  private forget(): void {
+    this.cached = null;
   }
 
   async writeAtomic(path: string, data: Uint8Array): Promise<FileMeta> {
+    this.forget();
     await this.ensureDir(parentOf(path));
     const tmp = path + TEMP_SUFFIX;
     const commit = path + COMMIT_SUFFIX;
@@ -106,6 +134,7 @@ export class AdapterBackend implements FileBackend {
   }
 
   async rename(from: string, to: string): Promise<void> {
+    this.forget();
     await this.ensureDir(parentOf(to));
     await this.a.rename(from, to);
   }
@@ -115,6 +144,7 @@ export class AdapterBackend implements FileBackend {
   }
 
   async rmdir(path: string): Promise<boolean> {
+    this.forget();
     const l = await this.a.list(path);
     if (l.files.length > 0 || l.folders.length > 0) return false;
     await this.a.rmdir(path, false);
@@ -122,15 +152,18 @@ export class AdapterBackend implements FileBackend {
   }
 
   async remove(path: string): Promise<void> {
+    this.forget();
     await this.a.remove(path);
   }
 
   async trash(path: string): Promise<void> {
+    this.forget();
     if (this.trashMode === "system" && (await this.a.trashSystem(path))) return;
     await this.a.trashLocal(path);
   }
 
   async tempWrite(name: string, offset: number, data: Uint8Array): Promise<void> {
+    this.forget();
     const f = this.stored(`tmp/${name}`);
     if (offset === 0) {
       await this.ensureDir(this.stored("tmp"));
@@ -153,19 +186,17 @@ export class AdapterBackend implements FileBackend {
   }
 
   async tempRead(name: string, offset: number, len: number): Promise<Uint8Array | null> {
-    const f = this.stored(`tmp/${name}`);
-    if (!(await this.a.exists(f))) return null;
-    const all = new Uint8Array(await this.a.readBinary(f));
-    const start = Math.min(offset, all.length);
-    return all.slice(start, Math.min(all.length, start + len));
+    return this.readPart(this.stored(`tmp/${name}`), offset, len);
   }
 
   async tempDelete(name: string): Promise<void> {
+    this.forget();
     const f = this.stored(`tmp/${name}`);
     if (await this.a.exists(f)) await this.a.remove(f);
   }
 
   async tempCommit(name: string, path: string): Promise<FileMeta> {
+    this.forget();
     await this.ensureDir(parentOf(path));
     const commit = path + COMMIT_SUFFIX;
     await this.replace(this.stored(`tmp/${name}`), commit);
@@ -183,6 +214,7 @@ export class AdapterBackend implements FileBackend {
   }
 
   async storeWrite(name: string, data: Uint8Array): Promise<void> {
+    this.forget();
     const f = this.stored(name);
     await this.ensureDir(parentOf(f));
     await this.a.writeBinary(f + TEMP_SUFFIX, buffer(data));
@@ -190,6 +222,7 @@ export class AdapterBackend implements FileBackend {
   }
 
   async storeDelete(name: string): Promise<void> {
+    this.forget();
     const f = this.stored(name);
     if (await this.a.exists(f)) await this.a.remove(f);
   }

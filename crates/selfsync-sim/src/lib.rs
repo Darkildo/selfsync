@@ -204,6 +204,10 @@ pub struct Client {
     pub requests: u64,
     /// Из них не GET/HEAD (устройство только для чтения не должно их слать).
     pub writes: u64,
+    /// Сколько раз записан снимок индекса.
+    pub index_saves: u64,
+    /// Сколько запросов `/v1/wait` отправлено (включая оборванные).
+    pub wait_requests: u64,
 }
 
 /// Учёт токенов для инварианта.
@@ -381,6 +385,8 @@ impl World {
             recv_bytes: 0,
             requests: 0,
             writes: 0,
+            index_saves: 0,
+            wait_requests: 0,
         };
         self.clients.push(client);
         self.start_client(self.clients.len() - 1);
@@ -570,6 +576,9 @@ impl World {
         }
         let res = match a {
             Action::Http { req, .. } => {
+                if req.path.starts_with("/v1/wait") {
+                    self.clients[c].wait_requests += 1;
+                }
                 let line = format!("{} {}", req.method, req.path);
                 let planned = self
                     .planned_faults
@@ -657,6 +666,7 @@ impl World {
             Action::Mkdir { path, .. } => self.clients[c].fs.mkdir(&path),
             Action::Rmdir { path, .. } => self.clients[c].fs.rmdir(&path),
             Action::SaveIndex { data, .. } => {
+                self.clients[c].index_saves += 1;
                 self.clients[c].saved_index = Some(data);
                 IoResult::Done
             }

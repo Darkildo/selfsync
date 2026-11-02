@@ -30,6 +30,7 @@ pub use ctx::{SyncError, TEMP_SUFFIX};
 use runtime::{Hub, Task, poll_task};
 pub use types::*;
 
+use crate::hash::Hash;
 use crate::index::Index;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,9 +61,15 @@ impl Engine {
                 Err(_) => (Index::new(), true),
             },
         };
+        let mut st = State::new(config, idx);
+        // Снимок с диска уже записан: тот же снимок не писать заново. Старый формат
+        // кодируется иначе — его перепишет первое же сохранение.
+        if let Some(b) = index.filter(|_| !reset) {
+            st.saved_index = Some(Hash::of(b));
+        }
         Engine {
             hub: Hub::new(),
-            st: Rc::new(RefCell::new(State::new(config, idx))),
+            st: Rc::new(RefCell::new(st)),
             tasks: Vec::new(),
             index_reset: reset,
         }
@@ -129,7 +136,7 @@ impl Engine {
                 s.need_full_scan = true;
                 s.sync_due = Some(now);
                 s.backoff_ms = 0;
-                s.wait_disabled = false;
+                s.reset_wait();
                 if s.blocked
                     .as_deref()
                     .is_some_and(|b| b != "wrong_password" && b != "encryption_mismatch")
@@ -151,6 +158,8 @@ impl Engine {
             Event::Visible => cx.with_mut(|s| {
                 s.visible = true;
                 s.need_full_scan = true;
+                // После сна сеть могла вернуться: long-poll пробуем сразу.
+                s.reset_wait();
                 s.sync_due = Some(now);
                 s.poll_interval = s.cfg.poll_active_ms;
             }),
@@ -224,7 +233,7 @@ impl Engine {
                 s.cfg = config;
                 s.need_full_scan = true;
                 s.sync_due = Some(now);
-                s.wait_disabled = false;
+                s.reset_wait();
             }),
         }
     }
@@ -294,12 +303,14 @@ impl Engine {
         let want_wait = cx.with(|s| {
             s.cfg.use_wait
                 && !s.wait_disabled
+                && s.wait_retry_at.is_none_or(|t| t <= now)
                 && s.visible
                 && s.index.initial_done
                 && s.paused.is_none()
                 && !s.sync_running
         });
         if want_wait && !self.running(Kind::Wait) && !self.running(Kind::Sync) {
+            cx.with_mut(|s| s.wait_retry_at = None);
             let c = cx.clone();
             self.spawn(Kind::Wait, async move { wait_task(c).await });
             spawned = true;
@@ -310,7 +321,15 @@ impl Engine {
     fn emit_wake(&mut self) {
         let wake = {
             let s = self.st.borrow();
-            let w = s.sync_due.into_iter().chain(s.next_poll).min();
+            let w = s
+                .sync_due
+                .into_iter()
+                .chain(s.next_poll)
+                .chain(
+                    s.wait_retry_at
+                        .filter(|&t| t > s.now && s.cfg.use_wait && s.visible),
+                )
+                .min();
             // Под ограничением 429 будить не раньше его конца.
             match (w, s.rate_limited_until) {
                 (Some(w), Some(u)) => Some(w.max(u)),
@@ -476,6 +495,10 @@ async fn wait_task(cx: Ctx) {
         match api::wait(&cx, since, 25).await {
             Ok(vs) => {
                 let now = cx.now();
+                cx.with_mut(|s| {
+                    s.wait_retry_at = None;
+                    s.wait_backoff_ms = 0;
+                });
                 if vs.seq > since {
                     cx.with_mut(|s| s.sync_due = Some(now));
                     return;
@@ -489,6 +512,17 @@ async fn wait_task(cx: Ctx) {
                 let now = cx.now();
                 cx.with_mut(|s| s.rate_limit(now, retry_after_s));
                 cx.set_status(|_| {});
+                return;
+            }
+            // Обрыв (сон ноутбука, смена сети): повторить позже с бэкоффом, а не
+            // отключать long-poll до перезапуска.
+            Err(SyncError::Network(_)) => {
+                let now = cx.now();
+                cx.with_mut(|s| {
+                    s.wait_backoff_ms = s.wait_backoff_ms.saturating_mul(2).clamp(5_000, 300_000);
+                    s.wait_retry_at =
+                        Some(now + i64::try_from(s.wait_backoff_ms).unwrap_or(300_000));
+                });
                 return;
             }
             Err(_) => {

@@ -128,6 +128,10 @@ pub(crate) struct State {
     pub wake_at: Option<i64>,
     /// `/v1/wait` отвечает мгновенно (CGI) — переключиться на опрос.
     pub wait_disabled: bool,
+    /// Сетевая ошибка long-poll: следующая попытка не раньше этого момента
+    /// (бэкофф `wait_backoff_ms`), без отключения до конца сессии.
+    pub wait_retry_at: Option<i64>,
+    pub wait_backoff_ms: u64,
     /// Сервер ответил 429: до этого момента ни синка, ни long-poll (иначе клиент
     /// сам продлевает свою блокировку). «Синхронизировать сейчас» не отменяет.
     pub rate_limited_until: Option<i64>,
@@ -148,6 +152,12 @@ pub(crate) struct State {
     /// Сервер ответил `hash_mismatch` на загрузку маленького блоба: путь → (хэш
     /// блоба, сколько раз подряд). На `MISMATCH_LIMIT`-й раз версия отклоняется.
     pub hash_mismatch: std::collections::HashMap<String, (Hash, u32)>,
+    /// Хэш снимка индекса, который точно лежит на диске: такой же снимок не
+    /// пишется повторно (цикл без изменений не трогает диск).
+    pub saved_index: Option<Hash>,
+    /// Номер последнего отданного на запись снимка: `saved_index` обновляет только
+    /// он (исполнитель пишет снимки по порядку, старый поверх нового не ляжет).
+    pub save_seq: u64,
     /// Уведомление `QuotaSoft` показано; сбрасывается, когда занято меньше порога.
     pub quota_soft_notified: bool,
     /// Что изменил текущий цикл: локальные пути, тронутые синком, и отправленные.
@@ -204,6 +214,14 @@ pub(crate) struct State {
 }
 
 impl State {
+    /// Long-poll снова разрешён: после «Синхронизировать сейчас», смены настроек
+    /// и возврата на передний план.
+    pub fn reset_wait(&mut self) {
+        self.wait_disabled = false;
+        self.wait_retry_at = None;
+        self.wait_backoff_ms = 0;
+    }
+
     pub fn new(cfg: EngineConfig, index: Index) -> State {
         let excludes = build_excludes(&cfg);
         let no_merge = Excludes::new(&cfg.no_merge);
@@ -232,6 +250,8 @@ impl State {
             last_activity: 0,
             wake_at: None,
             wait_disabled: false,
+            wait_retry_at: None,
+            wait_backoff_ms: 0,
             rate_limited_until: None,
             read_only: false,
             read_only_forced: false,
@@ -239,6 +259,8 @@ impl State {
             storage_notified: false,
             quota_hold: None,
             hash_mismatch: Default::default(),
+            saved_index: None,
+            save_seq: 0,
             quota_full_notified: false,
             quota_soft_notified: false,
             pulled: BTreeSet::new(),
@@ -906,11 +928,33 @@ impl Ctx {
     }
 
     /// Чекпоинт индекса.
+    /// Сохраняет снимок индекса, если он отличается от записанного на диск.
     pub async fn save(&self) -> SyncResult<()> {
         let data = self.with(|s| s.index.encode());
+        let hash = Hash::of(&data);
+        let seq = self.with_mut(|s| {
+            if s.saved_index == Some(hash) {
+                return None;
+            }
+            s.save_seq += 1;
+            Some(s.save_seq)
+        });
+        let Some(seq) = seq else {
+            return Ok(());
+        };
         match self.hub.submit(|id| Action::SaveIndex { id, data }).await {
-            IoResult::Done => Ok(()),
-            other => Err(io_err("save_index", other)),
+            IoResult::Done => {
+                self.with_mut(|s| {
+                    if s.save_seq == seq {
+                        s.saved_index = Some(hash);
+                    }
+                });
+                Ok(())
+            }
+            other => {
+                self.with_mut(|s| s.saved_index = None);
+                Err(io_err("save_index", other))
+            }
         }
     }
 
