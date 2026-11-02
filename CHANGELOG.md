@@ -2,6 +2,12 @@
 
 Release notes for each version; earlier versions are described on the [releases page](https://github.com/Darkildo/selfsync/releases).
 
+## 0.8.0
+
+- **Plugin.** `main.js` is about 1.35 MB instead of 3.8 MB: the WebAssembly core and the translations (except English and Russian) are stored compressed (deflate) and unpacked at startup. Only the language Obsidian uses is unpacked; the other 69 translations stay compressed and never reach memory. In a test run under Node, loading the plugin and `onload` took about 50–70 ms instead of 70–110 ms, and the plugin used about 4 MB of memory after startup instead of 11 MB. The decompressor is part of the plugin (`plugin/src/inflate.ts`), with no dependencies, and runs on every Obsidian platform, including iOS 15, where `DecompressionStream` is not available.
+- **For extensions.** `plugin/src/ext-pure.ts` is a second stable entry point without the `obsidian` package: the WebAssembly core (`initWasm` and its functions), interface strings, `lintDict` and `inflateRaw`. It loads in Node, so tests and build scripts can use it; `ext.ts` re-exports everything from it. `initWasm` accepts the WebAssembly module as is or compressed. `plugin/src/build/pack.mjs` is the esbuild plugin that compresses the core and translation registries; an extension can apply it to its own `locales.ts` (`pack({ wasm, locales: [{ registry, keep }] })`).
+- Server and protocol are unchanged.
+
 ## 0.7.0
 
 - **Plugin, desktop and mobile.** Fewer directory reads: the real name of a file (its letter case on macOS, Windows, iOS and Android) is looked up in a short-lived listing of its folder instead of reading the folder on every check, and a written file takes one check instead of three. Downloading many files into one folder no longer reads that folder 3–4 times per file.
