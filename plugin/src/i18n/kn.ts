@@ -7,6 +7,7 @@ const kn: Dict = {
   "status.syncing": "ಸಿಂಕ್ ಆಗುತ್ತಿದೆ",
   "status.offline": "ಸರ್ವರ್ ತಲುಪಲಾಗುತ್ತಿಲ್ಲ",
   "status.error": "ಸಿಂಕ್ ದೋಷ",
+  "status.restarting": "ಸಿಂಕ್ ದೋಷ, ಮರುಪ್ರಾರಂಭಿಸಲಾಗುತ್ತಿದೆ…",
   "status.needPassword": "ಪಾಸ್‌ವರ್ಡ್ ಅಗತ್ಯವಿದೆ",
   "status.blocked": "ಸಿಂಕ್ ನಿಲ್ಲಿಸಲಾಗಿದೆ",
   "status.rateLimited": "ಹಲವು ಪ್ರಯತ್ನಗಳು, ಮುಂದಿನದು {time}ಕ್ಕೆ",
@@ -50,6 +51,7 @@ const kn: Dict = {
   "notice.indexReset": "ಸಿಂಕ್ ಸೂಚ್ಯಂಕ ಹಾನಿಗೊಳಗಾಗಿದೆ — ಸುರಕ್ಷಿತ ಪೂರ್ಣ ಹೊಂದಾಣಿಕೆ ಪರಿಶೀಲನೆ ಪ್ರಾರಂಭವಾಗಿದೆ",
   "notice.encryptionMismatch": "ವಾಲ್ಟ್ ಇಲ್ಲಿ ಎನ್‌ಕ್ರಿಪ್ಟ್ ಆಗಿದೆ ಆದರೆ ಸರ್ವರ್‌ನಲ್ಲಿ ಅಲ್ಲ — ಸಿಂಕ್ ನಿಲ್ಲಿಸಲಾಗಿದೆ",
   "notice.error": "ಸಿಂಕ್: {message}",
+  "notice.engineStopped": "selfsync: ಸಿಂಕ್ ಎಂಜಿನ್ ಸತತ {n} ಬಾರಿ ವಿಫಲವಾಗಿದ್ದು ನಿಲ್ಲಿಸಲಾಗಿದೆ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಲು “{cmd}” ಚಲಾಯಿಸಿ; ವಿವರಗಳು ಸಿಂಕ್ ಲಾಗ್‌ನಲ್ಲಿವೆ.",
 
   "settings.connection": "ಸಂಪರ್ಕ",
   "settings.connectedTo": "“{vault}” ವಾಲ್ಟ್‌ಗೆ “{device}” ಆಗಿ ಸಂಪರ್ಕಗೊಂಡಿದೆ",

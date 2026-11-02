@@ -7,6 +7,7 @@ const zh: Dict = {
   "status.syncing": "正在同步",
   "status.offline": "无法连接服务器",
   "status.error": "同步出错",
+  "status.restarting": "同步出错，正在重启…",
   "status.needPassword": "需要密码",
   "status.blocked": "同步已停止",
   "status.rateLimited": "尝试次数过多，下次尝试时间：{time}",
@@ -50,6 +51,7 @@ const zh: Dict = {
   "notice.indexReset": "同步索引已损坏——已开始安全的完整核对",
   "notice.encryptionMismatch": "此处的仓库已加密，但服务器上的未加密——同步已停止",
   "notice.error": "同步：{message}",
+  "notice.engineStopped": "selfsync：同步引擎连续 {n} 次出错，已停止。运行“{cmd}”重试；详情见同步日志。",
 
   "settings.connection": "连接",
   "settings.connectedTo": "已以“{device}”身份连接到仓库“{vault}”",

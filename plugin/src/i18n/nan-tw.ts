@@ -7,6 +7,7 @@ const nanTw: Dict = {
   "status.syncing": "Teh tông-pōo",
   "status.offline": "Liân bē tio̍h sū-ho̍k-khì",
   "status.error": "Tông-pōo tshut-tshò",
+  "status.restarting": "Tông-pōo tshut-tshò, teh tsài khí-tōng…",
   "status.needPassword": "Ài àm-bé",
   "status.blocked": "Tông-pōo thîng--ah",
   "status.rateLimited": "Tshì siunn tsē pái, ē-tsi̍t pái tī {time}",
@@ -50,6 +51,7 @@ const nanTw: Dict = {
   "notice.indexReset": "Tông-pōo sik-ín phāinn--khì — í-king khai-sí an-tsuân ê tsuân-bīn tuì-tsiàu",
   "notice.encryptionMismatch": "Vault tī tsia ū ka-bi̍t, m̄-koh tī sū-ho̍k-khì bô — tông-pōo thîng--ah",
   "notice.error": "Tông-pōo: {message}",
+  "notice.engineStopped": "selfsync: tông-pōo ián-jín liân-sòa {n} pái tshut-tshò, í-king thîng--khì. Tsò “{cmd}” tsài tshì tsi̍t-pái; siông-sè tī tông-pōo kì-lo̍k.",
 
   "settings.connection": "Liân-suàn",
   "settings.connectedTo": "Í-king iōng “{device}” ê sin-hūn liân-suàn vault “{vault}”",

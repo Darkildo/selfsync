@@ -208,6 +208,8 @@ pub struct Client {
     pub index_saves: u64,
     /// Сколько запросов `/v1/wait` отправлено (включая оборванные).
     pub wait_requests: u64,
+    /// Сколько раз ядро запросило полный обход (`List`).
+    pub full_scans: u64,
 }
 
 /// Учёт токенов для инварианта.
@@ -387,6 +389,7 @@ impl World {
             writes: 0,
             index_saves: 0,
             wait_requests: 0,
+            full_scans: 0,
         };
         self.clients.push(client);
         self.start_client(self.clients.len() - 1);
@@ -404,6 +407,13 @@ impl World {
     }
 
     /// Лимит размера скачивания клиента (0 — без лимита): событие Configure.
+    /// Как часто возврат на экран запускает полный обход (десктоп: не чаще K мс).
+    pub fn set_visible_scan_min(&mut self, c: usize, ms: u64) {
+        self.clients[c].cfg.visible_scan_min_ms = ms;
+        let config = self.clients[c].cfg.clone();
+        self.deliver(c, Event::Configure { config });
+    }
+
     pub fn set_download_limit(&mut self, c: usize, limit: u64) {
         self.log(format!("c{c} DOWNLOAD LIMIT {limit}"));
         self.clients[c].cfg.max_download_size = limit;
@@ -619,7 +629,10 @@ impl World {
                     }
                 }
             }
-            Action::List { .. } => self.clients[c].fs.list(),
+            Action::List { .. } => {
+                self.clients[c].full_scans += 1;
+                self.clients[c].fs.list()
+            }
             Action::Stat { path, .. } => self.clients[c].fs.stat(&path),
             Action::Read {
                 path, offset, len, ..

@@ -60,9 +60,10 @@ export class Executor {
         return data ? { type: "data", data } : { type: "notFound" };
       }
       case "write": {
-        if (!(await this.holds(a.path, a.expect))) return { type: "precondition" };
+        // Один stat на условие и проверку «не папка»: на мобильном каждый — вызов
+        // через мост приложения.
         const cur = await this.fs.stat(a.path);
-        if (cur?.dir) return { type: "precondition" };
+        if (cur?.dir || !satisfies(cur, a.expect)) return { type: "precondition" };
         return { type: "stat", meta: await this.fs.writeAtomic(a.path, a.data) };
       }
       case "writeTemp":
@@ -139,10 +140,15 @@ export class Executor {
   /** Условие записи на текущее состояние пути. */
   private async holds(path: string, e: Expect): Promise<boolean> {
     if (e.kind === "any") return true;
-    const cur = await this.fs.stat(path);
-    if (e.kind === "absent") return cur === null;
-    return cur !== null && matches(cur, e);
+    return satisfies(await this.fs.stat(path), e);
   }
+}
+
+/** Условие записи на уже прочитанное состояние пути (`null` — пути нет). */
+function satisfies(cur: FileMeta | null, e: Expect): boolean {
+  if (e.kind === "any") return true;
+  if (e.kind === "absent") return cur === null;
+  return cur !== null && matches(cur, e);
 }
 
 function matches(m: FileMeta, e: Expect): boolean {

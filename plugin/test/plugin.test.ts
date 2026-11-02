@@ -355,3 +355,75 @@ test("main.js: индекс не читается — ошибка в строк
     await fsp.rm(vault, { recursive: true, force: true });
   }
 });
+
+test("main.js: сбой ядра — перезапуск с паузой, после трёх подряд — стоп и уведомление", async () => {
+  const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-crash-"));
+  const plugin = await loadPlugin(vault, server.token("crash", "stub"));
+  const p = plugin as unknown as { restartBaseMs: number; runner?: { engine: { handle(): unknown } } };
+  p.restartBaseMs = 10;
+  const crash = (): void => {
+    const r = p.runner;
+    assert.ok(r, "движок есть");
+    r.engine.handle = () => {
+      throw new WebAssembly.RuntimeError("unreachable");
+    };
+    plugin.runner?.send({ type: "tick" });
+  };
+  const restarted = async (prev: unknown): Promise<void> => {
+    for (let i = 0; i < 200 && (!plugin.runner || plugin.runner === prev); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(plugin.runner && plugin.runner !== prev, "движок пересоздан");
+    await plugin.runner.idle();
+  };
+  try {
+    obsidian.shown.length = 0;
+    let prev: unknown = plugin.runner;
+    crash();
+    assert.equal(plugin.runner, undefined, "упавший движок брошен");
+    assert.match(plugin.statusBar.text, /перезапуск/);
+    await restarted(prev);
+    prev = plugin.runner;
+    crash();
+    await restarted(prev);
+    crash();
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(plugin.runner, undefined, "после трёх сбоев подряд не перезапускается");
+    assert.match(plugin.statusBar.text, /Ошибка синхронизации/);
+    assert.ok(
+      obsidian.shown.some((m) => m.includes("остановлено")),
+      obsidian.shown.join("\n"),
+    );
+    // Ручной «Синхронизировать сейчас» пробует снова.
+    (plugin as unknown as { syncNow(): void }).syncNow();
+    for (let i = 0; i < 100 && !plugin.runner; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(plugin.runner, "ручной запуск после стопа");
+  } finally {
+    plugin.onunload();
+    await fsp.rm(vault, { recursive: true, force: true });
+  }
+});
+
+test("main.js: журнал синка в файле каталога плагина переживает перезапуск", async () => {
+  const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-log-"));
+  try {
+    await fsp.writeFile(join(vault, "a.md"), "# a\n");
+    const plugin = await loadPlugin(vault, server.token("log", "stub"));
+    plugin.runner?.send({ type: "syncNow" });
+    await plugin.runner?.idle();
+    plugin.onunload();
+    const file = join(vault, ".obsidian/plugins/selfsync/sync.log");
+    for (let i = 0; i < 100; i++) {
+      if (await fsp.stat(file).then(() => true, () => false)) break;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const text = await fsp.readFile(file, "utf8");
+    assert.match(text, /synced/);
+    // Новый запуск подхватывает прежние строки.
+    const again = await loadPlugin(vault, server.token("log", "stub"));
+    const log = (again as unknown as { log: { load(): Promise<void>; tail(): string[] } }).log;
+    await log.load();
+    assert.ok(log.tail().some((l) => l.includes("synced")), log.tail().join("\n"));
+    again.onunload();
+  } finally {
+    await fsp.rm(vault, { recursive: true, force: true });
+  }
+});

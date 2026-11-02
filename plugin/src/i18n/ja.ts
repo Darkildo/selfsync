@@ -7,6 +7,7 @@ const ja: Dict = {
   "status.syncing": "同期中",
   "status.offline": "サーバーに接続できません",
   "status.error": "同期エラー",
+  "status.restarting": "同期エラー、再起動中…",
   "status.needPassword": "パスワードが必要です",
   "status.blocked": "同期が停止しました",
   "status.rateLimited": "試行回数が多すぎます。次の試行は {time}",
@@ -50,6 +51,7 @@ const ja: Dict = {
   "notice.indexReset": "同期インデックスが破損していました。安全な完全照合を開始しました",
   "notice.encryptionMismatch": "保管庫はここでは暗号化されていますが、サーバー上では暗号化されていません。同期を停止しました",
   "notice.error": "同期: {message}",
+  "notice.engineStopped": "selfsync: 同期エンジンが {n} 回続けて失敗したため停止しました。もう一度試すには「{cmd}」を実行してください。詳細は同期ログにあります。",
 
   "settings.connection": "接続",
   "settings.connectedTo": "保管庫「{vault}」に「{device}」として接続しています",

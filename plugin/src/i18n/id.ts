@@ -7,6 +7,7 @@ const id: Dict = {
   "status.syncing": "Menyinkronkan",
   "status.offline": "Server tidak dapat dijangkau",
   "status.error": "Kesalahan sinkronisasi",
+  "status.restarting": "Kesalahan sinkronisasi, memulai ulang…",
   "status.needPassword": "Kata sandi diperlukan",
   "status.blocked": "Sinkronisasi dihentikan",
   "status.rateLimited": "Terlalu banyak percobaan, berikutnya pada {time}",
@@ -50,6 +51,7 @@ const id: Dict = {
   "notice.indexReset": "Indeks sinkronisasi rusak — rekonsiliasi penuh yang aman dimulai",
   "notice.encryptionMismatch": "Brankas terenkripsi di sini tetapi tidak di server — sinkronisasi dihentikan",
   "notice.error": "Sinkronisasi: {message}",
+  "notice.engineStopped": "selfsync: mesin sinkronisasi gagal {n} kali berturut-turut dan dihentikan. Jalankan “{cmd}” untuk mencoba lagi; detailnya ada di log sinkronisasi.",
 
   "settings.connection": "Koneksi",
   "settings.connectedTo": "Terhubung ke brankas “{vault}” sebagai “{device}”",

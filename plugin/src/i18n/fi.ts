@@ -7,6 +7,7 @@ const fi: Dict = {
   "status.syncing": "Synkronoidaan",
   "status.offline": "Palvelin ei ole tavoitettavissa",
   "status.error": "Synkronointivirhe",
+  "status.restarting": "Synkronointivirhe, käynnistetään uudelleen…",
   "status.needPassword": "Salasana tarvitaan",
   "status.blocked": "Synkronointi pysäytetty",
   "status.rateLimited": "Liian monta yritystä, seuraava klo {time}",
@@ -50,6 +51,7 @@ const fi: Dict = {
   "notice.indexReset": "Synkronointihakemisto oli vioittunut — turvallinen täysi täsmäytys aloitettu",
   "notice.encryptionMismatch": "Holvi on salattu täällä mutta ei palvelimella — synkronointi pysäytetty",
   "notice.error": "Synkronointi: {message}",
+  "notice.engineStopped": "selfsync: synkronointimoottori kaatui {n} kertaa peräkkäin ja pysäytettiin. Yritä uudelleen suorittamalla ”{cmd}”; tiedot ovat synkronointilokissa.",
 
   "settings.connection": "Yhteys",
   "settings.connectedTo": "Yhdistetty holviin ”{vault}” laitteena ”{device}”",

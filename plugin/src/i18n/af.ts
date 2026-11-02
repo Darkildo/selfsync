@@ -7,6 +7,7 @@ const af: Dict = {
   "status.syncing": "Sinkroniseer tans",
   "status.offline": "Bediener onbereikbaar",
   "status.error": "Sinkroniseringsfout",
+  "status.restarting": "Sinkroniseringsfout, herbegin…",
   "status.needPassword": "Wagwoord nodig",
   "status.blocked": "Sinkronisering gestop",
   "status.rateLimited": "Te veel pogings, volgende om {time}",
@@ -50,6 +51,7 @@ const af: Dict = {
   "notice.indexReset": "Die sinkroniseringsindeks was beskadig — 'n veilige volledige versoening het begin",
   "notice.encryptionMismatch": "Die kluis is hier geënkripteer maar nie op die bediener nie — sinkronisering gestop",
   "notice.error": "Sinkronisering: {message}",
+  "notice.engineStopped": "selfsync: die sinkroniseringsenjin het {n} keer na mekaar misluk en is gestop. Voer “{cmd}” uit om weer te probeer; besonderhede is in die sinkroniseringslog.",
 
   "settings.connection": "Verbinding",
   "settings.connectedTo": "Gekoppel aan kluis “{vault}” as “{device}”",

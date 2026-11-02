@@ -7,6 +7,7 @@ const la: Dict = {
   "status.syncing": "Synchronizatur",
   "status.offline": "Servitrum non attingitur",
   "status.error": "Error synchronizationis",
+  "status.restarting": "Error synchronizationis, iterum incipitur…",
   "status.needPassword": "Tessera requiritur",
   "status.blocked": "Synchronizatio intermissa",
   "status.rateLimited": "Nimis multa conata, proximum hora {time}",
@@ -50,6 +51,7 @@ const la: Dict = {
   "notice.indexReset": "Index synchronizationis corruptus erat — tuta plena reconciliatio incepit",
   "notice.encryptionMismatch": "Arca hic cryptata est sed non in servitro — synchronizatio intermissa",
   "notice.error": "Synchronizatio: {message}",
+  "notice.engineStopped": "selfsync: machina synchronizationis {n} vicibus continuis defecit et sistitur. Exsequere “{cmd}” ut iterum coneris; singula in actis synchronizationis sunt.",
 
   "settings.connection": "Conexio",
   "settings.connectedTo": "Conexum cum arca “{vault}” ut “{device}”",

@@ -7,6 +7,7 @@ const bg: Dict = {
   "status.syncing": "Синхронизиране",
   "status.offline": "Сървърът е недостъпен",
   "status.error": "Грешка при синхронизиране",
+  "status.restarting": "Грешка при синхронизиране, рестартиране…",
   "status.needPassword": "Нужна е парола",
   "status.blocked": "Синхронизирането е спряно",
   "status.rateLimited": "Твърде много опити, следващият в {time}",
@@ -50,6 +51,7 @@ const bg: Dict = {
   "notice.indexReset": "Индексът на синхронизирането беше повреден — започна безопасно пълно съгласуване",
   "notice.encryptionMismatch": "Хранилището е шифровано тук, но не и на сървъра — синхронизирането е спряно",
   "notice.error": "Синхронизиране: {message}",
+  "notice.engineStopped": "selfsync: ядрото за синхронизиране се срина {n} пъти поред и е спряно. Изпълнете „{cmd}“, за да опитате отново; подробности има в дневника на синхронизирането.",
 
   "settings.connection": "Връзка",
   "settings.connectedTo": "Свързано с хранилище „{vault}“ като „{device}“",

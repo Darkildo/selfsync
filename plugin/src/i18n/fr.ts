@@ -7,6 +7,7 @@ const fr: Dict = {
   "status.syncing": "Synchronisation",
   "status.offline": "Serveur injoignable",
   "status.error": "Erreur de synchronisation",
+  "status.restarting": "Erreur de synchronisation, redémarrage…",
   "status.needPassword": "Mot de passe requis",
   "status.blocked": "Synchronisation arrêtée",
   "status.rateLimited": "Trop de tentatives, prochaine à {time}",
@@ -50,6 +51,7 @@ const fr: Dict = {
   "notice.indexReset": "L'index de synchronisation était endommagé — un rapprochement complet sûr a commencé",
   "notice.encryptionMismatch": "Le coffre est chiffré ici mais pas sur le serveur — synchronisation arrêtée",
   "notice.error": "Synchronisation : {message}",
+  "notice.engineStopped": "selfsync : le moteur de synchronisation a échoué {n} fois de suite et a été arrêté. Lancez « {cmd} » pour réessayer ; les détails sont dans le journal de synchronisation.",
 
   "settings.connection": "Connexion",
   "settings.connectedTo": "Connecté au coffre « {vault} » en tant que « {device} »",

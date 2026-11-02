@@ -7,6 +7,7 @@ const tl: Dict = {
   "status.syncing": "Nagsi-sync",
   "status.offline": "Hindi maabot ang server",
   "status.error": "Error sa pag-sync",
+  "status.restarting": "Error sa pag-sync, nagre-restart…",
   "status.needPassword": "Kailangan ang password",
   "status.blocked": "Itinigil ang pag-sync",
   "status.rateLimited": "Masyadong maraming pagsubok, ang susunod ay sa {time}",
@@ -50,6 +51,7 @@ const tl: Dict = {
   "notice.indexReset": "Nasira ang index ng pag-sync — nagsimula ang isang ligtas na buong pagtutugma",
   "notice.encryptionMismatch": "Naka-encrypt ang vault dito pero hindi sa server — itinigil ang pag-sync",
   "notice.error": "Pag-sync: {message}",
+  "notice.engineStopped": "selfsync: pumalya ang sync engine nang {n} beses nang sunod-sunod at itinigil na. Patakbuhin ang “{cmd}” para subukang muli; nasa log ng pag-sync ang mga detalye.",
 
   "settings.connection": "Koneksyon",
   "settings.connectedTo": "Nakakonekta sa vault na “{vault}” bilang “{device}”",

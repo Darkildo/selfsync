@@ -7,6 +7,7 @@ const ar: Dict = {
   "status.syncing": "جارٍ المزامنة",
   "status.offline": "تعذّر الوصول إلى الخادم",
   "status.error": "خطأ في المزامنة",
+  "status.restarting": "خطأ في المزامنة، جارٍ إعادة التشغيل…",
   "status.needPassword": "كلمة المرور مطلوبة",
   "status.blocked": "توقفت المزامنة",
   "status.rateLimited": "محاولات كثيرة جدًا، المحاولة التالية في {time}",
@@ -50,6 +51,7 @@ const ar: Dict = {
   "notice.indexReset": "تلف فهرس المزامنة — بدأت مطابقة كاملة آمنة",
   "notice.encryptionMismatch": "الخزنة مشفّرة هنا لكنها غير مشفّرة على الخادم — توقفت المزامنة",
   "notice.error": "المزامنة: {message}",
+  "notice.engineStopped": "selfsync: فشل محرك المزامنة {n} مرات متتالية وتم إيقافه. شغّل \"{cmd}\" للمحاولة مجددًا؛ التفاصيل في سجل المزامنة.",
 
   "settings.connection": "الاتصال",
   "settings.connectedTo": "متصل بالخزنة «{vault}» باسم «{device}»",

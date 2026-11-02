@@ -7,6 +7,7 @@ const eu: Dict = {
   "status.syncing": "Sinkronizatzen",
   "status.offline": "Zerbitzaria ez dago eskuragarri",
   "status.error": "Sinkronizazio-errorea",
+  "status.restarting": "Sinkronizazio-errorea, berrabiarazten…",
   "status.needPassword": "Pasahitza behar da",
   "status.blocked": "Sinkronizazioa geldituta",
   "status.rateLimited": "Saiakera gehiegi, hurrengoa: {time}",
@@ -50,6 +51,7 @@ const eu: Dict = {
   "notice.indexReset": "Sinkronizazio-indizea hondatuta zegoen — bateratze oso eta seguru bat hasi da",
   "notice.encryptionMismatch": "Kutxa-gordailua hemen zifratuta dago, baina ez zerbitzarian — sinkronizazioa geldituta",
   "notice.error": "Sinkronizazioa: {message}",
+  "notice.engineStopped": "selfsync: sinkronizazio-motorrak {n} aldiz jarraian huts egin du eta gelditu egin da. Exekutatu «{cmd}» berriro saiatzeko; xehetasunak sinkronizazio-erregistroan daude.",
 
   "settings.connection": "Konexioa",
   "settings.connectedTo": "«{vault}» kutxa-gordailura konektatuta, «{device}» gisa",

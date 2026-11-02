@@ -7,6 +7,7 @@ const hu: Dict = {
   "status.syncing": "Szinkronizálás",
   "status.offline": "A szerver nem érhető el",
   "status.error": "Szinkronizálási hiba",
+  "status.restarting": "Szinkronizálási hiba, újraindítás…",
   "status.needPassword": "Jelszó szükséges",
   "status.blocked": "Szinkronizálás leállítva",
   "status.rateLimited": "Túl sok próbálkozás, a következő: {time}",
@@ -50,6 +51,7 @@ const hu: Dict = {
   "notice.indexReset": "A szinkronizálási index megsérült — biztonságos teljes egyeztetés indult",
   "notice.encryptionMismatch": "A széf itt titkosított, a szerveren viszont nem — szinkronizálás leállítva",
   "notice.error": "Szinkronizálás: {message}",
+  "notice.engineStopped": "selfsync: a szinkronizáló motor egymás után {n} alkalommal hibával leállt, ezért megállítottuk. Az újrapróbáláshoz futtassa a következőt: „{cmd}”; a részletek a szinkronizálási naplóban vannak.",
 
   "settings.connection": "Kapcsolat",
   "settings.connectedTo": "Csatlakoztatva a(z) „{vault}” széfhez „{device}” néven",

@@ -7,6 +7,7 @@ const uz: Dict = {
   "status.syncing": "Sinxronlanmoqda",
   "status.offline": "Serverga ulanib boʻlmayapti",
   "status.error": "Sinxronizatsiya xatosi",
+  "status.restarting": "Sinxronizatsiya xatosi, qayta ishga tushirilmoqda…",
   "status.needPassword": "Parol kerak",
   "status.blocked": "Sinxronizatsiya toʻxtatildi",
   "status.rateLimited": "Urinishlar juda koʻp, keyingisi: {time}",
@@ -50,6 +51,7 @@ const uz: Dict = {
   "notice.indexReset": "Sinxronizatsiya indeksi shikastlangan edi — xavfsiz toʻliq solishtirish boshlandi",
   "notice.encryptionMismatch": "Ombor bu yerda shifrlangan, serverda esa yoʻq — sinxronizatsiya toʻxtatildi",
   "notice.error": "Sinxronizatsiya: {message}",
+  "notice.engineStopped": "selfsync: sinxronizatsiya dvigateli ketma-ket {n} marta ishdan chiqdi va toʻxtatildi. Qayta urinish uchun “{cmd}” buyrugʻini bajaring; tafsilotlar sinxronizatsiya jurnalida.",
 
   "settings.connection": "Ulanish",
   "settings.connectedTo": "“{vault}” omboriga “{device}” sifatida ulangan",

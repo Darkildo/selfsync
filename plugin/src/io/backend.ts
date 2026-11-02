@@ -75,3 +75,61 @@ export function realName(entries: string[], wanted: string): string | undefined 
   const key = wanted.normalize("NFC").toLowerCase();
   return entries.find((e) => e.normalize("NFC").toLowerCase() === key);
 }
+
+/**
+ * Имена записей каталогов на короткое время: настоящее имя файла (регистр) без
+ * чтения каталога на каждый stat — иначе скачивание N файлов в одну папку читало
+ * бы её 3–4·N раз. Свои изменения вносятся сразу; чужие (правки вне плагина) видны
+ * не позже чем через `ttlMs`.
+ */
+export class DirNames {
+  private dirs = new Map<string, { names: string[]; at: number }>();
+
+  constructor(
+    private ttlMs = 2000,
+    private now: () => number = Date.now,
+  ) {}
+
+  async get(dir: string, load: () => Promise<string[]>): Promise<string[]> {
+    const c = this.dirs.get(dir);
+    if (c && this.now() - c.at < this.ttlMs) return c.names;
+    const names = await load();
+    this.put(dir, names);
+    return names;
+  }
+
+  /** Каталог только что прочитан целиком (обход vault'а). */
+  put(dir: string, names: string[]): void {
+    this.dirs.set(dir, { names, at: this.now() });
+  }
+
+  /** Появилась запись с ровно этим именем (запись, переименование, mkdir) — вместе
+   *  с папками на пути к ней, которые могли быть созданы заодно. */
+  added(path: string): void {
+    const parts = path.split("/");
+    for (let i = 1; i <= parts.length; i++) this.addOne(parts.slice(0, i).join("/"));
+  }
+
+  private addOne(path: string): void {
+    const dir = parentOf(path);
+    const c = this.dirs.get(dir);
+    if (!c) return;
+    const name = nameOf(path);
+    if (c.names.includes(name)) return;
+    // Была запись, отличная только регистром: какое имя осталось на диске, решает
+    // ФС — перечитать.
+    if (realName(c.names, name) !== undefined) this.dirs.delete(dir);
+    else c.names = [...c.names, name];
+  }
+
+  /** Запись удалена (вместе с содержимым, если это папка). */
+  removed(path: string): void {
+    const c = this.dirs.get(parentOf(path));
+    if (c) c.names = c.names.filter((n) => n !== nameOf(path));
+    for (const d of [...this.dirs.keys()]) if (d === path || d.startsWith(`${path}/`)) this.dirs.delete(d);
+  }
+
+  clear(): void {
+    this.dirs.clear();
+  }
+}

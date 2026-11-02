@@ -7,6 +7,7 @@ const sq: Dict = {
   "status.syncing": "Po sinkronizohet",
   "status.offline": "Serveri nuk arrihet",
   "status.error": "Gabim sinkronizimi",
+  "status.restarting": "Gabim sinkronizimi, po riniset…",
   "status.needPassword": "Duhet fjalëkalimi",
   "status.blocked": "Sinkronizimi u ndal",
   "status.rateLimited": "Shumë përpjekje, tjetra në {time}",
@@ -50,6 +51,7 @@ const sq: Dict = {
   "notice.indexReset": "Indeksi i sinkronizimit ishte i dëmtuar — nisi një rakordim i plotë i sigurt",
   "notice.encryptionMismatch": "Kasaforta është e enkriptuar këtu, por jo në server — sinkronizimi u ndal",
   "notice.error": "Sinkronizimi: {message}",
+  "notice.engineStopped": "selfsync: motori i sinkronizimit dështoi {n} herë radhazi dhe u ndal. Ekzekutoni «{cmd}» për të provuar përsëri; hollësitë janë në regjistrin e sinkronizimit.",
 
   "settings.connection": "Lidhja",
   "settings.connectedTo": "I lidhur me kasafortën «{vault}» si «{device}»",

@@ -7,6 +7,7 @@ const lt: Dict = {
   "status.syncing": "Sinchronizuojama",
   "status.offline": "Serveris nepasiekiamas",
   "status.error": "Sinchronizavimo klaida",
+  "status.restarting": "Sinchronizavimo klaida, paleidžiama iš naujo…",
   "status.needPassword": "Reikia slaptažodžio",
   "status.blocked": "Sinchronizavimas sustabdytas",
   "status.rateLimited": "Per daug bandymų, kitas {time}",
@@ -50,6 +51,7 @@ const lt: Dict = {
   "notice.indexReset": "Sinchronizavimo indeksas buvo sugadintas — pradėtas saugus visiškas suderinimas",
   "notice.encryptionMismatch": "Saugykla čia užšifruota, o serveryje — ne; sinchronizavimas sustabdytas",
   "notice.error": "Sinchronizavimas: {message}",
+  "notice.engineStopped": "selfsync: sinchronizavimo variklis {n} kartus iš eilės sutriko ir buvo sustabdytas. Paleiskite „{cmd}“, kad bandytumėte dar kartą; išsami informacija – sinchronizavimo žurnale.",
 
   "settings.connection": "Ryšys",
   "settings.connectedTo": "Prisijungta prie saugyklos „{vault}“ kaip „{device}“",

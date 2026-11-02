@@ -3424,3 +3424,77 @@ fn long_poll_survives_network_error() {
         w.clients[0].wait_requests
     );
 }
+
+/// Возврат на экран: на мобильном (по умолчанию) — полный обход всегда, на десктопе
+/// (`visible_scan_min_ms`) — не чаще заданного.
+#[test]
+fn visible_full_scan_respects_min_interval() {
+    let mut w = World::new(quiet(1));
+    base_note(&mut w, 0, "a.md");
+    w.sync(0);
+    // По умолчанию каждый Visible — полный обход.
+    let before = w.clients[0].full_scans;
+    w.now += 1_000;
+    w.deliver(0, Event::Visible);
+    w.drain(0);
+    assert_eq!(
+        w.clients[0].full_scans,
+        before + 1,
+        "мобильный: обход при каждом возврате"
+    );
+
+    w.set_visible_scan_min(0, 600_000);
+    w.sync(0);
+    let before = w.clients[0].full_scans;
+    w.now += 60_000;
+    w.deliver(0, Event::Visible);
+    w.drain(0);
+    assert_eq!(
+        w.clients[0].full_scans, before,
+        "десктоп: недавний обход не повторяется"
+    );
+    // Правки по событиям при этом доходят.
+    edit_line(&mut w, 0, "a.md", 1);
+    w.sync(0);
+    w.now += 700_000;
+    w.deliver(0, Event::Visible);
+    w.drain(0);
+    assert!(
+        w.clients[0].full_scans > before,
+        "давний обход — снова полный"
+    );
+    finish(&mut w);
+}
+
+/// Порог «сервер старее плагина» задаёт клиент: надстройка со своим сервером может
+/// предупреждение отключить (`None`).
+#[test]
+fn diagnose_server_minor_warn_policy() {
+    use selfsync_core::engine::{DiagLevel, UiCommand, UiResult};
+    let mut w = World::new(quiet(1));
+    base_note(&mut w, 0, "a.md");
+    w.sync(0);
+    let version = |w: &mut World, req: u64| match ui_result(w, 0, req, UiCommand::Diagnose) {
+        UiResult::Diagnosis { checks } => checks
+            .into_iter()
+            .find(|c| c.step == "version")
+            .map(|c| (c.level, c.code))
+            .expect("шаг version"),
+        r => panic!("{r:?}"),
+    };
+    // По умолчанию порог — своя минорная версия: сервер той же версии в порядке.
+    assert_eq!(version(&mut w, 1), (DiagLevel::Ok, "ok".to_owned()));
+    let minor = selfsync_proto::PROTO_MINOR;
+    w.clients[0].cfg.server_minor_warn = Some(minor + 1);
+    let config = w.clients[0].cfg.clone();
+    w.deliver(0, Event::Configure { config });
+    assert_eq!(
+        version(&mut w, 2),
+        (DiagLevel::Warn, "server_old".to_owned())
+    );
+    w.clients[0].cfg.server_minor_warn = None;
+    let config = w.clients[0].cfg.clone();
+    w.deliver(0, Event::Configure { config });
+    assert_eq!(version(&mut w, 3), (DiagLevel::Ok, "ok".to_owned()));
+    finish(&mut w);
+}

@@ -7,6 +7,7 @@ const si: Dict = {
   "status.syncing": "සමමුහුර්ත කරමින්",
   "status.offline": "සේවාදායකයට ළඟා විය නොහැක",
   "status.error": "සමමුහුර්ත කිරීමේ දෝෂයක්",
+  "status.restarting": "සමමුහුර්ත කිරීමේ දෝෂයක්, යළි ආරම්භ වෙමින්…",
   "status.needPassword": "මුරපදය අවශ්‍යයි",
   "status.blocked": "සමමුහුර්ත කිරීම නැවතිණි",
   "status.rateLimited": "උත්සාහයන් වැඩියි, ඊළඟ උත්සාහය {time} ට",
@@ -50,6 +51,7 @@ const si: Dict = {
   "notice.indexReset": "සමමුහුර්ත දර්ශකය හානි වී තිබිණි — ආරක්ෂිත සම්පූර්ණ සැසඳීමක් ආරම්භ විය",
   "notice.encryptionMismatch": "vault එක මෙහි සංකේතනය කර ඇති නමුත් සේවාදායකයේ නැත — සමමුහුර්ත කිරීම නැවතිණි",
   "notice.error": "සමමුහුර්ත කිරීම: {message}",
+  "notice.engineStopped": "selfsync: සමමුහුර්ත එන්ජිම අඛණ්ඩව {n} වතාවක් අසාර්ථක වී නතර කරන ලදී. නැවත උත්සාහ කිරීමට “{cmd}” ධාවනය කරන්න; විස්තර සමමුහුර්ත ලොගයේ ඇත.",
 
   "settings.connection": "සම්බන්ධතාවය",
   "settings.connectedTo": "“{vault}” vault එකට “{device}” ලෙස සම්බන්ධයි",

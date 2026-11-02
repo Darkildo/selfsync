@@ -3,7 +3,7 @@
 //! итога и подробность; тексты для людей — в плагине и CLI.
 
 use prost::Message;
-use selfsync_proto::{HEADER_PROTO, PROTO_MINOR, PROTO_VERSION, parse_proto};
+use selfsync_proto::{HEADER_PROTO, PROTO_VERSION, parse_proto};
 
 use super::api;
 use super::ctx::{Ctx, SyncError};
@@ -184,7 +184,10 @@ async fn server_steps(cx: &Ctx, out: &mut Vec<DiagCheck>) -> bool {
             "proto_major",
             format!("{major}.{minor}"),
         )
-    } else if minor < PROTO_MINOR {
+    } else if cx
+        .with(|s| s.cfg.server_minor_warn)
+        .is_some_and(|warn| minor < warn)
+    {
         check("version", DiagLevel::Warn, "server_old", version)
     } else {
         check("version", DiagLevel::Ok, "ok", version)

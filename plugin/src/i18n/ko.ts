@@ -7,6 +7,7 @@ const ko: Dict = {
   "status.syncing": "동기화 중",
   "status.offline": "서버에 연결할 수 없음",
   "status.error": "동기화 오류",
+  "status.restarting": "동기화 오류, 다시 시작하는 중…",
   "status.needPassword": "비밀번호 필요",
   "status.blocked": "동기화 중지됨",
   "status.rateLimited": "시도 횟수가 너무 많습니다. 다음 시도: {time}",
@@ -50,6 +51,7 @@ const ko: Dict = {
   "notice.indexReset": "동기화 색인이 손상되었습니다. 안전한 전체 대조를 시작했습니다",
   "notice.encryptionMismatch": "보관함이 여기에서는 암호화되어 있지만 서버에서는 암호화되어 있지 않습니다. 동기화를 중지했습니다",
   "notice.error": "동기화: {message}",
+  "notice.engineStopped": "selfsync: 동기화 엔진이 {n}번 연속 실패하여 중지되었습니다. 다시 시도하려면 “{cmd}”을(를) 실행하세요. 자세한 내용은 동기화 기록에 있습니다.",
 
   "settings.connection": "연결",
   "settings.connectedTo": "보관함 “{vault}”에 “{device}”(으)로 연결됨",

@@ -157,7 +157,12 @@ impl Engine {
             }),
             Event::Visible => cx.with_mut(|s| {
                 s.visible = true;
-                s.need_full_scan = true;
+                let since = now - s.last_full_scan;
+                if s.last_full_scan == 0
+                    || since >= i64::try_from(s.cfg.visible_scan_min_ms).unwrap_or(i64::MAX)
+                {
+                    s.need_full_scan = true;
+                }
                 // После сна сеть могла вернуться: long-poll пробуем сразу.
                 s.reset_wait();
                 s.sync_due = Some(now);

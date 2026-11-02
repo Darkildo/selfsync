@@ -7,6 +7,7 @@ const de: Dict = {
   "status.syncing": "Synchronisierung läuft",
   "status.offline": "Server nicht erreichbar",
   "status.error": "Synchronisierungsfehler",
+  "status.restarting": "Synchronisierungsfehler, Neustart…",
   "status.needPassword": "Passwort erforderlich",
   "status.blocked": "Synchronisierung gestoppt",
   "status.rateLimited": "Zu viele Versuche, nächster um {time}",
@@ -50,6 +51,7 @@ const de: Dict = {
   "notice.indexReset": "Der Synchronisierungsindex war beschädigt — ein sicherer vollständiger Abgleich wurde gestartet",
   "notice.encryptionMismatch": "Der Vault ist hier verschlüsselt, auf dem Server aber nicht — Synchronisierung gestoppt",
   "notice.error": "Synchronisierung: {message}",
+  "notice.engineStopped": "selfsync: Die Synchronisierung ist {n}-mal hintereinander abgestürzt und wurde angehalten. Führen Sie „{cmd}“ aus, um es erneut zu versuchen; Details stehen im Synchronisierungsprotokoll.",
 
   "settings.connection": "Verbindung",
   "settings.connectedTo": "Verbunden mit dem Vault „{vault}“ als „{device}“",

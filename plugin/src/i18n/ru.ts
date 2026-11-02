@@ -7,6 +7,7 @@ const ru: Record<Key, string> = {
   "status.syncing": "Синхронизация",
   "status.offline": "Сервер недоступен",
   "status.error": "Ошибка синхронизации",
+  "status.restarting": "Ошибка синхронизации, перезапуск…",
   "status.needPassword": "Нужен пароль",
   "status.blocked": "Синхронизация остановлена",
   "status.rateLimited": "Слишком много попыток, следующая в {time}",
@@ -50,6 +51,7 @@ const ru: Record<Key, string> = {
   "notice.indexReset": "Индекс синхронизации повреждён — начата безопасная полная сверка",
   "notice.encryptionMismatch": "Здесь vault зашифрован, а на сервере нет — синхронизация остановлена",
   "notice.error": "Синхронизация: {message}",
+  "notice.engineStopped": "selfsync: ядро синхронизации {n} раза подряд завершилось с ошибкой и остановлено. Выполните «{cmd}», чтобы попробовать снова; подробности — в журнале синхронизации.",
 
   "settings.connection": "Подключение",
   "settings.connectedTo": "Подключено к vault «{vault}» как «{device}»",

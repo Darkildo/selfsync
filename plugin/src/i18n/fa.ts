@@ -7,6 +7,7 @@ const fa: Dict = {
   "status.syncing": "در حال همگام‌سازی",
   "status.offline": "سرور در دسترس نیست",
   "status.error": "خطای همگام‌سازی",
+  "status.restarting": "خطای همگام‌سازی، در حال راه‌اندازی دوباره…",
   "status.needPassword": "گذرواژه لازم است",
   "status.blocked": "همگام‌سازی متوقف شد",
   "status.rateLimited": "تلاش‌های بیش از حد، تلاش بعدی در {time}",
@@ -50,6 +51,7 @@ const fa: Dict = {
   "notice.indexReset": "فهرست همگام‌سازی آسیب دیده بود — یک تطبیق کامل و امن آغاز شد",
   "notice.encryptionMismatch": "خزانه اینجا رمزگذاری شده اما در سرور نه — همگام‌سازی متوقف شد",
   "notice.error": "همگام‌سازی: {message}",
+  "notice.engineStopped": "selfsync: موتور همگام‌سازی {n} بار پشت سر هم از کار افتاد و متوقف شد. برای تلاش دوباره «{cmd}» را اجرا کنید؛ جزئیات در گزارش همگام‌سازی است.",
 
   "settings.connection": "اتصال",
   "settings.connectedTo": "به خزانه‌ی «{vault}» با نام «{device}» متصل است",

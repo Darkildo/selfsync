@@ -7,6 +7,7 @@ const ka: Dict = {
   "status.syncing": "მიმდინარეობს სინქრონიზაცია",
   "status.offline": "სერვერი მიუწვდომელია",
   "status.error": "სინქრონიზაციის შეცდომა",
+  "status.restarting": "სინქრონიზაციის შეცდომა, ხელახლა გაშვება…",
   "status.needPassword": "საჭიროა პაროლი",
   "status.blocked": "სინქრონიზაცია შეჩერებულია",
   "status.rateLimited": "ძალიან ბევრი მცდელობა, შემდეგი — {time}",
@@ -50,6 +51,7 @@ const ka: Dict = {
   "notice.indexReset": "სინქრონიზაციის ინდექსი დაზიანდა — დაიწყო უსაფრთხო სრული შეჯერება",
   "notice.encryptionMismatch": "საცავი აქ დაშიფრულია, სერვერზე კი არა — სინქრონიზაცია შეჩერდა",
   "notice.error": "სინქრონიზაცია: {message}",
+  "notice.engineStopped": "selfsync: სინქრონიზაციის ძრავა ზედიზედ {n}-ჯერ ჩავარდა და შეჩერდა. ხელახლა საცდელად გაუშვით „{cmd}“; დეტალები სინქრონიზაციის ჟურნალშია.",
 
   "settings.connection": "კავშირი",
   "settings.connectedTo": "დაკავშირებულია საცავთან „{vault}“ როგორც „{device}“",

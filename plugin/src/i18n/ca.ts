@@ -7,6 +7,7 @@ const ca: Dict = {
   "status.syncing": "Sincronitzant",
   "status.offline": "Servidor inaccessible",
   "status.error": "Error de sincronització",
+  "status.restarting": "Error de sincronització, s'està reiniciant…",
   "status.needPassword": "Cal la contrasenya",
   "status.blocked": "Sincronització aturada",
   "status.rateLimited": "Massa intents, el següent a les {time}",
@@ -50,6 +51,7 @@ const ca: Dict = {
   "notice.indexReset": "L'índex de sincronització estava malmès — s'ha iniciat una conciliació completa segura",
   "notice.encryptionMismatch": "L'arca està xifrada aquí però no al servidor — sincronització aturada",
   "notice.error": "Sincronització: {message}",
+  "notice.engineStopped": "selfsync: el motor de sincronització ha fallat {n} vegades seguides i s'ha aturat. Executa «{cmd}» per tornar-ho a provar; els detalls són al registre de sincronització.",
 
   "settings.connection": "Connexió",
   "settings.connectedTo": "Connectat a l'arca «{vault}» com a «{device}»",

@@ -7,6 +7,7 @@ const gl: Dict = {
   "status.syncing": "Sincronizando",
   "status.offline": "Servidor non accesible",
   "status.error": "Erro de sincronización",
+  "status.restarting": "Erro de sincronización, reiniciando…",
   "status.needPassword": "Cómpre o contrasinal",
   "status.blocked": "Sincronización detida",
   "status.rateLimited": "Demasiados intentos, o seguinte ás {time}",
@@ -50,6 +51,7 @@ const gl: Dict = {
   "notice.indexReset": "O índice de sincronización estaba danado — iniciouse unha conciliación completa segura",
   "notice.encryptionMismatch": "O almacén está cifrado aquí pero non no servidor — sincronización detida",
   "notice.error": "Sincronización: {message}",
+  "notice.engineStopped": "selfsync: o motor de sincronización fallou {n} veces seguidas e detívose. Executa «{cmd}» para tentalo de novo; os detalles están no rexistro de sincronización.",
 
   "settings.connection": "Conexión",
   "settings.connectedTo": "Conectado ao almacén «{vault}» como «{device}»",
