@@ -31,6 +31,9 @@ pub struct AppState(pub Arc<Inner>);
 pub struct Inner {
     pub config: Config,
     pub mode: Mode,
+    /// Держать соединения с БД открытыми (`db::pool`). Нет — у CGI: процесс живёт
+    /// один запрос.
+    keep_open: bool,
     server_db: OnceLock<Pool>,
     vaults: Mutex<HashMap<String, Arc<Vault>>>,
     pub activity: Activity,
@@ -94,6 +97,7 @@ impl AppState {
         let state = AppState(Arc::new(Inner {
             config,
             mode,
+            keep_open: mode != Mode::Cgi,
             server_db: OnceLock::new(),
             vaults: Mutex::new(HashMap::new()),
             activity: Activity::default(),
@@ -119,7 +123,7 @@ impl AppState {
         }
         std::fs::create_dir_all(&self.config.data_dir)?;
         let path = self.config.data_dir.join("server.db");
-        let pool = db::pool(&path, self.pool_size());
+        let pool = db::pool(&path, self.pool_size(), self.keep_open);
         {
             let mut c = pool.get()?;
             db::server::migrate_server(&mut c)?;
@@ -155,7 +159,12 @@ impl AppState {
         {
             return Ok(Arc::clone(v));
         }
-        let v = Arc::new(open_vault(&self.config, name, self.pool_size())?);
+        let v = Arc::new(open_vault_pool(
+            &self.config,
+            name,
+            self.pool_size(),
+            self.keep_open,
+        )?);
         let mut map = self
             .vaults
             .lock()
@@ -191,11 +200,21 @@ pub fn vault_dir(config: &Config, name: &str) -> PathBuf {
     config.data_dir.join("vaults").join(name)
 }
 
+/// Открыть vault для команды или проверки: соединения закрываются после простоя.
 pub fn open_vault(config: &Config, name: &str, pool_size: u32) -> anyhow::Result<Vault> {
+    open_vault_pool(config, name, pool_size, false)
+}
+
+fn open_vault_pool(
+    config: &Config,
+    name: &str,
+    pool_size: u32,
+    keep_open: bool,
+) -> anyhow::Result<Vault> {
     let dir = vault_dir(config, name);
     let blobs = BlobStore::new(&dir);
     blobs.ensure_dirs()?;
-    let pool = db::pool(&dir.join("meta.db"), pool_size);
+    let pool = db::pool(&dir.join("meta.db"), pool_size, keep_open);
     let seq = {
         let mut c = pool.get()?;
         db::vault::migrate_vault(&mut c)?;

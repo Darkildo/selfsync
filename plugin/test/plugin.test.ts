@@ -44,7 +44,15 @@ interface LoadedPlugin {
     command(c: unknown): Promise<{ type: string; code?: string }>;
   };
   statusBar: { text: string };
-  settingTab: { getSettingDefinitions(): { items: { render(s: unknown): unknown }[] }[]; refresh(): void; updates: number };
+  settingTab: {
+    getSettingDefinitions(): { items: { render(s: unknown): unknown }[] }[];
+    refresh(): void;
+    updates: number;
+    sections(): { heading: string; rows: { name: string; build(s: obsidian.Setting): unknown }[] }[];
+    open(): void;
+    close(): void;
+    rendered: obsidian.Setting[];
+  };
 }
 
 /** Кнопки и строки, которые рисует вкладка настроек (с ответами сервера). */
@@ -141,20 +149,32 @@ test("main.js: устройство только для чтения — ста�
   await fsp.rm(roVault, { recursive: true, force: true });
 });
 
-test("main.js: вкладка из getSettingDefinitions перерисовывается, пока её строки на экране", async () => {
+test("main.js: строки, изменившиеся при закрытых настройках, видны при открытии", async () => {
   const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-refresh-"));
   const plugin = await loadPlugin(vault, server.token("refresh", "laptop"));
   const tab = plugin.settingTab;
+  // Состояние, которое меняется, пока окно настроек закрыто.
+  let state = "старое";
+  const orig = tab.sections.bind(tab);
+  tab.sections = () => [...orig(), { heading: "probe", rows: [{ name: "probe", build: (s) => s.setName(`probe:${state}`) }] }];
+  tab.refresh();
+  await Promise.resolve();
+  state = "новое";
   const before = tab.updates;
   tab.refresh();
-  assert.equal(tab.updates, before, "вкладку не открывали — перерисовывать нечего");
-  const rows = await renderSettings(plugin);
   tab.refresh();
-  assert.equal(tab.updates, before + 1, "Obsidian 1.13+: containerEl не в DOM, но строки на экране");
-  for (const r of obsidian.settings) r.settingEl.isConnected = false;
   tab.refresh();
-  assert.equal(tab.updates, before + 1, "окно настроек закрыли");
-  assert.ok(rows.length > 0);
+  await Promise.resolve();
+  assert.equal(tab.updates, before + 1, "частые вызовы склеиваются в один пересчёт");
+  tab.open();
+  const names = tab.rendered.map((s) => s.name);
+  assert.ok(names.includes("probe:новое"), names.join(", "));
+  // Открытая вкладка перерисовывается сразу.
+  state = "ещё новее";
+  tab.refresh();
+  await Promise.resolve();
+  assert.ok(tab.rendered.some((s) => s.name === "probe:ещё новее"));
+  tab.close();
   plugin.onunload();
   await fsp.rm(vault, { recursive: true, force: true });
 });

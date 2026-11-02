@@ -129,20 +129,61 @@ export class Plugin {
   settingTab: unknown;
   addSettingTab(tab: unknown): void {
     this.settingTab = tab;
+    // Obsidian сразу берёт строки для поиска по настройкам.
+    (tab as { update?(): void }).update?.();
   }
   registerObsidianProtocolHandler(): void {}
 }
 
+interface StubDefinition {
+  items?: { render?(s: Setting): unknown }[];
+}
+
+/**
+ * Как в Obsidian 1.13+: update() пересчитывает getSettingDefinitions() и хранит
+ * результат, перерисовывает только открытую вкладку; открытие (renderTab) рисует
+ * сохранённое, getSettingDefinitions() не вызывая.
+ */
 export class PluginSettingTab {
   containerEl = new El();
   /** Сколько раз вкладка просила Obsidian перерисовать её. */
   updates = 0;
+  /** Сохранённый результат getSettingDefinitions(). */
+  settingItems: unknown[] = [];
+  /** Вкладка открыта в окне настроек. */
+  active = false;
+  /** Строки последней отрисовки. */
+  rendered: Setting[] = [];
   constructor(
     public app: unknown,
     public plugin: unknown,
   ) {}
+  getSettingDefinitions(): unknown[] {
+    return [];
+  }
   update(): void {
     this.updates++;
+    this.settingItems = this.getSettingDefinitions();
+    if (this.active) this.renderTab();
+  }
+  renderTab(): void {
+    this.rendered = [];
+    for (const g of this.settingItems as StubDefinition[]) {
+      for (const it of g.items ?? []) {
+        const s = new Setting();
+        this.rendered.push(s);
+        it.render?.(s);
+      }
+    }
+  }
+  /** Открыть вкладку (openTab в Obsidian). */
+  open(): void {
+    this.active = true;
+    this.renderTab();
+  }
+  /** Закрыть окно настроек. */
+  close(): void {
+    this.active = false;
   }
 }
 

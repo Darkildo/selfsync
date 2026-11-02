@@ -145,6 +145,9 @@ pub(crate) struct State {
     pub quota_hold: Option<QuotaHold>,
     /// Уведомление `QuotaFull` показано; сбрасывается, когда ждущих не осталось.
     pub quota_full_notified: bool,
+    /// Сервер ответил `hash_mismatch` на загрузку маленького блоба: путь → (хэш
+    /// блоба, сколько раз подряд). На `MISMATCH_LIMIT`-й раз версия отклоняется.
+    pub hash_mismatch: std::collections::HashMap<String, (Hash, u32)>,
     /// Уведомление `QuotaSoft` показано; сбрасывается, когда занято меньше порога.
     pub quota_soft_notified: bool,
     /// Что изменил текущий цикл: локальные пути, тронутые синком, и отправленные.
@@ -235,6 +238,7 @@ impl State {
             read_only_notified: false,
             storage_notified: false,
             quota_hold: None,
+            hash_mismatch: Default::default(),
             quota_full_notified: false,
             quota_soft_notified: false,
             pulled: BTreeSet::new(),

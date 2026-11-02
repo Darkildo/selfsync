@@ -287,11 +287,18 @@ async fn access(State(st): State<AppState>, req: Request, next: Next) -> Respons
     let ms = start.elapsed().as_secs_f64() * 1000.0;
     let device = resp.extensions().get::<DeviceTag>().map(|d| d.0);
     let status = resp.status().as_u16();
+    // Код отказа 4xx — в ту же строку: без него причину не восстановить по журналу.
+    let err = resp
+        .extensions()
+        .get::<crate::error::ErrorLog>()
+        .filter(|_| (400..500).contains(&status));
+    let code = err.map(|e| e.code);
+    let detail = err.and_then(|e| e.detail.as_deref());
     // Пути API не содержат имён файлов (они в теле), токены и пароли не логируются.
     if path == "/v1/health" || is_metrics {
         tracing::debug!(%method, %path, status, ms, "request");
     } else {
-        tracing::info!(%method, %path, status, ms, device, "request");
+        tracing::info!(%method, %path, status, ms, device, code, detail, "request");
     }
     // Отказы и ошибки — в счётчики `/metrics` (редкие события, запись в БД дешева).
     let event = match status {

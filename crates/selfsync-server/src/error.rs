@@ -14,6 +14,16 @@ pub struct ApiError {
     pub message: String,
     /// `Retry-After`, секунды (для 429).
     pub retry_after: Option<u64>,
+    /// Подробность только для журнала (клиенту не уходит): например, сколько байт
+    /// пришло при `hash_mismatch`.
+    pub detail: Option<String>,
+}
+
+/// Код ошибки ответа и подробность — для строки журнала запроса (`api::access`).
+#[derive(Clone, Debug)]
+pub struct ErrorLog {
+    pub code: &'static str,
+    pub detail: Option<String>,
 }
 
 impl ApiError {
@@ -23,6 +33,22 @@ impl ApiError {
             code,
             message: message.into(),
             retry_after: None,
+            detail: None,
+        }
+    }
+
+    /// Подробность для журнала запроса.
+    #[must_use]
+    pub fn log_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+
+    /// Расширение ответа для журнала запроса.
+    pub fn log(&self) -> ErrorLog {
+        ErrorLog {
+            code: self.code,
+            detail: self.detail.clone(),
         }
     }
 
@@ -108,6 +134,7 @@ impl From<tokio::task::JoinError> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        let log = self.log();
         let body = pb::Error {
             code: self.code.to_owned(),
             message: self.message,
@@ -127,8 +154,24 @@ impl IntoResponse for ApiError {
             resp.headers_mut()
                 .insert(header::RETRY_AFTER, HeaderValue::from(secs));
         }
+        resp.extensions_mut().insert(log);
         resp
     }
 }
 
 pub type ApiResult<T> = Result<T, ApiError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_code_and_detail_reach_the_request_log() {
+        let resp = ApiError::bad_request("hash_mismatch", "содержимое не совпадает с хэшем")
+            .log_detail("received=5")
+            .into_response();
+        let log = resp.extensions().get::<ErrorLog>().unwrap();
+        assert_eq!(log.code, "hash_mismatch");
+        assert_eq!(log.detail.as_deref(), Some("received=5"));
+    }
+}

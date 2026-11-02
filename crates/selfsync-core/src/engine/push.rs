@@ -20,6 +20,9 @@ use crate::path::{NameRules, VaultPath};
 
 /// Максимум операций в одном запросе.
 const OPS_BATCH: usize = 200;
+/// Сколько раз подряд сервер может не сойтись с хэшем одного блоба, прежде чем
+/// версия файла отклоняется до следующей правки.
+pub(crate) const MISMATCH_LIMIT: u32 = 3;
 /// Лимит байтов маленьких блобов в памяти за один батч.
 const BATCH_BYTES: u64 = 32 * 1024 * 1024;
 
@@ -198,6 +201,40 @@ fn hold_for_quota(cx: &Ctx, key: &str) {
             .keys
             .insert(key.to_owned());
     });
+}
+
+/// Сервер не сошёлся с хэшем маленького блоба (тело дошло не то): повторить в
+/// следующем раунде, остальные файлы отправить. `MISMATCH_LIMIT` раз подряд для той
+/// же версии — отклонить её до следующей правки и сказать пользователю. `true` —
+/// файл отклонён.
+fn note_hash_mismatch(cx: &Ctx, key: &str, hash: Hash, obs: &LocalObs) -> bool {
+    let count = cx.with_mut(|s| {
+        let e = s.hash_mismatch.entry(key.to_owned()).or_insert((hash, 0));
+        if e.0 != hash {
+            *e = (hash, 0);
+        }
+        e.1 += 1;
+        let n = e.1;
+        if n >= MISMATCH_LIMIT {
+            s.hash_mismatch.remove(key);
+            if let Some(f) = s.index.files.get_mut(key) {
+                f.rejected = Some(("hash_mismatch".into(), obs.plain));
+            }
+        }
+        n
+    });
+    cx.log(
+        LogLevel::Warn,
+        format!("{key}: сервер не сошёлся с хэшем блоба {hash} ({count}/{MISMATCH_LIMIT})"),
+    );
+    if count < MISMATCH_LIMIT {
+        return false;
+    }
+    cx.notify(Notice::Rejected {
+        path: key.to_owned(),
+        code: "hash_mismatch".into(),
+    });
+    true
 }
 
 /// Сервер не принял файл по размеру (лимит vault'а меньше лимита устройства):
@@ -408,8 +445,17 @@ async fn send_batch(cx: &Ctx, batch: Vec<Item>) -> SyncResult<()> {
                 upload_big(cx, key, Src::Vault(key), obs, b, keys.as_ref()).await
             };
             match res {
-                Ok(true) => {}
+                Ok(true) => {
+                    cx.with_mut(|s| s.hash_mismatch.remove(key));
+                }
                 Ok(false) => failed.push(key.clone()),
+                Err(SyncError::Http { code, .. }) if code == "hash_mismatch" => {
+                    if note_hash_mismatch(cx, key, b.hash, obs) {
+                        skipped.push(key.clone());
+                    } else {
+                        failed.push(key.clone());
+                    }
+                }
                 Err(SyncError::QuotaExceeded(m)) => {
                     cx.log(LogLevel::Warn, format!("{key}: не отправлен — {m}"));
                     hold_for_quota(cx, key);
