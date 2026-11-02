@@ -40,15 +40,19 @@ export class ConnectModal extends Modal {
     this.setTitle(t("connect.title"));
     const form = contentEl.createDiv();
     const status = contentEl.createDiv({ cls: "selfsync-handoff" });
-    new Setting(form).setName(t("connect.server")).addText((x) => x.setValue(this.server).onChange((v) => (this.server = v)));
-    new Setting(form).setName(t("connect.code")).addText((x) =>
+    new Setting(form).setName(t("connect.server")).addText((x) => {
+      x.inputEl.dir = "ltr";
+      x.setValue(this.server).onChange((v) => (this.server = v));
+    });
+    new Setting(form).setName(t("connect.code")).addText((x) => {
+      x.inputEl.dir = "ltr";
       x.setValue(this.code).onChange((v) => {
         this.code = v;
         // Код ввели заново — секрет из прежней ссылки к нему не относится.
         this.secret = undefined;
         this.check = undefined;
-      }),
-    );
+      });
+    });
     new Setting(form).setName(t("connect.device")).addText((x) => x.setValue(device).onChange((v) => (device = v)));
     new Setting(form)
       .addButton((b) => b.setButtonText(t("common.cancel")).onClick(() => this.close()))

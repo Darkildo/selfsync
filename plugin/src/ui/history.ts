@@ -4,7 +4,7 @@
 import { type App, Modal, Notice, Setting } from "obsidian";
 
 import { quotaMinor } from "../../pkg/selfsync_wasm.js";
-import { formatBytes, t } from "../i18n.ts";
+import { formatBytes, formatDateTime, t } from "../i18n.ts";
 import type SelfsyncPlugin from "../main.ts";
 import { confirm } from "./confirm.ts";
 
@@ -61,7 +61,7 @@ export class HistoryModal extends Modal {
     r.revisions.forEach((rev, i) => {
       const what = rev.deleted ? t("history.deleted") : rev.renamedFrom ? t("history.renamed", { from: rev.renamedFrom }) : formatBytes(rev.size);
       const s = new Setting(contentEl)
-        .setName(t("history.rev", { rev: rev.rev, when: new Date(rev.mtime || 0).toLocaleString() }))
+        .setName(t("history.rev", { rev: rev.rev, when: formatDateTime(rev.mtime || 0) }))
         .setDesc(`${what} · ${t("history.device", { id: rev.device })}${i === 0 ? ` · ${t("history.current")}` : ""}`);
       if (i > 0 && !rev.deleted) {
         s.addButton((b) =>
