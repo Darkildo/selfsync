@@ -305,3 +305,53 @@ test("main.js: подключение к другому vault'у — индек�
     await fsp.rm(vault, { recursive: true, force: true });
   }
 });
+
+test("main.js: два перезапуска подряд оставляют один живой движок", async () => {
+  const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-restart-"));
+  const plugin = await loadPlugin(vault, server.token("restart", "stub"));
+  const p = plugin as unknown as { start(): Promise<void>; runner?: unknown };
+  const made: { stopped: boolean }[] = [];
+  let current = p.runner;
+  Object.defineProperty(p, "runner", {
+    configurable: true,
+    get: () => current,
+    set: (r) => {
+      current = r;
+      if (r) made.push(r as { stopped: boolean });
+    },
+  });
+  try {
+    await Promise.all([p.start(), p.start()]);
+    assert.equal(made.length, 1, "устаревший запуск не создаёт движок");
+    assert.equal(made.filter((r) => !r.stopped).length, 1);
+  } finally {
+    plugin.onunload();
+    await fsp.rm(vault, { recursive: true, force: true });
+  }
+});
+
+test("main.js: индекс не читается — ошибка в строке состояния, а не тихий сбой", async () => {
+  const vault = await fsp.mkdtemp(join(tmpdir(), "selfsync-plugin-badindex-"));
+  // Каталог вместо файла: чтение падает не с ENOENT.
+  await fsp.mkdir(join(vault, ".obsidian/plugins/selfsync/index.bin"), { recursive: true });
+  const app = obsidian.stubApp(vault, { server: server.url, token: server.token("badindex", "stub"), deviceName: "stub" });
+  const require = Module.createRequire(import.meta.url);
+  const Plugin = (require(join(PLUGIN, "main.js")) as { default: new (a: unknown, m: unknown) => LoadedPlugin }).default;
+  const plugin = new Plugin(app, { id: "selfsync", dir: ".obsidian/plugins/selfsync" });
+  const unhandled: unknown[] = [];
+  const onUnhandled = (e: unknown): void => {
+    unhandled.push(e);
+  };
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    await plugin.onload();
+    for (let i = 0; i < 50 && !/Ошибка/.test(plugin.statusBar.text); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.match(plugin.statusBar.text, /Ошибка синхронизации/);
+    assert.equal(plugin.runner, undefined);
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+    plugin.onunload();
+    await fsp.rm(vault, { recursive: true, force: true });
+  }
+});

@@ -25,6 +25,10 @@ use crate::path::VaultPath;
 
 const PAGE: u32 = 1000;
 const BATCH: usize = 20_000;
+/// Скачанные файлы между сохранениями индекса в pull: не больше столько…
+const PULL_SAVE_EVERY: u32 = 50;
+/// …или столько времени.
+const PULL_SAVE_MS: i64 = 2000;
 
 struct Item {
     key: String,
@@ -283,14 +287,34 @@ async fn apply_batch(cx: &Ctx, entries: Vec<pb::Entry>, full_listing: bool) -> S
         }
         done += 1;
     }
+    // Индекс пишется пачками, а не после каждого файла: на первой синхронизации
+    // тысячи полных перезаписей с fsync. Файл, записанный после последнего
+    // сохранения, при сбое распознаётся заново по содержимому (как в s05).
+    let mut unsaved = 0u32;
+    let mut saved_at = cx.now();
     for it in renames.into_iter().chain(files) {
         if !unsupported_name(cx, &it) {
-            changed |= guard(cx, &it, apply_file(cx, &it).await)?;
+            match guard(cx, &it, apply_file(cx, &it).await) {
+                Ok(c) => changed |= c,
+                Err(e) => {
+                    // Скачанное до обрыва не терять.
+                    cx.save().await?;
+                    return Err(e);
+                }
+            }
         }
         done += 1;
+        unsaved += 1;
         if done.is_multiple_of(16) {
             cx.set_status(|st| st.done = done);
         }
+        if unsaved >= PULL_SAVE_EVERY || cx.now() - saved_at >= PULL_SAVE_MS {
+            cx.save().await?;
+            unsaved = 0;
+            saved_at = cx.now();
+        }
+    }
+    if unsaved > 0 {
         cx.save().await?;
     }
     for it in tombs {

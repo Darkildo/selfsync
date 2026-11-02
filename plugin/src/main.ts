@@ -126,6 +126,8 @@ export default class SelfsyncPlugin extends Plugin {
   }
 
   override onunload(): void {
+    // Запуск, который ещё читает индекс, не должен создать Runner после выгрузки.
+    this.generation++;
     this.runner?.stop();
     this.runner = undefined;
   }
@@ -232,17 +234,38 @@ export default class SelfsyncPlugin extends Plugin {
     return new Executor(this.backend(), new ObsidianHttp(requestUrl), { server, token });
   }
 
+  /** Номер последнего запуска: запуск, который пока читал индекс, успел устареть,
+   *  не должен оставить второй живой Runner. */
+  private generation = 0;
+  /** Синк не запустился (индекс не прочитан): строка состояния показывает ошибку. */
+  private startError = false;
+
   /** (Пере)запуск синка с текущими настройками. */
   async start(): Promise<void> {
+    const gen = ++this.generation;
     this.runner?.stop();
     this.runner = undefined;
     this.status = null;
+    this.startError = false;
     if (!this.settings.server || !this.settings.token) {
       this.renderStatus();
       return;
     }
     const exec = this.executor(this.settings.server, this.settings.token);
-    const index = await exec.loadIndex();
+    let index: Uint8Array | null;
+    try {
+      index = await exec.loadIndex();
+    } catch (e) {
+      if (gen !== this.generation) return;
+      const message = e instanceof Error ? e.message : String(e);
+      this.addLog("error", `индекс не прочитан: ${message}`);
+      new Notice(t("notice.error", { message }), 0);
+      this.startError = true;
+      this.renderStatus();
+      return;
+    }
+    // Пока читали индекс, запустили заново или выгрузили плагин.
+    if (gen !== this.generation) return;
     this.runner = new Runner(this.engineConfig(), index, exec, {
       status: (s) => {
         const wasEncrypted = this.status?.encrypted;
@@ -414,12 +437,18 @@ export default class SelfsyncPlugin extends Plugin {
     }).open();
   }
 
+  /** Иконка строки состояния перерисовывается, только когда меняется её вид. */
+  private statusKind: StatusKind | null = null;
+
   private renderStatus(): void {
     const s = this.status;
-    const kind: StatusKind = !s ? "none" : s.readOnly && s.state === "idle" ? "readOnly" : s.state;
-    setIcon(this.statusIconEl, statusIcon(kind));
-    this.statusEl.setAttribute("data-state", kind);
-    const parts = [stateText(s)];
+    const kind: StatusKind = this.startError ? "error" : !s ? "none" : s.readOnly && s.state === "idle" ? "readOnly" : s.state;
+    if (kind !== this.statusKind) {
+      this.statusKind = kind;
+      setIcon(this.statusIconEl, statusIcon(kind));
+      this.statusEl.setAttribute("data-state", kind);
+    }
+    const parts = [this.startError ? t("status.error") : stateText(s)];
     if (s?.state === "syncing" && s.total > 0) parts.push(`${s.done}/${s.total}`);
     else if (s && s.pending > 0) parts.push(t(s.readOnly ? "status.readOnlyPending" : "status.pending", { n: s.pending }));
     if (s && s.conflicts > 0) parts.push(t("status.conflicts", { n: s.conflicts }));

@@ -2,6 +2,17 @@
 
 Release notes for each version; earlier versions are described on the [releases page](https://github.com/Darkildo/selfsync/releases).
 
+## 0.6.2
+
+- **Core.** The sync index is written only when it changed. Before, every sync cycle rewrote it (with `fsync`) even when nothing happened — several writes a minute in idle time.
+- **Core.** While downloading, the index is saved every 50 files or 2 seconds and at the end, instead of after every file: the first sync of a large vault no longer rewrites the index thousands of times. A file written after the last save is recognised by its content after a crash, as before.
+- **Core, fix.** A network error in long-poll (`/v1/wait`, for example after a laptop wakes up) no longer turns long-poll off until restart: it is retried with a backoff (5 s up to 5 min), and coming back to the app retries it at once. Long-poll is still turned off when the server answers instantly (CGI).
+- **Plugin, mobile.** Reading a large file in 4 MB parts no longer reads the whole file from the device for every part: the file being read is kept until it is read to the end or anything is written.
+- **Plugin, fix.** Two restarts in a row (for example, a quick change of server) no longer leave two sync engines running.
+- **Plugin, fix.** If the sync index cannot be read (not missing, but unreadable), the plugin shows the error in a notice, the sync log and the status bar instead of failing silently.
+- **Plugin.** The status bar icon is redrawn only when the state changes.
+- Server and protocol are unchanged.
+
 ## 0.6.1
 
 - **Plugin, fix.** The settings tab no longer shows a stale state when opened. Obsidian 1.13+ keeps the rows from `getSettingDefinitions()` and draws the stored rows when the tab opens; the plugin now asks Obsidian to recompute them on every change, even with settings closed (calls in a row are merged into one). Before, a change made while settings were closed (for example, an account or status that finished loading) was not visible until something else redrew the tab.
