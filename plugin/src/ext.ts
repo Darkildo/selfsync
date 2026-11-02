@@ -6,6 +6,9 @@
 // Импорт из других модулей `plugin/src` надстройке не гарантирован — внутреннее
 // устройство меняется без предупреждения. CI selfsync собирает и тестирует
 // selfsync-cloud против текущего ядра (джоб `extension`).
+//
+// Модули без Obsidian (WASM, строки, lintDict) есть и отдельно — в ext-pure.ts:
+// их можно импортировать в Node, где пакета `obsidian` нет.
 
 export { default as SelfsyncPlugin, type KeyReceiver } from "./main.ts";
 export {
@@ -24,27 +27,10 @@ export type {
   UiCommand,
   UiResult,
 } from "./types.ts";
-export { initWasm, Runner } from "./engine.ts";
-export {
-  formatBytes,
-  formatDate,
-  formatDateTime,
-  formatTime,
-  language,
-  resolveLanguage,
-  setLanguage,
-  t,
-} from "./i18n.ts";
-export { type LintResult, lintDict } from "./i18n/lint.ts";
+export { Runner } from "./engine.ts";
+// Без Obsidian (WASM, строки, проверка словарей) — ext-pure.ts, здесь реэкспорт.
+export * from "./ext-pure.ts";
 export { confirm } from "./ui/confirm.ts";
 export { DiagnoseModal, hasProblems } from "./ui/diagnose.ts";
 export { qrSvg } from "./ui/join.ts";
 export { phraseError } from "./ui/recovery.ts";
-export {
-  argon2id,
-  passwordStrength,
-  phraseDecode,
-  phraseEncode,
-  protocolVersion,
-  qrModules,
-} from "../pkg/selfsync_wasm.js";

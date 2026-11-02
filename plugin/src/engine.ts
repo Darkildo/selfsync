@@ -3,14 +3,23 @@
 
 import { initSync, WasmEngine } from "../pkg/selfsync_wasm.js";
 import type { Executor } from "./executor.ts";
+import { inflateRaw } from "./inflate.ts";
 import type { Action, EngineConfig, EngineEvent, LogLevel, Notice, SyncStatus, UiCommand, UiResult } from "./types.ts";
 
 let wasmReady = false;
 
-/** Инициализация WASM из байтов модуля (в плагине они встроены в main.js). */
+/** Начало любого WASM-модуля: "\0asm". */
+function isWasm(b: Uint8Array): boolean {
+  return b[0] === 0 && b[1] === 0x61 && b[2] === 0x73 && b[3] === 0x6d;
+}
+
+/**
+ * Инициализация WASM из байтов модуля (в плагине они встроены в main.js). Байты —
+ * сам модуль или он же, сжатый deflate (так его кладёт сборка, src/build/pack.mjs).
+ */
 export function initWasm(bytes: Uint8Array): void {
   if (wasmReady) return;
-  initSync({ module: bytes });
+  initSync({ module: isWasm(bytes) ? bytes : inflateRaw(bytes, bytes.length * 3) });
   wasmReady = true;
 }
 

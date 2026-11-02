@@ -1,7 +1,7 @@
 {
   "id": "selfsync",
   "name": "Selfsync",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "minAppVersion": "1.13.0",
   "description": "Sync your vault through your own server, with no lost edits: automatic merges, conflict copies, deleted file recovery, file history and optional end-to-end encryption.",
   "author": "Darkildo",

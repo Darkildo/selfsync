@@ -9,15 +9,15 @@ export default defineConfig([
   {
     languageOptions: {
       parserOptions: {
-        projectService: { allowDefaultProject: ["eslint.config.mjs", "esbuild.config.mjs"] },
+        projectService: { allowDefaultProject: ["eslint.config.mjs", "esbuild.config.mjs", "src/build/*.mjs"] },
         tsconfigRootDir: import.meta.dirname,
       },
     },
   },
   // Сборка работает в Node, а не в Obsidian.
   {
-    files: ["*.mjs"],
-    languageOptions: { globals: { process: "readonly", console: "readonly" } },
+    files: ["*.mjs", "src/build/*.mjs"],
+    languageOptions: { globals: { process: "readonly", console: "readonly", Buffer: "readonly" } },
     rules: { "obsidianmd/no-nodejs-modules": "off", "no-restricted-globals": "off", "import/no-nodejs-modules": "off" },
   },
 ]);
