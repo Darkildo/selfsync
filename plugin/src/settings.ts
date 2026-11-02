@@ -4,7 +4,7 @@ import { type App, Notice, PluginSettingTab, Setting, type SettingDefinitionItem
 
 import { clientOlderThan, readOnlyMinor } from "../pkg/selfsync_wasm.js";
 import { buildRules, type ConfigSync, DEFAULT_CONFIG_SYNC, type Preset, PRESETS } from "./configsync.ts";
-import { quotaText, storageText, t } from "./i18n.ts";
+import { formatDateTime, quotaText, storageText, t } from "./i18n.ts";
 import type SelfsyncPlugin from "./main.ts";
 import type { DeviceView } from "./types.ts";
 import { ConnectModal } from "./ui/connect.ts";
@@ -144,12 +144,13 @@ export class SelfsyncSettingTab extends PluginSettingTab {
           row
             .setName(t("settings.server"))
             .setDesc(t("settings.serverDesc"))
-            .addText((x) =>
+            .addText((x) => {
+              x.inputEl.dir = "ltr";
               x.setValue(s.server).onChange(async (v) => {
                 s.server = normalizeServer(v);
                 await this.plugin.saveSettings({ restart: true });
-              }),
-            ),
+              });
+            }),
       },
       {
         name: t("settings.token"),
@@ -160,6 +161,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
             .setDesc(t("settings.tokenDesc"))
             .addText((x) => {
               x.inputEl.type = "password";
+              x.inputEl.dir = "ltr";
               x.setValue(s.token).onChange(async (v) => {
                 s.token = v.trim();
                 await this.plugin.saveSettings({ restart: true });
@@ -233,6 +235,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
             .setDesc(t("settings.excludesDesc"))
             .addTextArea((x) => {
               x.inputEl.rows = 5;
+              x.inputEl.dir = "ltr";
               x.setValue(s.excludes.join("\n")).onChange(async (v) => {
                 s.excludes = v
                   .split("\n")
@@ -587,7 +590,7 @@ export class SelfsyncSettingTab extends PluginSettingTab {
   private deviceRow(list: HTMLElement, d: DeviceView): void {
     const runner = this.plugin.runner;
     if (!runner) return;
-    const seen = d.lastSeen > 0 ? new Date(d.lastSeen).toLocaleString() : "—";
+    const seen = d.lastSeen > 0 ? formatDateTime(d.lastSeen) : "—";
     const row = new Setting(list)
       .setName(d.current ? `${d.name} (${t("devices.current")})` : d.name)
       .setDesc(

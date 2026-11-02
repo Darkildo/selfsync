@@ -3,7 +3,7 @@
 
 import { type App, Modal, Notice, Setting } from "obsidian";
 
-import { formatBytes, t } from "../i18n.ts";
+import { formatBytes, formatDate, formatDateTime, t } from "../i18n.ts";
 import type SelfsyncPlugin from "../main.ts";
 import type { DeletedView } from "../types.ts";
 import { confirm } from "./confirm.ts";
@@ -52,8 +52,8 @@ export class DeletedModal extends Modal {
       .setDesc(
         t("deleted.meta", {
           size: formatBytes(d.size),
-          when: new Date(d.deletedAt).toLocaleString(),
-          until: new Date(d.expiresAt).toLocaleDateString(),
+          when: formatDateTime(d.deletedAt),
+          until: formatDate(d.expiresAt),
         }),
       )
       .addToggle((x) =>

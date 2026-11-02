@@ -39,6 +39,9 @@ export function setIcon(el: El, id: string): void {
 }
 
 export const moment = { locale: () => "ru" };
+export function getLanguage(): string {
+  return "ru";
+}
 
 /** Заголовки, которые «сервер» не прислал (изобразить сервер 0.1.x). */
 export const hiddenResponseHeaders = new Set<string>();

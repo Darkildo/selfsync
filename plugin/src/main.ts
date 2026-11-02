@@ -1,13 +1,13 @@
 // Плагин Obsidian: тонкий слой между vault'ом и ядром. Ядро решает, что и когда
 // синхронизировать; здесь — события vault'а, исполнитель, статус-бар и окна.
 
-import { FileSystemAdapter, type Menu, moment, Notice, Platform, Plugin, requestUrl, setIcon, type TAbstractFile, TFile, TFolder } from "obsidian";
+import { FileSystemAdapter, getLanguage, type Menu, Notice, Platform, Plugin, requestUrl, setIcon, type TAbstractFile, TFile, TFolder } from "obsidian";
 
 import wasmBytes from "selfsync-wasm-bytes";
 import { initWasm, Runner } from "./engine.ts";
 import { Executor } from "./executor.ts";
 import { HANDOFF_WAIT_MS, isHandoff, pollHandoff } from "./handoff.ts";
-import { noticeText, setLanguage, stateText, t } from "./i18n.ts";
+import { formatTime, noticeText, setLanguage, stateText, t } from "./i18n.ts";
 import { AdapterBackend } from "./io/adapter.ts";
 import type { FileBackend } from "./io/backend.ts";
 import { ObsidianHttp } from "./io/http.ts";
@@ -53,7 +53,7 @@ export default class SelfsyncPlugin extends Plugin {
   private migrationNotice: Notice | undefined;
 
   override async onload(): Promise<void> {
-    setLanguage(moment.locale());
+    setLanguage(getLanguage());
     await this.loadSettings();
     initWasm(wasmBytes);
     registerIcons();
@@ -426,7 +426,7 @@ export default class SelfsyncPlugin extends Plugin {
     if (s?.quota && s.quota.held > 0) parts.push(t("status.quotaFull", { n: s.quota.held }));
     this.statusTextEl.setText(parts.join(" · "));
     let tip = t("status.tooltip", { state: stateText(s) });
-    if (s && s.lastSync > 0) tip += `\n${t("status.lastSync", { time: new Date(s.lastSync).toLocaleTimeString() })}`;
+    if (s && s.lastSync > 0) tip += `\n${t("status.lastSync", { time: formatTime(s.lastSync) })}`;
     this.statusEl.setAttribute("aria-label", tip);
   }
 

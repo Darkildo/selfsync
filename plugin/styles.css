@@ -13,6 +13,17 @@
   margin: 0.5em 0;
 }
 
+/* Цифры для сверки, фраза, адреса, коды и пути читаются слева направо и в арабском,
+   иврите, фарси, урду. Параметры внутри строк изолирует t() (U+2068…U+2069). */
+.selfsync-sas,
+.selfsync-phrase,
+.selfsync-phrase-input,
+.selfsync-ltr,
+.selfsync-ltr-name .setting-item-name {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
 /* Телефон: кнопки строки переносятся, а не уходят за край экрана. На десктопе
    раскладка Obsidian как есть: перенос там сжимал бы кнопки рядом с длинным описанием. */
 .is-mobile .selfsync-actions .setting-item-control {

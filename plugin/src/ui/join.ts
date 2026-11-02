@@ -8,7 +8,7 @@ import { type App, Modal, Setting } from "obsidian";
 import { qrModules } from "../../pkg/selfsync_wasm.js";
 import type { Runner } from "../engine.ts";
 import { connectLink, formatSas, HANDOFF_WAIT_MS, pollHandoff } from "../handoff.ts";
-import { t } from "../i18n.ts";
+import { formatTime, t } from "../i18n.ts";
 import type { UiResult } from "../types.ts";
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -74,10 +74,11 @@ export class JoinModal extends Modal {
     const qr = h && secret && check ? connectLink(h.server, this.join.code, secret, check) : this.join.url;
     contentEl.appendChild(qrSvg(document, qrModules(qr)));
     if (h && secret) contentEl.createEl("p", { text: t("handoff.offer"), cls: "setting-item-description" });
-    new Setting(contentEl)
+    const link = new Setting(contentEl)
       .setName(this.join.url)
-      .setDesc(t("join.code", { code: this.join.code, until: new Date(this.join.expiresAt).toLocaleTimeString() }))
+      .setDesc(t("join.code", { code: this.join.code, until: formatTime(this.join.expiresAt) }))
       .addButton((b) => b.setButtonText(t("join.copy")).onClick(() => void navigator.clipboard.writeText(this.join.url)));
+    link.settingEl.addClass("selfsync-ltr-name");
     if (h && secret) {
       const status = contentEl.createDiv({ cls: "selfsync-handoff" });
       void pollHandoff({

@@ -3,7 +3,7 @@
 
 import { type App, Modal, Notice, Setting } from "obsidian";
 
-import { t } from "../i18n.ts";
+import { formatDateTime, t } from "../i18n.ts";
 import type SelfsyncPlugin from "../main.ts";
 import type { ConflictChoice, ConflictRecord } from "../types.ts";
 
@@ -42,7 +42,7 @@ export class ConflictsModal extends Modal {
   private item(c: ConflictRecord): void {
     const s = new Setting(this.contentEl)
       .setName(c.path)
-      .setDesc(t("conflicts.copy", { copy: c.copy, time: new Date(c.at).toLocaleString() }));
+      .setDesc(t("conflicts.copy", { copy: c.copy, time: formatDateTime(c.at) }));
     const open = (path: string) => void this.app.workspace.openLinkText(path, "", "tab");
     s.addExtraButton((b) => b.setIcon("file-text").setTooltip(t("conflicts.openServer")).onClick(() => open(c.path)));
     s.addExtraButton((b) => b.setIcon("files").setTooltip(t("conflicts.openMine")).onClick(() => open(c.copy)));
