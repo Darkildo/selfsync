@@ -286,6 +286,12 @@ From Obsidian's community plugins (search for "Selfsync"), or by hand: copy `mai
 
 The vault's configuration folder (`.obsidian/` by default; settings differ between devices) and `.trash/` are not synced by default. Exclusions are configurable: one pattern per line, and `!pattern` brings back something an earlier line excluded (the last matching line wins, as in `.gitignore`).
 
+### Languages
+
+The plugin speaks the language of the Obsidian app: English, Russian and the 70 other languages of Obsidian's own language list ([full list](plugin/src/i18n/LANGUAGES.md)). If a string is missing in a translation, it is shown in English.
+
+Translations other than English and Russian are **machine translations** and have not been reviewed by native speakers yet. Corrections are welcome as pull requests: each language is one file in `plugin/src/i18n/`, and [TRANSLATING.md](plugin/src/i18n/TRANSLATING.md) describes the format, the glossary and how to check a file. The server and `selfsync-cli` stay in English.
+
 ### Obsidian settings between devices
 
 Under "Obsidian settings" in the plugin settings, choose what to carry across. Everything is off by default, which is how 0.1.x behaved.

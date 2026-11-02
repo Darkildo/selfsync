@@ -2,6 +2,13 @@
 
 Release notes for each version; earlier versions are described on the [releases page](https://github.com/Darkildo/selfsync/releases).
 
+## 0.6.0
+
+- **Plugin.** The interface follows the language of Obsidian: English, Russian and the 70 other languages of Obsidian's list. Translations other than English and Russian are machine translations; corrections are welcome as pull requests (`plugin/src/i18n/TRANSLATING.md`). The language is picked from `getLanguage()`: the exact code (`zh-tw`, `pt-br`), then the base language, then English; a string missing in a translation is shown in English.
+- **Plugin.** Dates, times and size units follow the chosen language. In Arabic, Hebrew, Persian, Urdu and Dhivehi the verification digits, the recovery phrase, addresses, tokens, codes and file paths stay left-to-right.
+- **Plugin.** `main.js` grows by about 2 MB because of the translations.
+- Server, protocol and `selfsync-cli` are unchanged.
+
 ## 0.5.1
 
 - **Plugin.** On a phone, settings rows and dialogs with several buttons wrap them onto the next line instead of pushing the last one off the screen. The desktop layout is unchanged.

@@ -18,6 +18,9 @@ const ctx = await esbuild.context({
   alias: { "selfsync-wasm-bytes": "./pkg/selfsync_wasm_bg.wasm" },
   sourcemap: production ? false : "inline",
   minify: production,
+  // Переводы на 70+ языков: без utf8 esbuild пишет не-ASCII как \uXXXX, и main.js
+  // вырастает примерно в полтора раза.
+  charset: "utf8",
   treeShaking: true,
   logLevel: "info",
   // import.meta.url есть только в асинхронной загрузке обвязки wasm-bindgen, а мы

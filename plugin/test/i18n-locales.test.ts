@@ -24,14 +24,23 @@ test("выбор языка: точный код, базовый язык, en", 
   assert.equal(resolveLanguage("RU_ru"), "ru");
   assert.equal(resolveLanguage("ru-RU"), "ru");
   assert.equal(resolveLanguage("en-GB"), "en");
-  assert.equal(resolveLanguage("kab"), "en");
+  assert.equal(resolveLanguage("kab"), "kab");
+  assert.equal(resolveLanguage("qq"), "en");
+  assert.equal(resolveLanguage("zh-TW"), "zh-tw");
+  assert.equal(resolveLanguage("zh-cn"), "zh");
+  assert.equal(resolveLanguage("pt-BR"), "pt-br");
+  assert.equal(resolveLanguage("pt-PT"), "pt");
+  assert.equal(resolveLanguage("nb"), "no");
+  assert.equal(resolveLanguage("de-AT"), "de");
   assert.equal(resolveLanguage("constructor"), "en");
   assert.equal(resolveLanguage(""), "en");
 });
 
 test("нет строки в переводе — английская; письмо справа налево — параметры изолированы", () => {
+  const saved = { zh: LOCALES["zh"], "zh-tw": LOCALES["zh-tw"], ar: LOCALES["ar"] };
   LOCALES["xx"] = { "status.idle": "X", "status.pending": "{n} X" };
   LOCALES["zh"] = { "status.idle": "Z" };
+  delete LOCALES["zh-tw"];
   LOCALES["ar"] = { "status.pending": "{n} A" };
   try {
     setLanguage("xx-YY");
@@ -48,8 +57,10 @@ test("нет строки в переводе — английская; пись
     assert.equal(formatBytes(2048), "2.0 KB");
   } finally {
     delete LOCALES["xx"];
-    delete LOCALES["zh"];
-    delete LOCALES["ar"];
+    for (const [code, dict] of Object.entries(saved)) {
+      if (dict) LOCALES[code] = dict;
+      else delete LOCALES[code];
+    }
     setLanguage("en");
   }
 });
