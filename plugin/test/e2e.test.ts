@@ -307,6 +307,31 @@ describe("команды окон", () => {
     await b.stop();
   });
 
+  test("корзина сервера: стирается только показанное удаление", async () => {
+    const [a, b] = await pair("ui-purge-seq");
+    await a.write("x.md", "one\n");
+    await a.sync();
+    await fsp.rm(join(a.vault, "x.md"));
+    await a.sync();
+    const shown = await b.runner.command({ type: "listDeleted" });
+    const item = shown.type === "deleted" ? shown.items.find((d) => d.path === "x.md") : undefined;
+    assert.ok(item, JSON.stringify(shown));
+    // Пока окно открыто, файл вернули и удалили снова — это уже другое удаление.
+    await a.write("x.md", "two\n");
+    await a.sync();
+    await fsp.rm(join(a.vault, "x.md"));
+    await a.sync();
+    const stale = await b.runner.command({ type: "purgeDeleted", paths: ["x.md"], seqs: [item.seq] });
+    assert.deepEqual(stale, { type: "restored", count: 0 });
+    const now = await b.runner.command({ type: "listDeleted" });
+    const fresh = now.type === "deleted" ? now.items.find((d) => d.path === "x.md") : undefined;
+    assert.ok(fresh && fresh.seq > item.seq, JSON.stringify(now));
+    const r = await b.runner.command({ type: "purgeDeleted", paths: ["x.md"], seqs: [fresh.seq] });
+    assert.deepEqual(r, { type: "restored", count: 1 });
+    await a.stop();
+    await b.stop();
+  });
+
   test("история: возврат старой ревизии", async () => {
     const [a, b] = await pair("ui-history");
     await a.write("h.md", "v1\n");

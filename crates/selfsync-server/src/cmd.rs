@@ -122,6 +122,29 @@ fn patch_size(cur: Option<u64>, v: Option<&str>) -> anyhow::Result<Option<u64>> 
     })
 }
 
+/// Новое поколение базы vault'а (или всех): после отката снимка ФС или другой
+/// копии, сделанной не `selfsync backup`, устройства сделают полную сверку и не
+/// пропустят изменения, номера которых сервер выдаст заново.
+pub fn vault_regenerate(config: &Config, vault_name: Option<&str>) -> anyhow::Result<()> {
+    let names = match vault_name {
+        Some(n) => {
+            anyhow::ensure!(
+                vault_dir(config, n).join("meta.db").is_file(),
+                "vault {n} не найден"
+            );
+            vec![n.to_owned()]
+        }
+        None => list_vault_dirs(config),
+    };
+    for name in names {
+        let v = open_vault(config, &name, 1)?;
+        let c = v.pool.get()?;
+        let g = vault::new_generation(&c)?;
+        println!("vault {name}: новое поколение {g:016x}");
+    }
+    Ok(())
+}
+
 pub fn vault_quota(config: &Config, vault_name: &str, p: &QuotaPatch) -> anyhow::Result<()> {
     anyhow::ensure!(
         server::valid_vault_name(vault_name),
@@ -697,6 +720,10 @@ pub fn backup(config: &Config, dest: &Path, blobs: BlobSource<'_>) -> anyhow::Re
             let vc = v.pool.get()?;
             let t = vdest.join("meta.db");
             vc.execute("VACUUM INTO ?1", [t.to_string_lossy().as_ref()])?;
+            // У копии своё поколение: восстановят её — устройства увидят, что база
+            // вернулась в прошлое, даже когда голова лога уже обогнала их курсор.
+            let copy = rusqlite::Connection::open(&t)?;
+            vault::new_generation(&copy)?;
         }
         for (h, _, _) in v.blobs.list()? {
             let hex = h.to_hex();

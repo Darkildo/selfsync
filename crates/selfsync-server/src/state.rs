@@ -228,6 +228,7 @@ fn open_vault_pool(
     let seq = {
         let mut c = pool.get()?;
         db::vault::migrate_vault(&mut c)?;
+        db::vault::ensure_generation(&c)?;
         crate::quota::init_usage(&c, &blobs)?;
         db::vault::current_seq(&c)?
     };

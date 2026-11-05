@@ -168,6 +168,12 @@ enum VaultCmd {
         #[arg(long)]
         max_file: Option<String>,
     },
+    /// Новое поколение базы: после отката снимка ФС (или другой копии, сделанной не
+    /// `selfsync backup`) устройства сделают полную сверку. Без --vault — все vault'ы.
+    Regenerate {
+        #[arg(long)]
+        vault: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -251,6 +257,9 @@ fn run() -> anyhow::Result<ExitCode> {
         }
         Cmd::Migrate { vault } => cmd::migrate(&config, vault.as_deref())?,
         Cmd::Vault(VaultCmd::List) => cmd::vault_list(&config)?,
+        Cmd::Vault(VaultCmd::Regenerate { vault }) => {
+            cmd::vault_regenerate(&config, vault.as_deref())?
+        }
         Cmd::Vault(VaultCmd::Quota {
             vault,
             soft,

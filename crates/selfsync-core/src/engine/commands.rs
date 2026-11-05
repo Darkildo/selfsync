@@ -227,6 +227,7 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                     expires_at: it.expires_at,
                     size: it.last_live.as_ref().map_or(0, file_size),
                     device: e.updated_by,
+                    seq: e.seq,
                 });
             }
             Ok(UiResult::Deleted { items })
@@ -270,13 +271,20 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
                 count: u32::try_from(count).unwrap_or(u32::MAX),
             })
         }
-        UiCommand::PurgeDeleted { paths } => {
+        UiCommand::PurgeDeleted { paths, seqs } => {
+            if !seqs.is_empty() && seqs.len() != paths.len() {
+                return Err(SyncError::Http {
+                    status: 400,
+                    code: "bad_field".into(),
+                    message: "seqs: по одному на путь или пусто".into(),
+                });
+            }
             let mut sp = Vec::new();
             for p in paths {
                 let v = vp(&p)?;
                 sp.push(cx.with(|s| s.encode_path(&v))?);
             }
-            let r = api::purge_deleted(cx, sp).await?;
+            let r = api::purge_deleted(cx, sp, seqs).await?;
             // Место освободилось: файлы, ждущие его, — в ближайший цикл.
             cx.with_mut(|s| s.sync_due = Some(s.now));
             Ok(UiResult::Restored {

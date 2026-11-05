@@ -180,7 +180,7 @@ Environment variables (or TOML via `--config`; variables take precedence):
 | `SELFSYNC_QUOTA_MAX_FILE` | - | default per vault: largest file (never above `SELFSYNC_MAX_BLOB_SIZE`) |
 | `SELFSYNC_QUOTA_SERVER` | - | all vaults together: storage size past which new files are refused |
 
-**Durability.** The databases run SQLite in WAL mode. With `full` (the default) every commit waits for the write-ahead log to reach the disk, so once a client gets an answer, the change survives a power loss or an OS crash as far as the disk itself keeps its promises; this costs one `fsync` per sync request (a fraction of a millisecond on an SSD, several milliseconds on a hard disk). With `normal` the log reaches the disk only at checkpoints: the database never gets corrupted and a crash of the server process loses nothing, but a power loss can roll the server back by the last few seconds of acknowledged changes. Clients notice a rollback only while the server's change counter is still below what they have seen, so a rollback can leave devices out of step.
+**Durability.** The databases run SQLite in WAL mode. With `full` (the default) every commit waits for the write-ahead log to reach the disk, so once a client gets an answer, the change survives a power loss or an OS crash as far as the disk itself keeps its promises; this costs one `fsync` per sync request (a fraction of a millisecond on an SSD, several milliseconds on a hard disk). With `normal` the log reaches the disk only at checkpoints: the database never gets corrupted and a crash of the server process loses nothing, but a power loss can roll the server back by the last few seconds of acknowledged changes. Clients notice such a rollback only while the server's change counter is still below what they have seen, so a rollback can leave devices out of step; after one, run `selfsync vault regenerate` (below).
 
 In TOML the limits go into a `[rate]` section with the same names in lower case and without the prefix (`redeem_attempts = 10`, `auth_window = "1m"`); `trusted_proxy = true` and `sqlite_synchronous = "normal"` are top-level keys. A threshold of `0` turns that limit off; windows and blocks must be at least one second, otherwise the server refuses to start.
 
@@ -222,6 +222,7 @@ selfsync token add --vault notes --name nas --read-only   # receives changes, ca
 selfsync token list | revoke --name phone      # list shows each device's client (plugin/0.3.0)
 selfsync vault list                               # usage and limits of each vault
 selfsync vault quota --vault notes --hard 5GiB    # see "Quotas"
+selfsync vault regenerate                         # after rolling back a file system snapshot (see below)
 selfsync import --vault notes --from ~/Notes     # upload an existing folder
 selfsync backup /backups/selfsync-$(date +%F)    # consistent copy while running
 selfsync gc --vault notes                         # garbage collection plan; --yes to run it
@@ -233,7 +234,7 @@ selfsync healthcheck
 
 `selfsync doctor` checks the installation and says what to fix: the data directory (writable, closed to other users), free disk space, the databases, `SELFSYNC_PUBLIC_URL` and TLS, `SELFSYNC_TRUSTED_PROXY` behind a reverse proxy, whether the public address answers (with `curl`, if installed), the verify, backup and sweep timers (with systemd), whether backups are fresh and on another disk, the last `verify` of each vault, and quotas. Exit code 1 means something is broken; warnings alone give 0.
 
-Back up with `backup`: the copy is consistent even while the server is running. To restore, put the directory back. Devices notice that the server went back in time and run a full reconciliation without deleting anything. What a backup protects against depends on how blobs get into it:
+Back up with `backup`: the copy is consistent even while the server is running. To restore, put the directory back. Devices notice that the server went back in time and run a full reconciliation without deleting anything: each copy made by `backup` carries its own generation of the database (server 0.10.0+, plugin and CLI 0.10.0+), so devices notice even when other devices have written so much since that the server's change counter is ahead again. A file changed on a device after the backup comes back from that device; if the restored server has a different version, both are kept (a conflict copy next to it). After restoring a file system snapshot (ZFS, LVM, a VM snapshot) or any other copy not made by `backup`, run `selfsync vault regenerate` before starting the server, so that devices know the database went back. What a backup protects against depends on how blobs get into it:
 
 | Command | Blobs | Protects against |
 |---|---|---|

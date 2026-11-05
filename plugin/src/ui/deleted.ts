@@ -9,7 +9,8 @@ import type { DeletedView } from "../types.ts";
 import { confirm } from "./confirm.ts";
 
 export class DeletedModal extends Modal {
-  private selected = new Set<string>();
+  /** Выбранные пути → seq показанного tombstone'а. */
+  private selected = new Map<string, number>();
 
   constructor(
     app: App,
@@ -58,18 +59,21 @@ export class DeletedModal extends Modal {
       )
       .addToggle((x) =>
         x.onChange((v) => {
-          if (v) this.selected.add(d.path);
+          if (v) this.selected.set(d.path, d.seq);
           else this.selected.delete(d.path);
         }),
       );
   }
 
   private async apply(what: "restore" | "purge"): Promise<void> {
-    const paths = [...this.selected];
+    const paths = [...this.selected.keys()];
+    // Стирается только то, что показано: путь, удалённый заново, пока окно открыто,
+    // останется в корзине.
+    const seqs = [...this.selected.values()];
     const runner = this.plugin.runner;
     if (paths.length === 0 || !runner) return;
     if (what === "purge" && !(await confirm(this.app, t("deleted.purgeConfirm", { n: paths.length }), t("deleted.purge")))) return;
-    const r = await runner.command(what === "restore" ? { type: "restoreDeleted", paths } : { type: "purgeDeleted", paths });
+    const r = await runner.command(what === "restore" ? { type: "restoreDeleted", paths } : { type: "purgeDeleted", paths, seqs });
     if (r.type === "error") new Notice(r.message);
     else if (r.type === "restored") new Notice(t("deleted.restored", { n: r.count }));
     await this.render();

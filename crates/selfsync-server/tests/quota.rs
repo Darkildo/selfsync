@@ -348,6 +348,7 @@ async fn usage_follows_trash_purge_and_verify() {
             Some(&t),
             pb::PathList {
                 paths: vec![p("a.md")],
+                ..Default::default()
             }
             .encode_to_vec(),
             &[],
