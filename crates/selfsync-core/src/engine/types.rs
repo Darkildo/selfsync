@@ -767,8 +767,13 @@ pub enum UiCommand {
     RestoreDeleted {
         paths: Vec<String>,
     },
+    /// Стереть из корзины. `seqs` — пусто или seq каждого показанного tombstone'а
+    /// (`DeletedView::seq`): путь, восстановленный или удалённый заново после
+    /// показа, сервер 1.5+ не тронет.
     PurgeDeleted {
         paths: Vec<String>,
+        #[serde(default)]
+        seqs: Vec<u64>,
     },
     History {
         path: String,
@@ -941,6 +946,8 @@ pub struct DeletedView {
     pub expires_at: i64,
     pub size: u64,
     pub device: u32,
+    /// seq tombstone'а: передаётся в `PurgeDeleted::seqs`.
+    pub seq: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

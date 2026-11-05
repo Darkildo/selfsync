@@ -30,6 +30,13 @@ pub(crate) fn rebaseline(cx: &Ctx, skip_tombstones: bool) {
             f.base_blob = None;
             f.transfer = None;
             f.rejected = None;
+            if skip_tombstones {
+                // Сервер вернулся в прошлое: подтверждённой им версии (базы) на нём
+                // может уже не быть. Файл «без правок» — не повод молча взять
+                // серверную версию: она может быть старше нашей. База неизвестна —
+                // отличие от сервера сохраняет обе версии.
+                f.base_plain = None;
+            }
         }
         s.index.last_seq = 0;
         s.index.rebaselined = true;

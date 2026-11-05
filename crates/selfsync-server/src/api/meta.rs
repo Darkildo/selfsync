@@ -89,10 +89,18 @@ pub async fn purge_deleted(
         validate_proto_path(p).map_err(|e| ApiError::bad_request("bad_path", e.to_string()))?;
         keys.push(canonical_encode(p));
     }
+    // seq показанных tombstone'ов (1.5): по одному на путь или ни одного.
+    if !req.seqs.is_empty() && req.seqs.len() != req.paths.len() {
+        return Err(ApiError::bad_request(
+            "bad_field",
+            "seqs: по одному на путь или пусто",
+        ));
+    }
+    let seqs = req.seqs;
     let purged = a
         .vault
         .db(move |c, v| {
-            let (n, hashes) = vault::purge_deleted(c, &keys)?;
+            let (n, hashes) = vault::purge_deleted(c, &keys, &seqs)?;
             remove_unreferenced(c, &v.blobs, &hashes, None)?;
             crate::db::truncate_wal(c)?;
             Ok(n)

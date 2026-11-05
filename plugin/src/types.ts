@@ -165,6 +165,8 @@ export interface DeletedView {
   expiresAt: number;
   size: number;
   device: number;
+  /** seq tombstone'а: передаётся в `purgeDeleted.seqs`. */
+  seq: number;
 }
 
 export interface RevisionView {
@@ -247,7 +249,9 @@ export interface DiagCheck {
 export type UiCommand =
   | { type: "listDeleted" }
   | { type: "restoreDeleted"; paths: string[] }
-  | { type: "purgeDeleted"; paths: string[] }
+  /** `seqs` — пусто или seq каждого показанного tombstone'а (`DeletedView.seq`):
+   *  путь, восстановленный или удалённый заново после показа, сервер 1.5+ не тронет. */
+  | { type: "purgeDeleted"; paths: string[]; seqs?: number[] }
   | { type: "history"; path: string }
   | { type: "restoreRevision"; path: string; rev: number }
   | { type: "purgeHistory"; path: string; beforeRev: number }

@@ -51,12 +51,24 @@ pub(crate) async fn pull(cx: &Ctx) -> SyncResult<bool> {
             if first {
                 first = false;
                 check_state(cx, &vs).await?;
-                if vs.seq < since {
+                // Поколение базы (1.5): сменилось — база вернулась в прошлое, и seq
+                // могли выдать заново, даже если голова уже обогнала наш курсор.
+                let known = cx.with(|s| s.index.server_generation);
+                let regenerated = vs.generation != 0 && known != 0 && vs.generation != known;
+                if vs.generation != 0 && vs.generation != known {
+                    cx.with_mut(|s| s.index.server_generation = vs.generation);
+                }
+                if since > 0 && (vs.seq < since || regenerated) {
                     // Сервер «моложе» клиента (восстановлен из бэкапа): полная сверка.
-                    cx.log(
-                        LogLevel::Warn,
-                        format!("сервер вернулся с seq {since} на {}: полная сверка", vs.seq),
-                    );
+                    let why = if vs.seq < since {
+                        format!("сервер вернулся с seq {since} на {}", vs.seq)
+                    } else {
+                        format!(
+                            "сменилось поколение базы сервера ({known:016x} → {:016x}), seq {}",
+                            vs.generation, vs.seq
+                        )
+                    };
+                    cx.log(LogLevel::Warn, format!("{why}: полная сверка"));
                     cx.notify(Notice::ServerRewound);
                     rebaseline(cx, true);
                     cx.save().await?;

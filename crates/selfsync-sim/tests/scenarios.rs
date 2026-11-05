@@ -2452,6 +2452,7 @@ fn purging_trash_and_history_frees_room() {
         1,
         UiCommand::PurgeDeleted {
             paths: vec!["gone.bin".into()],
+            seqs: Vec::new(),
         },
     );
     assert_eq!(r, UiResult::Restored { count: 1 });
@@ -4194,4 +4195,169 @@ fn unreadable_file_in_listing_is_not_deleted() {
     w.clients[1].fs.unreadable.clear();
     finish(&mut w);
     assert!(w.server_files().contains_key("a.md"));
+}
+
+/// Базу vault'а `sim` вернуть к копии `snap` (как будто восстановили бэкап): все
+/// таблицы — содержимым копии, в одной транзакции.
+fn restore_server_db(w: &World, snap: &std::path::Path) {
+    let v = w.state.vault("sim").expect("vault");
+    let mut c = v.pool.get().expect("conn");
+    c.execute("ATTACH ?1 AS s", [snap.to_string_lossy().as_ref()])
+        .unwrap();
+    let tx = c.transaction().unwrap();
+    for t in ["files", "revisions", "meta", "uploads", "wanted_blobs"] {
+        tx.execute_batch(&format!(
+            "DELETE FROM main.{t}; INSERT INTO main.{t} SELECT * FROM s.{t};"
+        ))
+        .unwrap();
+    }
+    tx.commit().unwrap();
+    c.execute("DETACH s", []).unwrap();
+}
+
+/// Снимок базы vault'а `sim`; `regenerate` — с новым поколением, как в копии
+/// из `selfsync backup`.
+fn snapshot_server_db(w: &World, regenerate: bool) -> std::path::PathBuf {
+    let path = w.dir.path().join(format!("snap-{}.db", w.server_seq()));
+    let v = w.state.vault("sim").expect("vault");
+    let c = v.pool.get().expect("conn");
+    c.execute("VACUUM INTO ?1", [path.to_string_lossy().as_ref()])
+        .unwrap();
+    if regenerate {
+        let copy = rusqlite::Connection::open(&path).unwrap();
+        selfsync_server::db::vault::new_generation(&copy).unwrap();
+    }
+    path
+}
+
+/// Сервер вернули к копии из `selfsync backup`, а другое устройство успело
+/// записать столько, что голова лога обогнала курсор A. По одному `seq` A отката
+/// не заметил бы и пропустил бы чужие записи с выданными заново номерами, а свои
+/// подтверждённые правки счёл бы отправленными. Поколение базы (1.5) сменилось —
+/// A делает полную сверку: свои правки отправляет заново, чужие скачивает.
+#[test]
+fn server_restored_from_backup_with_reused_seqs_is_detected() {
+    let mut w = World::new(quiet(2));
+    let a_note = base_note(&mut w, 0, "a.md");
+    w.sync(0);
+    w.sync(1);
+    let snap = snapshot_server_db(&w, true);
+    // A правит и создаёт файл; сервер подтверждает.
+    let a_edit = edit_line(&mut w, 0, "a.md", 1);
+    let n_note = base_note(&mut w, 0, "n.md");
+    w.sync(0);
+    let a_cursor = w.server_seq();
+    assert!(server_text(&w, "a.md").contains(&a_edit));
+    // Сервер восстановлен из копии: правок A на нём больше нет.
+    restore_server_db(&w, &snap);
+    assert!(w.server_seq() < a_cursor);
+    // B пишет, пока голова лога не обгонит курсор A.
+    let mut b_notes = Vec::new();
+    let mut i = 0;
+    while w.server_seq() <= a_cursor + 1 {
+        b_notes.push(base_note(&mut w, 1, &format!("b{i}.md")));
+        w.sync(1);
+        i += 1;
+    }
+    w.clients[0].notices.clear();
+    w.sync(0);
+    assert!(
+        w.clients[0]
+            .notices
+            .iter()
+            .any(|n| matches!(n, Notice::ServerRewound)),
+        "A заметил откат по поколению: {:?}",
+        w.clients[0].notices
+    );
+    finish(&mut w);
+    let _ = a_note;
+    // Правка A цела: сервер вернул старую версию, и без базы не понять, какая из двух
+    // новее (B мог править файл уже после восстановления) — обе на месте.
+    let server = w.server_files();
+    assert!(
+        server
+            .values()
+            .any(|d| String::from_utf8_lossy(d).contains(&a_edit)),
+        "правка A на сервере: {:?}",
+        server.keys()
+    );
+    assert!(!conflict_copies(&w).is_empty(), "версия A — копией рядом");
+    assert!(
+        server_text(&w, "n.md").contains(&n_note),
+        "новый файл A вернулся"
+    );
+    for (i, t) in b_notes.iter().enumerate() {
+        assert!(server_text(&w, &format!("b{i}.md")).contains(t));
+        let local = w.clients[0].fs.read_file(&format!("b{i}.md")).cloned();
+        assert!(local.is_some(), "A скачал b{i}.md");
+    }
+}
+
+/// Сервер старее 1.5 (поколения нет) обновили: для клиентов, которые поколения
+/// ещё не видели, это первое знакомство, а не откат, — лишней полной сверки нет.
+#[test]
+fn first_seen_generation_does_not_rebaseline() {
+    let mut w = World::new(quiet(2));
+    let drop_generation = |w: &World| {
+        let v = w.state.vault("sim").expect("vault");
+        let c = v.pool.get().expect("conn");
+        c.execute("DELETE FROM meta WHERE key = 'generation'", [])
+            .unwrap();
+    };
+    drop_generation(&w);
+    base_note(&mut w, 0, "a.md");
+    w.sync(0);
+    w.sync(1);
+    base_note(&mut w, 1, "b.md");
+    w.sync(1);
+    w.sync(0);
+    // Сервер обновили: поколение появилось.
+    {
+        let v = w.state.vault("sim").expect("vault");
+        let c = v.pool.get().expect("conn");
+        selfsync_server::db::vault::ensure_generation(&c).unwrap();
+    }
+    w.clients[0].notices.clear();
+    base_note(&mut w, 1, "c.md");
+    w.sync(1);
+    w.sync(0);
+    assert!(
+        !w.clients[0]
+            .notices
+            .iter()
+            .any(|n| matches!(n, Notice::ServerRewound)),
+        "{:?}",
+        w.clients[0].notices
+    );
+    finish(&mut w);
+}
+
+/// Сервер восстановили из бэкапа, сделанного до подтверждённой правки A (откат
+/// виден и по `seq`). Раньше A считал файл синхронизированным и молча брал старую
+/// серверную версию — правка, которой больше нигде нет, пропадала. Теперь база
+/// после отката неизвестна: обе версии остаются.
+#[test]
+fn server_rewind_keeps_acknowledged_edit() {
+    let mut w = World::new(quiet(2));
+    base_note(&mut w, 0, "a.md");
+    w.sync(0);
+    w.sync(1);
+    let snap = snapshot_server_db(&w, false);
+    let edit = edit_line(&mut w, 0, "a.md", 1);
+    w.sync(0);
+    restore_server_db(&w, &snap);
+    w.clients[0].notices.clear();
+    w.sync(0);
+    assert!(
+        w.clients[0]
+            .notices
+            .iter()
+            .any(|n| matches!(n, Notice::ServerRewound))
+    );
+    finish(&mut w);
+    assert!(
+        w.server_files()
+            .values()
+            .any(|d| String::from_utf8_lossy(d).contains(&edit))
+    );
 }

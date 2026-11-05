@@ -726,6 +726,7 @@ async fn trash_restore_and_purge() {
         None,
         VaultCommand::Ui(UiCommand::PurgeDeleted {
             paths: vec!["z.md".into()],
+            seqs: Vec::new(),
         }),
     )
     .await;

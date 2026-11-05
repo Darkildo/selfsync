@@ -496,6 +496,7 @@ async fn trash_restore_and_purge() {
             Some(&t),
             pb::PathList {
                 paths: vec![p("gone.md")],
+                ..Default::default()
             }
             .encode_to_vec(),
             &[],
@@ -515,6 +516,53 @@ async fn trash_restore_and_purge() {
     assert_eq!(blob.status, StatusCode::NOT_FOUND, "блоб освобождён");
     let after = s.changes(&t, 0).await.vault.unwrap();
     assert!(after.purged_seq > 0);
+}
+
+/// `DELETE /v1/deleted` с `seqs` (1.5) стирает только показанный tombstone: путь,
+/// удалённый заново после показа, остаётся в корзине.
+#[tokio::test]
+async fn purge_deleted_checks_seq() {
+    let s = TestServer::new();
+    let t = s.token("notes", "a");
+    s.write_file(&t, "x.md", 0, b"1").await;
+    let r = s.ops(&t, vec![del_op("x.md", 1)]).await;
+    assert!(!applied(&r.results[0]).noop);
+    let shown = {
+        let d: pb::DeletedResponse = s.get("/v1/deleted", &t).await.proto();
+        d.items[0].entry.as_ref().unwrap().seq
+    };
+    // После показа путь восстановили и удалили снова — tombstone новый.
+    s.write_file(&t, "x.md", 2, b"2").await;
+    s.ops(&t, vec![del_op("x.md", 3)]).await;
+    let purge = |seqs: Vec<u64>| pb::PathList {
+        paths: vec![p("x.md")],
+        seqs,
+    };
+    let call = |body: pb::PathList| {
+        s.call(
+            Method::DELETE,
+            "/v1/deleted",
+            Some(&t),
+            body.encode_to_vec(),
+            &[],
+        )
+    };
+    let r: pb::PurgeResult = call(purge(vec![shown])).await.proto();
+    assert_eq!(r.purged, 0, "показанного tombstone'а уже нет");
+    let d: pb::DeletedResponse = s.get("/v1/deleted", &t).await.proto();
+    let current = d.items[0].entry.as_ref().unwrap().seq;
+    assert!(current > shown);
+    // Число seqs не совпадает с путями — отказ.
+    let bad = call(pb::PathList {
+        paths: vec![p("x.md")],
+        seqs: vec![1, 2],
+    })
+    .await;
+    assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+    let r: pb::PurgeResult = call(purge(vec![current])).await.proto();
+    assert_eq!(r.purged, 1);
+    let d: pb::DeletedResponse = s.get("/v1/deleted", &t).await.proto();
+    assert!(d.items.is_empty());
 }
 
 #[tokio::test]

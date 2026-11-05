@@ -140,10 +140,52 @@ pub fn retention_days(c: &Connection) -> rusqlite::Result<u32> {
         .unwrap_or(DEFAULT_RETENTION_DAYS))
 }
 
+/// Поколение базы vault'а (`VaultState.generation`, протокол 1.5): случайное
+/// ненулевое число. Меняется, когда база могла вернуться в прошлое, — тогда номера
+/// seq выдаются заново, и устройство, чей курсор голова лога уже обогнала, не
+/// заметило бы отката по одному `seq`. `selfsync backup` пишет в копию новое
+/// поколение (восстановили копию — устройства сверятся заново), `selfsync vault
+/// regenerate` — после отката снимка ФС или любой другой копии.
+pub fn generation(c: &Connection) -> rusqlite::Result<u64> {
+    Ok(u(meta_int(c, "generation")?.unwrap_or(0)))
+}
+
+/// Поколение есть (vault создан до 1.5 — появляется при первом открытии).
+pub fn ensure_generation(c: &Connection) -> rusqlite::Result<()> {
+    c.execute(
+        "INSERT OR IGNORE INTO meta (key, value) VALUES ('generation', ?1)",
+        params![i(fresh_generation())],
+    )?;
+    Ok(())
+}
+
+/// Новое поколение: устройства при следующем синке сделают полную сверку.
+pub fn new_generation(c: &Connection) -> rusqlite::Result<u64> {
+    let g = fresh_generation();
+    set_meta_int(c, "generation", i(g))?;
+    Ok(g)
+}
+
+/// Случайное в `1..=i64::MAX` (хранится в INTEGER); без системного генератора —
+/// время и pid: поколению нужна только непохожесть на прежнее.
+fn fresh_generation() -> u64 {
+    let mut b = [0u8; 8];
+    let v = if getrandom::fill(&mut b).is_ok() {
+        u64::from_le_bytes(b)
+    } else {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        (t as u64) ^ (u64::from(std::process::id()) << 32)
+    };
+    (v & (i64::MAX as u64)).max(1)
+}
+
 pub fn vault_state(c: &Connection) -> rusqlite::Result<pb::VaultState> {
     let mut st = c.prepare_cached(
         "SELECT key, value FROM meta WHERE key IN ('seq','vault_key_version','migration','retention_days','purged_seq','key_epoch',
-                       'verify_at','verify_db_errors','verify_key_problem')",
+                       'verify_at','verify_db_errors','verify_key_problem','generation')",
     )?;
     let mut s = pb::VaultState {
         retention_days: DEFAULT_RETENTION_DAYS,
@@ -166,6 +208,7 @@ pub fn vault_state(c: &Connection) -> rusqlite::Result<pb::VaultState> {
             "verify_db_errors" | "verify_key_problem" => {
                 s.storage_problem |= r.get::<_, i64>(1)? != 0;
             }
+            "generation" => s.generation = u(r.get(1)?),
             _ => {}
         }
     }
@@ -840,27 +883,35 @@ fn path_hashes(tx: &Connection, path: &[u8]) -> rusqlite::Result<Vec<Vec<u8>>> {
     rows.collect()
 }
 
-/// Окончательно стирает выбранные tombstone'ы вместе с историей. Возвращает число
-/// стёртых путей и хэши, которые могли стать бесхозными.
+/// Окончательно стирает выбранные tombstone'ы вместе с историей. `seqs` — пусто или
+/// по одному на путь: стирается только tombstone с этим seq (его и показали
+/// пользователю; восстановленный или удалённый заново путь остаётся). Возвращает
+/// число стёртых путей и хэши, которые могли стать бесхозными.
 pub fn purge_deleted(
     c: &mut Connection,
     paths: &[Vec<u8>],
+    seqs: &[u64],
 ) -> rusqlite::Result<(u64, Vec<Vec<u8>>)> {
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let res = purge_in(&tx, paths)?;
+    let res = purge_in(&tx, paths, seqs)?;
     tx.commit()?;
     Ok(res)
 }
 
-/// Стирает tombstone'ы из `paths` внутри уже открытой транзакции записи.
-/// `purged_seq` — по `seq` реально стёртых строк.
-fn purge_in(tx: &Connection, paths: &[Vec<u8>]) -> rusqlite::Result<(u64, Vec<Vec<u8>>)> {
+/// Стирает tombstone'ы из `paths` внутри уже открытой транзакции записи (`seqs` —
+/// как у [`purge_deleted`]). `purged_seq` — по `seq` реально стёртых строк.
+fn purge_in(
+    tx: &Connection,
+    paths: &[Vec<u8>],
+    seqs: &[u64],
+) -> rusqlite::Result<(u64, Vec<Vec<u8>>)> {
     let mut n = 0;
     let mut hashes = Vec::new();
     let mut max_seq = 0u64;
-    for p in paths {
+    for (i, p) in paths.iter().enumerate() {
         if let Some(row) = get_file(tx, p)?
             && row.deleted
+            && seqs.get(i).is_none_or(|&want| want == row.seq)
         {
             hashes.extend(path_hashes(tx, p)?);
             tx.execute("DELETE FROM revisions WHERE path = ?1", params![p])?;
@@ -934,7 +985,7 @@ pub fn sweep(c: &mut Connection, now: i64) -> rusqlite::Result<(u64, Vec<Vec<u8>
         st.query_map(params![cutoff], |r| r.get(0))?
             .collect::<Result<_, _>>()?
     };
-    let res = purge_in(&tx, &paths)?;
+    let res = purge_in(&tx, &paths, &[])?;
     set_meta_int(&tx, "last_sweep", now)?;
     tx.commit()?;
     Ok(res)

@@ -314,10 +314,19 @@ pub async fn deleted(cx: &Ctx) -> SyncResult<pb::DeletedResponse> {
     call(cx, req("GET", "/v1/deleted".into(), vec![], None)).await
 }
 
-pub async fn purge_deleted(cx: &Ctx, paths: Vec<pb::Path>) -> SyncResult<pb::PurgeResult> {
+/// `seqs` — пусто или seq показанного tombstone'а на каждый путь (1.5).
+pub async fn purge_deleted(
+    cx: &Ctx,
+    paths: Vec<pb::Path>,
+    seqs: Vec<u64>,
+) -> SyncResult<pb::PurgeResult> {
     call(
         cx,
-        proto_req("DELETE", "/v1/deleted".into(), &pb::PathList { paths }),
+        proto_req(
+            "DELETE",
+            "/v1/deleted".into(),
+            &pb::PathList { paths, seqs },
+        ),
     )
     .await
 }

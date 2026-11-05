@@ -348,7 +348,10 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 anyhow::bail!("стирание из корзины необратимо: добавьте --yes");
             }
             let paths = paths.iter().map(|p| vault_path(&dir, p)).collect();
-            let cmd = VaultCommand::Ui(UiCommand::PurgeDeleted { paths });
+            let cmd = VaultCommand::Ui(UiCommand::PurgeDeleted {
+                paths,
+                seqs: Vec::new(),
+            });
             return vault_command(&dir, v, cmd, |r, json| {
                 let UiResult::Restored { count } = r else {
                     anyhow::bail!("неожиданный ответ: {r:?}");

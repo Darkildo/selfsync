@@ -220,6 +220,37 @@ async fn backup_is_consistent_copy() {
     assert!(cmd::backup(s.config(), &target, Default::default()).is_err());
 }
 
+/// Копия из `backup` и `vault regenerate` получают своё поколение базы (1.5):
+/// восстановленную копию устройства узнают, даже если голова лога уже обогнала
+/// их курсор.
+#[tokio::test]
+async fn backup_and_regenerate_change_generation() {
+    use selfsync_server::db::vault::generation;
+    let s = TestServer::new();
+    let t = s.token("notes", "a");
+    s.write_file(&t, "a.md", 0, b"x").await;
+    let live = s.changes(&t, 0).await.vault.unwrap().generation;
+    assert_ne!(live, 0, "у нового vault'а есть поколение");
+    assert_eq!(s.changes(&t, 0).await.vault.unwrap().generation, live);
+    let dest = tempfile::tempdir().unwrap();
+    let target = dest.path().join("bk");
+    cmd::backup(s.config(), &target, Default::default()).unwrap();
+    let copy = selfsync_server::Config::for_tests(target.clone());
+    {
+        let v = open_vault(&copy, "notes", 1).unwrap();
+        let g = generation(&v.pool.get().unwrap()).unwrap();
+        assert_ne!(g, 0);
+        assert_ne!(g, live, "у копии своё поколение");
+    }
+    // Живой vault бэкап не меняет.
+    assert_eq!(s.changes(&t, 0).await.vault.unwrap().generation, live);
+    cmd::vault_regenerate(s.config(), Some("notes")).unwrap();
+    let after = s.changes(&t, 0).await.vault.unwrap().generation;
+    assert_ne!(after, 0);
+    assert_ne!(after, live);
+    assert!(cmd::vault_regenerate(s.config(), Some("nope")).is_err());
+}
+
 #[test]
 fn token_cli_roundtrip() {
     let bin = env!("CARGO_BIN_EXE_selfsync");

@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::hash::Hash;
 
 /// Версия формата снимка. Старые версии читаются и поднимаются в [`Index::decode`].
-pub const INDEX_FORMAT: u32 = 5;
+pub const INDEX_FORMAT: u32 = 6;
 const MAGIC: &[u8; 4] = b"NSI\0";
 
 /// Режим vault'а с точки зрения клиента.
@@ -227,6 +227,62 @@ pub struct Index {
     /// здесь нет, сравниваются по размеру и mtime (ctime запоминается без
     /// перехэширования).
     pub ctimes: BTreeMap<String, i64>,
+    /// Поколение базы сервера, с которой построен индекс (формат 6;
+    /// `VaultState.generation`, протокол 1.5). Сменилось — база вернулась в прошлое и
+    /// номера seq могли выдаваться заново: полная сверка. 0 — ещё неизвестно (старый
+    /// сервер или индекс старого формата).
+    pub server_generation: u64,
+}
+
+/// Формат 5: то же без `server_generation`.
+#[derive(Deserialize)]
+struct IndexV5 {
+    format: u32,
+    last_seq: u64,
+    initial_done: bool,
+    mode: VaultMode,
+    files: BTreeMap<String, FileState>,
+    conflicts: Vec<ConflictRecord>,
+    next_conflict_id: u64,
+    migration: Option<MigrationState>,
+    cache: Vec<(Hash, u64)>,
+    rebaselined: bool,
+    rebaseline_seen: BTreeSet<String>,
+    rewound: bool,
+    excludes: Option<Vec<String>>,
+    skipped: BTreeMap<String, SkippedFile>,
+    max_download: u64,
+    offloadable: BTreeMap<String, LocalObs>,
+    key_epoch: u32,
+    links: BTreeSet<String>,
+    ctimes: BTreeMap<String, i64>,
+}
+
+impl From<IndexV5> for Index {
+    fn from(v: IndexV5) -> Index {
+        Index {
+            format: v.format,
+            last_seq: v.last_seq,
+            initial_done: v.initial_done,
+            mode: v.mode,
+            files: v.files,
+            conflicts: v.conflicts,
+            next_conflict_id: v.next_conflict_id,
+            migration: v.migration,
+            cache: v.cache,
+            rebaselined: v.rebaselined,
+            rebaseline_seen: v.rebaseline_seen,
+            rewound: v.rewound,
+            excludes: v.excludes,
+            skipped: v.skipped,
+            max_download: v.max_download,
+            offloadable: v.offloadable,
+            key_epoch: v.key_epoch,
+            links: v.links,
+            ctimes: v.ctimes,
+            server_generation: 0,
+        }
+    }
 }
 
 /// Формат 4: то же без `ctimes`.
@@ -274,6 +330,7 @@ impl From<IndexV4> for Index {
             key_epoch: v.key_epoch,
             links: v.links,
             ctimes: BTreeMap::new(),
+            server_generation: 0,
         }
     }
 }
@@ -322,6 +379,7 @@ impl From<IndexV3> for Index {
             key_epoch: v.key_epoch,
             links: BTreeSet::new(),
             ctimes: BTreeMap::new(),
+            server_generation: 0,
         }
     }
 }
@@ -438,6 +496,13 @@ impl Index {
             INDEX_FORMAT => {
                 let mut idx: Index =
                     postcard::from_bytes(&bytes[8..]).map_err(|_| IndexError::Corrupt)?;
+                idx.format = INDEX_FORMAT;
+                Ok(idx)
+            }
+            5 => {
+                let v5: IndexV5 =
+                    postcard::from_bytes(&bytes[8..]).map_err(|_| IndexError::Corrupt)?;
+                let mut idx = Index::from(v5);
                 idx.format = INDEX_FORMAT;
                 Ok(idx)
             }
@@ -580,14 +645,23 @@ mod tests {
         i.key_epoch = 2;
         i.links = ["linked".to_owned(), "notes/leaf.md".to_owned()].into();
         i.ctimes = [("a.md".to_owned(), 1_791_556_200_123)].into();
+        i.server_generation = 0x1234_5678_9abc_def0;
         i
+    }
+
+    /// `sample()` без полей формата 6.
+    fn sample_v5() -> Index {
+        Index {
+            server_generation: 0,
+            ..sample()
+        }
     }
 
     /// `sample()` без полей формата 5.
     fn sample_v4() -> Index {
         Index {
             ctimes: BTreeMap::new(),
-            ..sample()
+            ..sample_v5()
         }
     }
 
@@ -619,6 +693,7 @@ mod tests {
     const FIXTURE_V3: &[u8] = include_bytes!("../tests/fixtures/index-v3.bin");
     const FIXTURE_V4: &[u8] = include_bytes!("../tests/fixtures/index-v4.bin");
     const FIXTURE_V5: &[u8] = include_bytes!("../tests/fixtures/index-v5.bin");
+    const FIXTURE_V6: &[u8] = include_bytes!("../tests/fixtures/index-v6.bin");
 
     /// Замороженный снимок формата v1 читается и после смены формата.
     #[test]
@@ -650,22 +725,29 @@ mod tests {
         assert_eq!(Index::decode(FIXTURE_V4).unwrap(), sample_v4());
     }
 
-    /// Замороженный снимок формата v5. Если тест упал, формат индекса изменился
-    /// несовместимо: поднимите INDEX_FORMAT и научите decode читать v5, а эталон
+    /// Замороженный снимок формата v5 читается и после смены формата.
+    #[test]
+    fn format_v5_fixture_still_reads() {
+        assert_eq!(&FIXTURE_V5[..8], b"NSI\0\x05\x00\x00\x00");
+        assert_eq!(Index::decode(FIXTURE_V5).unwrap(), sample_v5());
+    }
+
+    /// Замороженный снимок формата v6. Если тест упал, формат индекса изменился
+    /// несовместимо: поднимите INDEX_FORMAT и научите decode читать v6, а эталон
     /// не перезаписывайте. (Новый эталон: SELFSYNC_WRITE_FIXTURES=1.)
     #[test]
-    fn format_v5_fixture() {
+    fn format_v6_fixture() {
         if std::env::var_os("SELFSYNC_WRITE_FIXTURES").is_some() {
             std::fs::write(
-                concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/index-v5.bin"),
+                concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/index-v6.bin"),
                 sample().encode(),
             )
             .unwrap();
             return;
         }
-        assert_eq!(&FIXTURE_V5[..8], b"NSI\0\x05\x00\x00\x00");
-        assert_eq!(Index::decode(FIXTURE_V5).unwrap(), sample());
-        assert_eq!(sample().encode(), FIXTURE_V5, "кодирование v5 изменилось");
+        assert_eq!(&FIXTURE_V6[..8], b"NSI\0\x06\x00\x00\x00");
+        assert_eq!(Index::decode(FIXTURE_V6).unwrap(), sample());
+        assert_eq!(sample().encode(), FIXTURE_V6, "кодирование v6 изменилось");
     }
 
     #[test]
