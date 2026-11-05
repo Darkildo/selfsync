@@ -17,14 +17,48 @@ pub type Pool = r2d2::Pool<SqliteConnectionManager>;
 /// одновременном старте нескольких CGI-процессов тоже должно ждать, а не падать.
 /// `secure_delete`: удалённые строки затираются нулями, а не остаются в свободных
 /// страницах — иначе открытые имена файлов переживали бы миграцию на шифрование.
+/// `synchronous` — отдельно, по настройке (`Synchronous`).
 const PRAGMAS: &str = "PRAGMA busy_timeout = 5000;
 PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
 PRAGMA foreign_keys = ON;
 PRAGMA secure_delete = ON;";
 
-pub fn init_conn(c: &mut Connection) -> rusqlite::Result<()> {
-    c.execute_batch(PRAGMAS)
+/// `PRAGMA synchronous` для всех баз сервера (`SELFSYNC_SQLITE_SYNCHRONOUS`).
+///
+/// В WAL оба режима не портят базу и переживают падение процесса. Разница — при
+/// падении ОС или пропадании питания: в `Normal` WAL сбрасывается на диск только
+/// перед checkpoint, и последние подтверждённые клиентам транзакции могут
+/// пропасть; в `Full` каждый коммит ждёт `fsync` WAL, и ответ клиенту значит, что
+/// операция на диске (насколько это обещает сам накопитель). Цена `Full` — один
+/// `fsync` на запрос синхронизации: на SSD это доли миллисекунды, на HDD — единицы
+/// и десятки.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Synchronous {
+    Normal,
+    #[default]
+    Full,
+}
+
+impl Synchronous {
+    pub fn parse(s: &str) -> Option<Synchronous> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "normal" => Some(Synchronous::Normal),
+            "full" => Some(Synchronous::Full),
+            _ => None,
+        }
+    }
+
+    fn pragma(self) -> &'static str {
+        match self {
+            Synchronous::Normal => "PRAGMA synchronous = NORMAL;",
+            Synchronous::Full => "PRAGMA synchronous = FULL;",
+        }
+    }
+}
+
+pub fn init_conn(c: &mut Connection, sync: Synchronous) -> rusqlite::Result<()> {
+    c.execute_batch(PRAGMAS)?;
+    c.execute_batch(sync.pragma())
 }
 
 /// Перенести WAL в базу и обрезать его до нуля. В WAL лежат прежние версии страниц
@@ -35,9 +69,9 @@ pub fn truncate_wal(c: &Connection) -> rusqlite::Result<()> {
 }
 
 /// Открывает одно соединение (служебные команды).
-pub fn open(path: &Path) -> rusqlite::Result<Connection> {
+pub fn open(path: &Path, sync: Synchronous) -> rusqlite::Result<Connection> {
     let mut c = Connection::open(path)?;
-    init_conn(&mut c)?;
+    init_conn(&mut c, sync)?;
     Ok(c)
 }
 
@@ -55,13 +89,13 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
 /// умолчанию при уничтожении пула ждёт запланированного запуска уборки — до 30 с
 /// живут три потока на пул. Здесь отложенные задачи отбрасываются, и потоки
 /// завершаются сразу: важно, когда пулы открываются и закрываются часто.
-pub fn pool(path: &Path, max_size: u32, keep_open: bool) -> Pool {
+pub fn pool(path: &Path, max_size: u32, keep_open: bool, sync: Synchronous) -> Pool {
     let workers = ScheduledThreadPool::builder()
         .num_threads(3)
         .thread_name_pattern("r2d2-worker-{}")
         .on_drop_behavior(OnPoolDropBehavior::DiscardPendingScheduled)
         .build();
-    let manager = SqliteConnectionManager::file(path).with_init(init_conn);
+    let manager = SqliteConnectionManager::file(path).with_init(move |c| init_conn(c, sync));
     r2d2::Pool::builder()
         .thread_pool(Arc::new(workers))
         .max_size(max_size)
@@ -111,4 +145,34 @@ pub fn u(v: i64) -> u64 {
 /// u64 протокола в i64 для SQLite.
 pub fn i(v: u64) -> i64 {
     i64::try_from(v).unwrap_or(i64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn synchronous(c: &Connection) -> i64 {
+        c.query_row("PRAGMA synchronous", [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn synchronous_applies_to_open_and_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.db");
+        assert_eq!(Synchronous::default(), Synchronous::Full);
+        // FULL = 2, NORMAL = 1
+        assert_eq!(synchronous(&open(&path, Synchronous::Full).unwrap()), 2);
+        assert_eq!(synchronous(&open(&path, Synchronous::Normal).unwrap()), 1);
+        let full = pool(&path, 1, false, Synchronous::Full);
+        assert_eq!(synchronous(&full.get().unwrap()), 2);
+        let normal = pool(&path, 1, false, Synchronous::Normal);
+        assert_eq!(synchronous(&normal.get().unwrap()), 1);
+    }
+
+    #[test]
+    fn synchronous_parse() {
+        assert_eq!(Synchronous::parse(" FULL "), Some(Synchronous::Full));
+        assert_eq!(Synchronous::parse("normal"), Some(Synchronous::Normal));
+        assert_eq!(Synchronous::parse("off"), None);
+    }
 }

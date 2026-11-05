@@ -20,7 +20,10 @@ use crate::state::{list_vault_dirs, open_vault, vault_dir};
 pub(crate) fn server_conn(config: &Config) -> anyhow::Result<rusqlite::Connection> {
     std::fs::create_dir_all(&config.data_dir)
         .with_context(|| format!("не создаётся каталог данных {}", config.data_dir.display()))?;
-    let mut c = db::open(&config.data_dir.join("server.db"))?;
+    let mut c = db::open(
+        &config.data_dir.join("server.db"),
+        config.sqlite_synchronous,
+    )?;
     server::migrate_server(&mut c)?;
     Ok(c)
 }
@@ -550,7 +553,7 @@ pub fn verify(
     let mut clean = true;
     let server_db = config.data_dir.join("server.db");
     if server_db.is_file() {
-        let errors = crate::verify::integrity(&db::open(&server_db)?)?;
+        let errors = crate::verify::integrity(&db::open(&server_db, config.sqlite_synchronous)?)?;
         for e in &errors {
             println!("server.db: {e}");
         }

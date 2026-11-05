@@ -35,7 +35,7 @@ pub fn sweep_throttle(config: &Config, now: i64) -> anyhow::Result<usize> {
     if !path.is_file() {
         return Ok(0);
     }
-    let mut c = crate::db::open(&path)?;
+    let mut c = crate::db::open(&path, config.sqlite_synchronous)?;
     crate::db::server::migrate_server(&mut c)?;
     Ok(crate::throttle::cleanup(&c, now)? + crate::db::server::sweep_join_codes(&c, now)?)
 }

@@ -210,7 +210,7 @@ async fn backup_is_consistent_copy() {
         b"backed up"
     );
     // токен работает и на копии
-    let pool = selfsync_server::db::open(&target.join("server.db")).unwrap();
+    let pool = selfsync_server::db::open(&target.join("server.db"), Default::default()).unwrap();
     assert!(
         selfsync_server::db::server::authenticate(&pool, &t)
             .unwrap()
