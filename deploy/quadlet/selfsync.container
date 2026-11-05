@@ -4,12 +4,14 @@ Requires=selfsync.socket
 After=selfsync.socket
 
 [Container]
-# Готового публичного образа нет: соберите его заранее из бинаря релиза
-# (сверяется с SHA256SUMS, Rust не нужен), из корня репозитория:
+# Образ из бинаря релиза server-X.Y.Z (amd64, arm64). Версия указана явно: при
+# обновлении поменяйте её и выполните
+#   systemctl --user daemon-reload && systemctl --user restart selfsync.socket
+# Собрать тот же образ у себя, без реестра (из корня репозитория):
 #   podman build -t localhost/selfsync:local --build-arg VERSION=X.Y.Z deploy/quickstart
-# X.Y.Z — версия релиза server-X.Y.Z. Pull=never: образ не ищется в реестрах.
-Image=localhost/selfsync:local
-Pull=never
+# и указать Image=localhost/selfsync:local, Pull=never.
+Image=ghcr.io/darkildo/selfsync:0.8.0
+Pull=missing
 Exec=socket --idle-timeout 10m
 Volume=%h/selfsync-data:/data:Z
 ReadOnly=true

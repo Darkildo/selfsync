@@ -1,7 +1,11 @@
 # syntax=docker/dockerfile:1
 # Готовый статический бинарь из релиза server-X.Y.Z (сверяется с SHA256SUMS) в
-# distroless: без исходников и сборки на сервере.
-FROM alpine:3.22 AS fetch
+# distroless: без исходников и сборки на сервере. Этот же файл собирает образ
+# ghcr.io/darkildo/selfsync (.github/workflows/image.yml).
+#
+# Стадия fetch идёт на платформе сборки и только скачивает бинарь под TARGETARCH:
+# образ для amd64 и arm64 собирается без эмуляции (QEMU).
+FROM --platform=$BUILDPLATFORM alpine:3.22 AS fetch
 ARG VERSION
 ARG TARGETARCH
 RUN apk add --no-cache curl
@@ -19,6 +23,13 @@ RUN set -eu; \
     mkdir -p /out/data
 
 FROM gcr.io/distroless/static-debian12:nonroot
+ARG VERSION
+# source связывает пакет в GHCR с репозиторием.
+LABEL org.opencontainers.image.source="https://github.com/Darkildo/selfsync" \
+      org.opencontainers.image.title="selfsync" \
+      org.opencontainers.image.description="Self-hosted sync server for Obsidian" \
+      org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.licenses="MIT"
 COPY --from=fetch /selfsync /usr/local/bin/selfsync
 COPY --from=fetch --chown=65532:65532 /out/data /data
 ENV SELFSYNC_DATA_DIR=/data
