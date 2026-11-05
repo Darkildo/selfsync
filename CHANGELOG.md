@@ -5,6 +5,9 @@ Release notes for each version; earlier versions are described on the [releases 
 ## Unreleased
 
 - **Deployment, fix.** `deploy/docker-compose.yml` and the Podman Quadlet unit referred to `ghcr.io/selfsync/selfsync:latest`. That image was never published, and the `selfsync` namespace on GitHub belongs to an unrelated account, so a pull could fetch someone else's image. Both now use the local tag `localhost/selfsync:local` and never pull it (`pull_policy: build`, `Pull=never`); the README says how to build the image. There is no prebuilt public image.
+- **Server, fix.** `selfsync gc` no longer erases a recently deleted file that was restored and deleted again while the garbage collection plan was being built: such a file now stays in the trash, with its history, until its own retention window ends. Before, the stale plan erased it at once and recorded an older `purged_seq`, so a device that had seen the restore but not the second deletion could keep the file. The background sweeper now selects and erases expired deleted files in one write transaction, closing the same race.
+- **Server.** New setting `SELFSYNC_SQLITE_SYNCHRONOUS` (`sqlite_synchronous` in TOML): `full` (the new default) or `normal` (as before). With `full` an answer to a sync request means the change is on disk and survives a power loss or OS crash; it costs one `fsync` per sync request. See “Durability” in the README.
+- Plugin and protocol are unchanged.
 
 ## 0.8.0
 

@@ -164,6 +164,7 @@ Environment variables (or TOML via `--config`; variables take precedence):
 | `SELFSYNC_LOG` | `info` | log level (file names never reach the log) |
 | `SELFSYNC_TRUSTED_PROXY` | `0` | `1`: take the client address from `X-Forwarded-For` (rightmost entry) |
 | `SELFSYNC_METRICS_TOKEN` | - | enables `GET /metrics` behind this bearer token (16 characters or more) |
+| `SELFSYNC_SQLITE_SYNCHRONOUS` | `full` | `full`: an answer to a sync request means the change is on disk; `normal`: faster on slow disks, but a power loss or OS crash can drop the last acknowledged changes |
 | `SELFSYNC_RATE_REDEEM_ATTEMPTS` | `10` | wrong connect codes from one address per window |
 | `SELFSYNC_RATE_REDEEM_WINDOW` | `15m` | counting window for connect codes |
 | `SELFSYNC_RATE_REDEEM_BLOCK` | `15m` | how long an address is blocked after the limit |
@@ -177,7 +178,9 @@ Environment variables (or TOML via `--config`; variables take precedence):
 | `SELFSYNC_QUOTA_MAX_FILE` | - | default per vault: largest file (never above `SELFSYNC_MAX_BLOB_SIZE`) |
 | `SELFSYNC_QUOTA_SERVER` | - | all vaults together: storage size past which new files are refused |
 
-In TOML the limits go into a `[rate]` section with the same names in lower case and without the prefix (`redeem_attempts = 10`, `auth_window = "1m"`); `trusted_proxy = true` is a top-level key. A threshold of `0` turns that limit off; windows and blocks must be at least one second, otherwise the server refuses to start.
+**Durability.** The databases run SQLite in WAL mode. With `full` (the default) every commit waits for the write-ahead log to reach the disk, so once a client gets an answer, the change survives a power loss or an OS crash as far as the disk itself keeps its promises; this costs one `fsync` per sync request (a fraction of a millisecond on an SSD, several milliseconds on a hard disk). With `normal` the log reaches the disk only at checkpoints: the database never gets corrupted and a crash of the server process loses nothing, but a power loss can roll the server back by the last few seconds of acknowledged changes. Clients notice a rollback only while the server's change counter is still below what they have seen, so a rollback can leave devices out of step.
+
+In TOML the limits go into a `[rate]` section with the same names in lower case and without the prefix (`redeem_attempts = 10`, `auth_window = "1m"`); `trusted_proxy = true` and `sqlite_synchronous = "normal"` are top-level keys. A threshold of `0` turns that limit off; windows and blocks must be at least one second, otherwise the server refuses to start.
 
 **Failed-attempt limits.** Codes and tokens are far too long to guess, but a scanner should neither load SQLite nor look like normal traffic in the log. The server counts only failures (a wrong connect code, a rejected token) and answers `429` with `Retry-After` once a limit is reached; the plugin and the command-line client wait that long without retrying. Counters live in `server.db`, so they work in CGI mode too; `selfsync sweep` removes those idle for a day. Requests without a token are not counted. The client address is the connection address (in CGI, `REMOTE_ADDR`). Behind a reverse proxy in `serve`/`socket` mode every request comes from the proxy: set `SELFSYNC_TRUSTED_PROXY=1` and let the proxy pass the address (the configs in [deploy/](deploy/) already do). Never enable it without a proxy that overwrites the header - anyone could then pick their own address. Without a known address (Unix socket, no trusted proxy) all clients share one counter.
 

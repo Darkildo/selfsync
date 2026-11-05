@@ -847,22 +847,29 @@ pub fn purge_deleted(
     paths: &[Vec<u8>],
 ) -> rusqlite::Result<(u64, Vec<Vec<u8>>)> {
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let res = purge_in(&tx, paths)?;
+    tx.commit()?;
+    Ok(res)
+}
+
+/// Стирает tombstone'ы из `paths` внутри уже открытой транзакции записи.
+/// `purged_seq` — по `seq` реально стёртых строк.
+fn purge_in(tx: &Connection, paths: &[Vec<u8>]) -> rusqlite::Result<(u64, Vec<Vec<u8>>)> {
     let mut n = 0;
     let mut hashes = Vec::new();
     let mut max_seq = 0u64;
     for p in paths {
-        if let Some(row) = get_file(&tx, p)?
+        if let Some(row) = get_file(tx, p)?
             && row.deleted
         {
-            hashes.extend(path_hashes(&tx, p)?);
+            hashes.extend(path_hashes(tx, p)?);
             tx.execute("DELETE FROM revisions WHERE path = ?1", params![p])?;
             tx.execute("DELETE FROM files WHERE path = ?1", params![p])?;
             max_seq = max_seq.max(row.seq);
             n += 1;
         }
     }
-    bump_purged_seq(&tx, max_seq)?;
-    tx.commit()?;
+    bump_purged_seq(tx, max_seq)?;
     Ok((n, hashes))
 }
 
@@ -912,18 +919,24 @@ fn bump_purged_seq(tx: &Connection, s: u64) -> rusqlite::Result<()> {
 
 /// Sweeper: стирает tombstone'ы старше окна хранения. Источники переименований
 /// (их история — начало истории переехавшего файла) оставляются `gc`.
+///
+/// Выборка и стирание — в одной транзакции записи: иначе путь, восстановленный и
+/// снова удалённый между ними, стёрся бы вместе со свежим tombstone'ом раньше
+/// окна хранения.
 pub fn sweep(c: &mut Connection, now: i64) -> rusqlite::Result<(u64, Vec<Vec<u8>>)> {
-    let retention = i64::from(retention_days(c)?) * DAY_MS;
+    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let retention = i64::from(retention_days(&tx)?) * DAY_MS;
     let cutoff = now - retention;
     let paths: Vec<Vec<u8>> = {
-        let mut st = c.prepare(
+        let mut st = tx.prepare(
             "SELECT path FROM files WHERE deleted = 1 AND renamed_to IS NULL AND deleted_at < ?1",
         )?;
         st.query_map(params![cutoff], |r| r.get(0))?
             .collect::<Result<_, _>>()?
     };
-    let res = purge_deleted(c, &paths)?;
-    set_meta_int(c, "last_sweep", now)?;
+    let res = purge_in(&tx, &paths)?;
+    set_meta_int(&tx, "last_sweep", now)?;
+    tx.commit()?;
     Ok(res)
 }
 
@@ -1470,7 +1483,7 @@ mod tests {
     fn purge_leaves_no_plaintext_on_disk() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("meta.db");
-        let mut c = crate::db::open(&path).unwrap();
+        let mut c = crate::db::open(&path, crate::db::Synchronous::Full).unwrap();
         migrate_vault(&mut c).unwrap();
         let name = "секретная-заметка.md";
         run(&mut c, vec![put(name, 0, 1)]);

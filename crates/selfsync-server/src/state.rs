@@ -123,7 +123,12 @@ impl AppState {
         }
         std::fs::create_dir_all(&self.config.data_dir)?;
         let path = self.config.data_dir.join("server.db");
-        let pool = db::pool(&path, self.pool_size(), self.keep_open);
+        let pool = db::pool(
+            &path,
+            self.pool_size(),
+            self.keep_open,
+            self.config.sqlite_synchronous,
+        );
         {
             let mut c = pool.get()?;
             db::server::migrate_server(&mut c)?;
@@ -214,7 +219,12 @@ fn open_vault_pool(
     let dir = vault_dir(config, name);
     let blobs = BlobStore::new(&dir);
     blobs.ensure_dirs()?;
-    let pool = db::pool(&dir.join("meta.db"), pool_size, keep_open);
+    let pool = db::pool(
+        &dir.join("meta.db"),
+        pool_size,
+        keep_open,
+        config.sqlite_synchronous,
+    );
     let seq = {
         let mut c = pool.get()?;
         db::vault::migrate_vault(&mut c)?;

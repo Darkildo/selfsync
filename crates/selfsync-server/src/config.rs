@@ -7,6 +7,8 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use serde::Deserialize;
 
+use crate::db::Synchronous;
+
 pub const DEFAULT_MAX_BLOB: u64 = 512 * 1024 * 1024;
 pub const DEFAULT_MAX_BODY: u64 = 16 * 1024 * 1024;
 /// Однократная загрузка блоба (`PUT /v1/blobs/{hash}`).
@@ -27,6 +29,8 @@ pub struct Config {
     /// Bearer-токен для `GET /metrics`; `None` — метрик нет (404).
     pub metrics_token: Option<String>,
     pub quota: QuotaConfig,
+    /// `PRAGMA synchronous` всех баз (`SELFSYNC_SQLITE_SYNCHRONOUS`).
+    pub sqlite_synchronous: Synchronous,
 }
 
 /// Лимиты vault'а; `0` — без ограничения.
@@ -101,6 +105,7 @@ struct FileConfig {
     log: Option<String>,
     trusted_proxy: Option<bool>,
     metrics_token: Option<String>,
+    sqlite_synchronous: Option<String>,
     #[serde(default)]
     rate: FileRate,
     #[serde(default)]
@@ -190,6 +195,14 @@ impl Config {
             bail!("SELFSYNC_METRICS_TOKEN: не короче {METRICS_TOKEN_MIN} символов");
         }
         let quota = load_quota(&env, file.quota)?;
+        let sqlite_synchronous = match env("SELFSYNC_SQLITE_SYNCHRONOUS")
+            .or(file.sqlite_synchronous)
+        {
+            Some(s) => Synchronous::parse(&s).with_context(|| {
+                format!("SELFSYNC_SQLITE_SYNCHRONOUS: ожидается full или normal, получено «{s}»")
+            })?,
+            None => Synchronous::default(),
+        };
         Ok(Config {
             data_dir,
             public_url,
@@ -201,6 +214,7 @@ impl Config {
             trusted_proxy,
             metrics_token,
             quota,
+            sqlite_synchronous,
         })
     }
 
@@ -217,6 +231,7 @@ impl Config {
             trusted_proxy: false,
             metrics_token: None,
             quota: QuotaConfig::default(),
+            sqlite_synchronous: Synchronous::default(),
         }
     }
 }

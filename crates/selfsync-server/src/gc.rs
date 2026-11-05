@@ -197,10 +197,13 @@ pub fn execute(c: &mut Connection, store: &BlobStore, plan: &GcPlan) -> anyhow::
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut max_seq = 0u64;
         for (path, seq) in &plan.tombstones {
-            // Перепроверка: путь мог ожить после построения плана.
+            // Перепроверка: план строится без блокировки, и за это время путь мог
+            // ожить и снова удалиться — уже свежим tombstone'ом, которому ещё жить
+            // до конца окна хранения. `seq` меняется при любой записи строки, так
+            // что совпадение значит: это тот самый tombstone из плана.
             let still: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM files WHERE path = ?1 AND deleted = 1",
-                params![path],
+                "SELECT COUNT(*) FROM files WHERE path = ?1 AND deleted = 1 AND seq = ?2",
+                params![path, i(*seq)],
                 |r| r.get(0),
             )?;
             if still == 0 {
