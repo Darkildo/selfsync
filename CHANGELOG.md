@@ -2,7 +2,7 @@
 
 Release notes for each version; earlier versions are described on the [releases page](https://github.com/Darkildo/selfsync/releases).
 
-## Unreleased
+## 0.10.0
 
 - **Plugin, mobile, fix.** A file that the mobile file system lists but whose metadata cannot be read (Obsidian answers "no such file") is no longer taken for deleted: the plugin asks again and checks the folder listing; if the file is still there it is skipped until the next scan instead of being deleted on every device. For extensions: `FileMeta.unreadable`.
 - **Core, fix.** A same-length edit saved within the same second or two as the file was last seen (for example right after a download) on a file system with coarse modification times (FAT/exFAT, some network drives) without a change time (mobile) kept both the size and the modification time and went unnoticed. Files changed within 2 seconds of being seen are now hashed again the next time they are checked (as Git does for "racily clean" files). Files over 8 MB are not.
