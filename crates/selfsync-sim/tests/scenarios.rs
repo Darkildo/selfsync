@@ -4,6 +4,7 @@
 
 use selfsync_core::engine::{Event, Notice, SyncState, UiCommand, UiResult};
 use selfsync_core::path::NameRules;
+use selfsync_core::tempname::{TEMP_SUFFIX, temp_base};
 use selfsync_sim::{PASSWORD, SimConfig, World, tokens_in};
 
 fn quiet(clients: usize) -> SimConfig {
@@ -1925,6 +1926,94 @@ fn temp_name_taken_by_user_file() {
         files.keys()
     );
     assert_eq!(w.clients[1].fs.display_name("note.md"), Some("Note.md"));
+}
+
+// Имя на пределе 255 байт (issue #11): временному имени с суффиксом места не
+// остаётся, база укорачивается — и брошенный временный файл всё равно доводится.
+
+/// 252 байта имени + `.md`.
+fn long_name(stem: &str) -> String {
+    format!("{}.md", stem.repeat(252 / stem.len()))
+}
+
+#[test]
+fn long_nfd_name_does_not_block_other_files() {
+    let mut w = World::new(quiet(2));
+    // 247 байт в NFD, 245 в NFC: `{nfc}.nfc.selfsync-tmp` длиннее 255 байт.
+    let nfd = format!("{}\u{438}\u{306}.md", "f".repeat(240));
+    let nfc = format!("{}\u{439}.md", "f".repeat(240));
+    let t0 = w.ledger.fresh(0);
+    w.user_write(0, &nfd, format!("nfd {t0}\n").into_bytes());
+    let t1 = w.ledger.fresh(0);
+    w.user_write(0, "normal.md", format!("normal {t1}\n").into_bytes());
+    w.sync(0);
+    w.sync(1);
+    finish(&mut w);
+    let files = w.server_files();
+    assert!(
+        String::from_utf8_lossy(&files[&nfc]).contains(&t0),
+        "{:?}",
+        files.keys()
+    );
+    assert!(String::from_utf8_lossy(&files["normal.md"]).contains(&t1));
+    assert_eq!(w.clients[1].fs.display_name(&nfc), Some(nfc.as_str()));
+}
+
+#[test]
+fn interrupted_commit_of_long_name_is_completed() {
+    let mut w = World::new(quiet(2));
+    let name = long_name("я");
+    shared_note(&mut w, &name);
+    let ta = edit_line(&mut w, 0, &name, 0);
+    w.sync(0);
+    let fresh = w.server_files()[&name].clone();
+    let now = w.client_now(1);
+    let commit = format!("{}.commit{TEMP_SUFFIX}", temp_base(&name));
+    assert!(commit.len() <= 255, "{}", commit.len());
+    w.clients[1].fs.user_write(&commit, fresh, now);
+    w.clients[1].fs.user_delete(&name);
+    w.kill(1);
+    finish(&mut w);
+    assert!(String::from_utf8_lossy(w.clients[1].fs.read_file(&name).unwrap()).contains(&ta));
+    assert!(conflict_copies(&w).is_empty(), "{:?}", conflict_copies(&w));
+    assert!(w.clients[1].fs.get(&commit).is_none());
+}
+
+#[test]
+fn interrupted_rename_of_long_name_is_completed() {
+    let mut w = World::new(quiet(2));
+    let name = format!("dir/{}", long_name("a"));
+    let t = shared_note(&mut w, &name);
+    // Убит посреди двухшагового переименования (смена регистра): файл лежит под
+    // укороченным временным именем.
+    let data = w.clients[1].fs.read_file(&name).unwrap().clone();
+    let now = w.client_now(1);
+    let temp = format!("{}.case{TEMP_SUFFIX}", temp_base(&name));
+    w.clients[1].fs.user_write(&temp, data, now);
+    w.clients[1].fs.user_delete(&name);
+    w.kill(1);
+    finish(&mut w);
+    assert!(String::from_utf8_lossy(w.clients[1].fs.read_file(&name).unwrap()).contains(&t));
+    assert!(w.clients[1].fs.get(&temp).is_none());
+    assert_eq!(w.server_files().len(), 1, "{:?}", w.server_files().keys());
+}
+
+#[test]
+fn abandoned_long_temp_of_unknown_file_keeps_its_content() {
+    let mut w = World::new(quiet(2));
+    w.sync(0);
+    // Хэш пути, которого индекс не знает: файл остаётся под укороченным именем.
+    let base = temp_base(&long_name("q"));
+    let t = w.ledger.fresh(0);
+    let now = w.client_now(0);
+    w.clients[0].fs.user_write(
+        &format!("{base}.nfc{TEMP_SUFFIX}"),
+        format!("x {t}\n").into_bytes(),
+        now,
+    );
+    w.kill(0);
+    finish(&mut w);
+    assert!(String::from_utf8_lossy(&w.server_files()[&base]).contains(&t));
 }
 
 // Пока push читал файл, его переименовали и на старом месте создали новый того же

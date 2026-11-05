@@ -167,3 +167,34 @@ test("адаптер: лимит скачивания, «Скачать» и о�
   await phone.stop();
   await desk.stop();
 });
+
+test("адаптер: имена на пределе 255 байт приходят, прерванная запись доводится (#11)", async () => {
+  const [phone, stub, desk] = await mobileAndDesktop("adapter-long");
+  const ascii = `${"g".repeat(252)}.md`;
+  const cyr = `dir/${"я".repeat(126)}.md`;
+  await desk.write(ascii, "ascii\n");
+  await desk.write(cyr, "кириллица\n");
+  await desk.sync();
+  await phone.sync();
+  assert.equal(stub.text(ascii), "ascii\n");
+  assert.equal(stub.text(cyr), "кириллица\n");
+  assert.ok(!stub.names().some((n) => n.endsWith(".selfsync-tmp")), "временных файлов не осталось");
+
+  // Убит между удалением старой версии и переименованием новой: файла нет, новая
+  // версия — во временном файле с укороченным именем.
+  await desk.write(ascii, "ascii v2\n");
+  await desk.sync();
+  stub.failRenameTo = (to) => to === ascii;
+  await phone.sync();
+  assert.equal(stub.text(ascii), null);
+  assert.ok(stub.names().some((n) => n.endsWith(".commit.selfsync-tmp")));
+  stub.failRenameTo = null;
+  await phone.restart({ caseInsensitive: true, hardExcludes: [".obsidian/"] });
+  await phone.sync();
+  assert.equal(stub.text(ascii), "ascii v2\n", "запись доведена после перезапуска");
+  assert.ok(!stub.names().some((n) => n.endsWith(".selfsync-tmp")), "временных файлов не осталось");
+  await desk.sync();
+  assert.equal(await desk.read(ascii), "ascii v2\n", "удаление не ушло на другое устройство");
+  await phone.stop();
+  await desk.stop();
+});

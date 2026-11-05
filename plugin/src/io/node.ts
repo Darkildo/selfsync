@@ -8,9 +8,7 @@
 type FsPromises = typeof import("node:fs/promises");
 
 import type { FileMeta } from "../types.ts";
-import { DirNames, type FileBackend, joinPath, nameOf, parentOf, realName } from "./backend.ts";
-
-const TEMP_SUFFIX = ".selfsync-tmp";
+import { DirNames, type FileBackend, joinPath, nameOf, parentOf, realName, TEMP_SUFFIX, tempBase } from "./backend.ts";
 
 export interface NodeBackendOptions {
   /** ФС различает регистр (Linux): настоящее имя можно не искать в каталоге. */
@@ -126,8 +124,11 @@ export class NodeBackend implements FileBackend {
   async writeAtomic(path: string, data: Uint8Array): Promise<FileMeta> {
     await this.inside(path);
     await this.fsp.mkdir(this.abs(parentOf(path)), { recursive: true });
-    await writeDurable(this.fsp, this.abs(path) + TEMP_SUFFIX, data);
-    await this.fsp.rename(this.abs(path) + TEMP_SUFFIX, this.abs(path));
+    // Рядом с файлом: rename в пределах каталога атомарен. Длинное имя (до 255 байт)
+    // с суффиксом не поместилось бы — тогда база временного имени укорочена.
+    const tmp = this.abs(tempBase(path)) + TEMP_SUFFIX;
+    await writeDurable(this.fsp, tmp, data);
+    await this.fsp.rename(tmp, this.abs(path));
     this.names.added(path);
     return (await this.stat(path)) ?? { path, size: data.length, mtime: 0, dir: false };
   }
@@ -178,7 +179,7 @@ export class NodeBackend implements FileBackend {
     if (this.opts.trash) return this.opts.trash(path);
     const dir = this.stored("trash");
     await this.fsp.mkdir(dir, { recursive: true });
-    await this.fsp.rename(this.abs(path), `${dir}/${Date.now()}-${nameOf(path)}`);
+    await this.fsp.rename(this.abs(path), `${dir}/${Date.now()}-${nameOf(tempBase(path))}`);
   }
 
   async tempWrite(name: string, offset: number, data: Uint8Array): Promise<void> {

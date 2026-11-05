@@ -12,6 +12,7 @@ use super::types::{FileMeta, LogLevel, Notice};
 use crate::hash::Hash;
 use crate::index::{FileState, LocalObs};
 use crate::path::VaultPath;
+use crate::tempname;
 
 const DIR_OBS: LocalObs = LocalObs {
     size: 0,
@@ -79,37 +80,67 @@ async fn recover_temp(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
     // `X.commit.selfsync-tmp` уже записан целиком. Если X нет — убит между удалением
     // X и переименованием: довести. Если X есть — до замены не дошло, а запись
     // повторит следующий цикл (индекс её ещё не учёл).
-    if let Some(target) = base.strip_suffix(".commit") {
-        if cx.stat(target).await?.is_none() {
+    if let Some(stem) = base.strip_suffix(".commit") {
+        // Укороченное имя, чей путь не в индексе: файл скачивался впервые, и
+        // следующий цикл скачает его снова.
+        let Some(target) = target_of(cx, stem) else {
+            return trash_abandoned(cx, raw).await;
+        };
+        if cx.stat(&target).await?.is_none() {
             cx.log(
                 LogLevel::Warn,
                 format!("доведена прерванная запись: {target}"),
             );
-            return Ok(cx.rename(raw, target).await?.map(|_| target.to_owned()));
+            return Ok(cx.rename(raw, &target).await?.map(|_| target));
         }
         cx.trash(raw, super::types::Expect::Any).await?;
         return Ok(None);
     }
-    let target = strip_tag(base, ".case").or_else(|| strip_tag(base, ".nfc"));
-    let Some(target) = target else {
-        cx.log(
-            LogLevel::Warn,
-            format!("брошенный временный файл убран в корзину: {raw}"),
-        );
-        cx.trash(raw, super::types::Expect::Any).await?;
-        return Ok(None);
+    let Some(stem) = strip_tag(base, ".case").or_else(|| strip_tag(base, ".nfc")) else {
+        return trash_abandoned(cx, raw).await;
     };
-    let dest = if cx.stat(target).await?.is_none() {
-        target.to_owned()
+    // Укороченное имя без пути в индексе: файл остаётся под укороченным именем —
+    // лучше так, чем потерять его содержимое.
+    let target = target_of(cx, stem).unwrap_or_else(|| stem.to_owned());
+    let dest = if cx.stat(&target).await?.is_none() {
+        target
     } else {
         let (date, _) = super::resolve::stamp(cx.now(), cx.with(|s| s.cfg.tz_offset_min));
-        super::resolve::unique_copy(cx, target, &format!("recovered {date}")).await?
+        super::resolve::unique_copy(cx, &target, &format!("recovered {date}")).await?
     };
     cx.log(
         LogLevel::Warn,
         format!("доведено прерванное переименование: {raw} → {dest}"),
     );
     Ok(cx.rename(raw, &dest).await?.map(|_| dest))
+}
+
+async fn trash_abandoned(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
+    cx.log(
+        LogLevel::Warn,
+        format!("брошенный временный файл убран в корзину: {raw}"),
+    );
+    cx.trash(raw, super::types::Expect::Any).await?;
+    Ok(None)
+}
+
+/// Путь назначения по базе временного имени: сама база или, если она укорочена
+/// (`tempname::temp_base`), путь из индекса в том же каталоге с тем же хэшем.
+/// `None` — укороченная база, чей путь индексу не известен.
+fn target_of(cx: &Ctx, base: &str) -> Option<String> {
+    let Some(hash) = tempname::shortened_hash(base) else {
+        return Some(base.to_owned());
+    };
+    let dir = tempname::dir_of(base);
+    cx.with(|s| {
+        s.index
+            .files
+            .keys()
+            .find(|k| tempname::dir_of(k) == dir && tempname::path_hash(k) == hash)
+            .cloned()
+            // Своё имя файла, случайно похожее на укороченное.
+            .or_else(|| s.index.files.contains_key(base).then(|| base.to_owned()))
+    })
 }
 
 /// `X.tag` или `X.tag-N` (см. `Ctx::free_temp`) → `X`.
@@ -515,6 +546,22 @@ fn take_links(cx: &Ctx, listing: Vec<FileMeta>) -> Vec<FileMeta> {
     files
 }
 
+/// Ошибка ввода-вывода с одним файлом (например, временное имя длиннее, чем
+/// позволяет ФС): файл пропускается до следующего обхода и удалённым не считается, а
+/// не обрывает весь цикл. Прочие ошибки (сеть, остановка) пробрасываются.
+fn skip_stuck(cx: &Ctx, raw: &str, e: SyncError) -> SyncResult<Option<String>> {
+    let SyncError::Io(msg) = e else {
+        return Err(e);
+    };
+    cx.log(
+        LogLevel::Warn,
+        format!("файл пропущен до следующего обхода: {raw}: {msg}"),
+    );
+    let key =
+        VaultPath::normalize(raw).map_or_else(|_| raw.to_owned(), |vp| vp.as_str().to_owned());
+    Ok(Some(key))
+}
+
 /// Сканирование: полный обход или пути из событий.
 pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
     let ev = cx.with(|s| s.renames.clone());
@@ -545,17 +592,29 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
             s.dirty.clear();
         });
         let mut present: BTreeMap<String, FileMeta> = BTreeMap::new();
+        // Файлы, с которыми не вышло (переименование в NFC, доведение брошенного
+        // временного файла): они на диске, удалёнными не считаются.
+        let mut stuck: BTreeSet<String> = BTreeSet::new();
         for mut m in listing {
-            if m.path.ends_with(super::ctx::TEMP_SUFFIX)
-                && !cx.with(|s| s.excludes.is_excluded(&m.path))
-            {
-                match recover_temp(cx, &m.path).await? {
-                    Some(p) => m.path = p,
-                    None => continue,
+            let raw = m.path.clone();
+            let p = async {
+                if m.path.ends_with(super::ctx::TEMP_SUFFIX)
+                    && !cx.with(|s| s.excludes.is_excluded(&m.path))
+                {
+                    match recover_temp(cx, &m.path).await? {
+                        Some(p) => m.path = p,
+                        None => return Ok(None),
+                    }
                 }
+                canonical(cx, &m.path, m.dir).await
             }
-            if let Some(p) = canonical(cx, &m.path, m.dir).await? {
-                present.insert(p, m);
+            .await;
+            match p {
+                Ok(Some(p)) => {
+                    present.insert(p, m);
+                }
+                Ok(None) => {}
+                Err(e) => stuck.extend(skip_stuck(cx, &raw, e)?),
             }
         }
         for (p, m) in &present {
@@ -571,7 +630,9 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
         });
         let gone: Vec<String> = tracked
             .into_iter()
-            .filter(|p| !present.contains_key(p) && !cx.with(|s| s.is_excluded(p)))
+            .filter(|p| {
+                !present.contains_key(p) && !stuck.contains(p) && !cx.with(|s| s.is_excluded(p))
+            })
             .collect();
         hold_mass_delete(cx, &present, &gone)?;
         for p in gone {
@@ -594,8 +655,12 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
                     {
                         mark_gone(cx, vp.as_str(), &mut delta);
                     }
-                    if let Some(p) = canonical(cx, &actual, m.dir).await? {
-                        observe(cx, &p, &m, &mut delta).await?;
+                    match canonical(cx, &actual, m.dir).await {
+                        Ok(Some(p)) => observe(cx, &p, &m, &mut delta).await?,
+                        Ok(None) => {}
+                        Err(e) => {
+                            skip_stuck(cx, &actual, e)?;
+                        }
                     }
                 }
                 None => {

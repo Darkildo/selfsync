@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use selfsync_core::engine::{Action, Expect, FileMeta, HttpRequest, IoResult};
+use selfsync_core::path::MAX_SEGMENT_BYTES;
+use selfsync_core::tempname::{self, TEMP_SUFFIX};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::config::{STATE_DIR, TRASH_DIR};
-
-const TEMP_SUFFIX: &str = ".selfsync-tmp";
 
 pub struct Exec {
     root: PathBuf,
@@ -175,7 +175,12 @@ impl Exec {
                 if let Some(parent) = target.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
-                let tmp = PathBuf::from(format!("{}{TEMP_SUFFIX}", target.display()));
+                // Рядом с файлом (rename в пределах каталога атомарен); имени до 255 байт
+                // не хватило бы места под суффикс — база тогда укорочена.
+                let tmp = PathBuf::from(format!(
+                    "{}{TEMP_SUFFIX}",
+                    self.abs(&tempname::temp_base(&path)).display()
+                ));
                 write_durable(&tmp, &data).await?;
                 tokio::fs::rename(&tmp, &target).await?;
                 IoResult::Stat {
@@ -528,7 +533,9 @@ impl Exec {
     async fn trash(&self, path: &str) -> std::io::Result<()> {
         let dir = self.root.join(TRASH_DIR);
         tokio::fs::create_dir_all(&dir).await?;
-        let base = path.replace('/', " - ");
+        // Путь целиком в имени файла: глубокий путь длиннее 255 байт укорачивается
+        // (место — под номер «N » впереди).
+        let base = tempname::fit_name(&path.replace('/', " - "), MAX_SEGMENT_BYTES - 4);
         let mut dest = dir.join(&base);
         let mut n = 1;
         while tokio::fs::try_exists(&dest).await? {

@@ -22,6 +22,8 @@ export class StubAdapter implements AdapterLike {
   trashed: string[] = [];
   /** Сколько раз файл переписан целиком (для проверки appendBinary). */
   rewrites = 0;
+  /** Переименование в такой путь падает — как будто приложение убито на этом шаге. */
+  failRenameTo: ((to: string) => boolean) | null = null;
 
   constructor(private caseInsensitive = false) {}
 
@@ -37,6 +39,13 @@ export class StubAdapter implements AdapterLike {
   private tick(): number {
     this.clock += 1000;
     return this.clock;
+  }
+
+  /** Имя длиннее 255 байт не создать ни на одной ФС телефона (ENAMETOOLONG). */
+  private requireName(p: string): void {
+    for (const seg of p.split("/")) {
+      if (new TextEncoder().encode(seg).length > 255) throw Object.assign(new Error(`ENAMETOOLONG: ${p}`), { code: "ENAMETOOLONG" });
+    }
   }
 
   private requireParent(p: string): void {
@@ -74,6 +83,7 @@ export class StubAdapter implements AdapterLike {
   }
 
   async writeBinary(p: string, data: ArrayBuffer): Promise<void> {
+    this.requireName(p);
     this.requireParent(p);
     const name = this.get(p)?.name ?? p.replace(/^\/+/, "");
     if (this.get(p)) this.rewrites++;
@@ -93,6 +103,7 @@ export class StubAdapter implements AdapterLike {
   async mkdir(p: string): Promise<void> {
     const clean = p.replace(/^\/+|\/+$/g, "");
     if (clean === "") return;
+    this.requireName(clean);
     const parts = clean.split("/");
     for (let i = 1; i <= parts.length; i++) {
       const sub = parts.slice(0, i).join("/");
@@ -116,7 +127,9 @@ export class StubAdapter implements AdapterLike {
     if (!n) throw new Error(`ENOENT: ${from}`);
     // Как в Obsidian: назначение занято — ошибка (кроме смены регистра того же файла).
     if (this.get(to) && this.key(to) !== this.key(from)) throw new Error("Destination file already exists!");
+    this.requireName(to);
     this.requireParent(to);
+    if (this.failRenameTo?.(to)) throw new Error(`убит перед переименованием в ${to}`);
     const fromKey = this.key(from);
     const toName = to.replace(/^\/+/, "");
     const moved: [string, Node][] = [];

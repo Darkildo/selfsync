@@ -2,12 +2,13 @@
 //
 // adapter.rename не заменяет существующий файл, поэтому атомарная запись идёт по
 // протоколу из контракта Action::Write: X.selfsync-tmp → X.commit.selfsync-tmp
-// (записан целиком) → удалить X → переименовать в X. Прерванную на любом шаге
-// запись ядро доведёт или повторит. readBinary читает файл целиком — отсюда
+// (записан целиком) → удалить X → переименовать в X (для имени, которому не хватает
+// места под суффикс, вместо X — укороченная база, `tempBase`). Прерванную на любом
+// шаге запись ядро доведёт или повторит. readBinary читает файл целиком — отсюда
 // лимит размера файла на мобильных (README) и кэш файла, читаемого по частям.
 
 import type { FileMeta } from "../types.ts";
-import { DirNames, type FileBackend, joinPath, nameOf, parentOf, realName } from "./backend.ts";
+import { DirNames, type FileBackend, joinPath, nameOf, parentOf, realName, TEMP_SUFFIX, tempBase } from "./backend.ts";
 
 /** То подмножество DataAdapter, которым пользуется бэкенд (удобно подменять в тестах). */
 export interface AdapterLike {
@@ -26,7 +27,6 @@ export interface AdapterLike {
   trashLocal(path: string): Promise<void>;
 }
 
-const TEMP_SUFFIX = ".selfsync-tmp";
 const COMMIT_SUFFIX = ".commit.selfsync-tmp";
 /** Сколько stat одновременно при обходе: каждый — вызов через мост приложения. */
 const LIST_CONCURRENCY = 12;
@@ -125,8 +125,10 @@ export class AdapterBackend implements FileBackend {
   async writeAtomic(path: string, data: Uint8Array): Promise<FileMeta> {
     this.forget();
     await this.ensureDir(parentOf(path));
-    const tmp = path + TEMP_SUFFIX;
-    const commit = path + COMMIT_SUFFIX;
+    // Длинное имя с суффиксом не поместилось бы в 255 байт: база укорачивается, а
+    // ядро находит исходный путь по хэшу в укороченном имени (`tempname` в ядре).
+    const tmp = tempBase(path) + TEMP_SUFFIX;
+    const commit = tempBase(path) + COMMIT_SUFFIX;
     await this.a.writeBinary(tmp, buffer(data));
     await this.replace(tmp, commit);
     await this.replace(commit, path);
@@ -217,7 +219,7 @@ export class AdapterBackend implements FileBackend {
   async tempCommit(name: string, path: string): Promise<FileMeta> {
     this.forget();
     await this.ensureDir(parentOf(path));
-    const commit = path + COMMIT_SUFFIX;
+    const commit = tempBase(path) + COMMIT_SUFFIX;
     await this.replace(this.stored(`tmp/${name}`), commit);
     await this.replace(commit, path);
     this.names.added(path);

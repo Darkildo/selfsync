@@ -790,3 +790,49 @@ describe("символические ссылки (#10)", () => {
     for (const c of [a, b]) await c.stop();
   });
 });
+
+describe("длинные имена (#11)", () => {
+  test("имя на 255 байт: приходит, правится и удаляется на другом устройстве", async () => {
+    const a = await TestClient.create(server, { name: "a", token: server.token("long-names", "a") });
+    const b = await TestClient.create(server, { name: "b", token: server.token("long-names", "b") });
+    const names = [`${"a".repeat(252)}.md`, `${"я".repeat(126)}.md`, `dir/${"d".repeat(252)}.md`];
+    const big = `${"e".repeat(251)}.bin`;
+    for (const n of names) await a.write(n, `v1 ${n.length}\n`);
+    await a.write(big, new Uint8Array(9 * 1024 * 1024).fill(7));
+    await a.sync();
+    await b.sync();
+    for (const n of names) assert.equal(await b.read(n), `v1 ${n.length}\n`, n);
+    assert.equal((await fsp.stat(join(b.vault, big))).size, 9 * 1024 * 1024);
+    assert.ok(!b.notices.some((n) => n.kind === "error"), JSON.stringify(b.notices));
+
+    for (const n of names) await a.write(n, `v2 ${n.length}\n`);
+    await a.sync();
+    await b.sync();
+    for (const n of names) assert.equal(await b.read(n), `v2 ${n.length}\n`, n);
+
+    for (const n of names) await fsp.rm(join(a.vault, n));
+    await a.sync();
+    await b.sync();
+    for (const n of names) assert.equal(await b.read(n), null, n);
+    const left = (await fsp.readdir(b.vault, { recursive: true })).filter((n) => n.endsWith(".selfsync-tmp"));
+    assert.deepEqual(left, []);
+    for (const c of [a, b]) await c.stop();
+  });
+
+  test("длинное NFD-имя не останавливает синк остальных файлов", async () => {
+    const a = await TestClient.create(server, { name: "a", token: server.token("long-nfd", "a") });
+    const b = await TestClient.create(server, { name: "b", token: server.token("long-nfd", "b") });
+    // 247 байт в NFD, 245 в NFC: `{nfc}.nfc.selfsync-tmp` не поместилось бы в 255.
+    const nfd = `${"f".repeat(240)}й.md`;
+    const nfc = nfd.normalize("NFC");
+    await a.write(nfd, "nfd\n");
+    await a.write("normal.md", "normal\n");
+    await a.sync();
+    await b.sync();
+    assert.equal(a.status?.state, "idle");
+    assert.equal(await b.read("normal.md"), "normal\n");
+    assert.equal(await b.read(nfc), "nfd\n");
+    assert.deepEqual(await fsp.readdir(a.vault).then((l) => l.filter((n) => n.startsWith("f"))), [nfc]);
+    for (const c of [a, b]) await c.stop();
+  });
+});

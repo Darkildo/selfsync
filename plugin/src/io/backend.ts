@@ -66,6 +66,41 @@ export function nameOf(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
+/** Суффикс временных файлов: ядро их не синхронизирует, а брошенные доводит или убирает. */
+export const TEMP_SUFFIX = ".selfsync-tmp";
+
+const NAME_MAX = 255;
+/** Место под хвост после базы (`.commit`, `.case-99` и `TEMP_SUFFIX`). */
+const RESERVE = 24;
+const PREFIX_MAX = NAME_MAX - RESERVE - 1 - 16;
+const utf8 = new TextEncoder();
+
+/** FNV-1a, 64 бита, — 16 hex-цифр (то же, что `tempname::path_hash` в ядре). */
+export function pathHash(path: string): string {
+  let h = 0xcbf29ce484222325n;
+  for (const b of utf8.encode(path)) {
+    h = ((h ^ BigInt(b)) * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return h.toString(16).padStart(16, "0");
+}
+
+/** База временного имени рядом с `path` (как `tempname::temp_base` в ядре): сам путь,
+ *  если имя с хвостом укладывается в 255 байт, иначе `{начало имени}~{хэш пути}` —
+ *  длинное имя с суффиксом не поместилось бы (ENAMETOOLONG). */
+export function tempBase(path: string): string {
+  const name = nameOf(path);
+  if (utf8.encode(name).length + RESERVE <= NAME_MAX) return path;
+  let prefix = "";
+  let n = 0;
+  for (const ch of name) {
+    const len = utf8.encode(ch).length;
+    if (n + len > PREFIX_MAX) break;
+    prefix += ch;
+    n += len;
+  }
+  return joinPath(parentOf(path), `${prefix}~${pathHash(path)}`);
+}
+
 /**
  * Настоящее имя записи каталога для запрошенного: точное совпадение, иначе то, что
  * совпадает без учёта регистра и нормализации Unicode (так ищет ФС macOS/Windows).

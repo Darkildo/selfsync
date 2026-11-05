@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use selfsync_core::engine::{Expect, FileMeta, IoResult};
-use selfsync_core::path::{NameRules, VaultPath};
+use selfsync_core::path::{MAX_SEGMENT_BYTES, NameRules, VaultPath};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Node {
@@ -46,9 +46,11 @@ impl FakeFs {
         }
     }
 
-    /// Такое имя здесь не создать (`?` на Android и т.п.).
+    /// Такое имя здесь не создать (`?` на Android и т.п.; имя длиннее 255 байт —
+    /// ENAMETOOLONG на любой ФС, в том числе временное имя с суффиксом).
     pub fn forbids(&self, p: &str) -> bool {
-        VaultPath::normalize(p).is_ok_and(|v| self.name_rules.rejects(&v).is_some())
+        p.split('/').any(|seg| seg.len() > MAX_SEGMENT_BYTES)
+            || VaultPath::normalize(p).is_ok_and(|v| self.name_rules.rejects(&v).is_some())
     }
 
     fn bad_name() -> IoResult {
