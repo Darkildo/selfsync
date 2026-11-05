@@ -549,6 +549,10 @@ describe("настройки Obsidian", () => {
     const ta = await a.read(".obsidian/hotkeys.json");
     assert.equal(ta, await b.read(".obsidian/hotkeys.json"));
     assert.deepEqual(JSON.parse(ta ?? ""), { a: 1, b: "from b" }, "побеждает более поздняя правка");
+    // b правил позже и синхронизировался вторым: оставлена его версия, и он об этом знает
+    const over = b.notices.filter((n) => n.kind === "settingsOverwritten");
+    assert.deepEqual(over, [{ kind: "settingsOverwritten", keptLocal: [".obsidian/hotkeys.json"], keptRemote: [] }], JSON.stringify(b.notices));
+    assert.ok(!a.notices.some((n) => n.kind === "settingsOverwritten"), "у a расхождения не было");
     for (const c of [a, b]) {
       const names = [...(await c.files()).keys()];
       assert.ok(!names.some((n) => n.includes("(conflict") || n.includes(" (")), names.join(", "));

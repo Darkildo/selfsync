@@ -53,6 +53,7 @@ const ro: Dict = {
   "notice.massDelete": "Aici lipsesc {count} din {total} fișiere — sincronizarea a fost oprită, nimic nu a fost șters pe server. Dacă este o greșeală (permisiunile dosarului, o unitate deconectată), restaurați-le și sincronizați din nou. Faceți clic pentru a le șterge pe toate dispozitivele",
   "massDelete.confirm": "Ștergeți {count} fișiere lipsă pe toate dispozitivele? Rămân în fișierele șterse ale serverului pe durata de păstrare.",
   "massDelete.action": "Șterge pe toate dispozitivele",
+  "notice.settingsOverwritten": "Setările au fost modificate atât aici, cât și pe alt dispozitiv: {paths}. A fost păstrată versiunea mai recentă (după ceasurile dispozitivelor); cealaltă este în coșul de gunoi sau în istoricul fișierului de pe server.",
   "notice.error": "Sincronizare: {message}",
   "notice.engineStopped": "selfsync: motorul de sincronizare a eșuat de {n} ori la rând și a fost oprit. Rulați „{cmd}” pentru a încerca din nou; detaliile sunt în jurnalul de sincronizare.",
 

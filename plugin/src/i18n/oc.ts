@@ -53,6 +53,7 @@ const oc: Dict = {
   "notice.massDelete": "Aicí mancan {count} fichièrs sus {total} — sincronizacion arrestada, res es pas estat suprimit sul servidor. S'es una error (permissions del dorsièr, unitat desconnectada), restablissètz-los e sincronizatz tornamai. Clicatz per los suprimir sus totes los aparelhs",
   "massDelete.confirm": "Suprimir {count} fichièrs mancants sus totes los aparelhs? Demòran dins los fichièrs suprimits del servidor pendent la durada de conservacion.",
   "massDelete.action": "Suprimir sus totes los aparelhs",
+  "notice.settingsOverwritten": "Los paramètres son estats modificats aicí e sus un autre aparelh: {paths}. La version mai recenta es estada gardada (segon los relòtges dels aparelhs) ; l'autra es dins l'escobilhièr o dins l'istoric del fichièr sul servidor.",
   "notice.error": "Sincronizacion : {message}",
   "notice.engineStopped": "selfsync : lo motor de sincronizacion a fracassat {n} còps de seguida e es estat arrestat. Executatz « {cmd} » per tornar ensajar ; los detalhs son dins lo jornal de sincronizacion.",
 

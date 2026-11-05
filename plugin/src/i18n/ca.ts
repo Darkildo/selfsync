@@ -53,6 +53,7 @@ const ca: Dict = {
   "notice.massDelete": "Aquí falten {count} de {total} fitxers — la sincronització s'ha aturat i no s'ha suprimit res al servidor. Si és un error (permisos de la carpeta, una unitat desconnectada), restaureu-los i torneu a sincronitzar. Feu clic per suprimir-los a tots els dispositius",
   "massDelete.confirm": "Voleu suprimir {count} fitxers que falten a tots els dispositius? Es conserven als fitxers suprimits del servidor durant el període de retenció.",
   "massDelete.action": "Suprimeix a tots els dispositius",
+  "notice.settingsOverwritten": "La configuració s'ha canviat aquí i en un altre dispositiu: {paths}. S'ha mantingut la versió posterior (segons els rellotges dels dispositius); l'altra és a la paperera o a l'historial del fitxer al servidor.",
   "notice.error": "Sincronització: {message}",
   "notice.engineStopped": "selfsync: el motor de sincronització ha fallat {n} vegades seguides i s'ha aturat. Executa «{cmd}» per tornar-ho a provar; els detalls són al registre de sincronització.",
 

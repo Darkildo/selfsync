@@ -1116,6 +1116,24 @@ fn json(w: &World, c: usize, path: &str) -> String {
     String::from_utf8(w.clients[c].fs.read_file(path).cloned().unwrap()).unwrap()
 }
 
+/// Все `SettingsOverwritten` клиента: (оставлена своя, оставлена серверная) и
+/// сколько было уведомлений.
+fn settings_overwritten(w: &World, c: usize) -> (Vec<String>, Vec<String>, usize) {
+    let mut out = (Vec::new(), Vec::new(), 0);
+    for n in &w.clients[c].notices {
+        if let Notice::SettingsOverwritten {
+            kept_local,
+            kept_remote,
+        } = n
+        {
+            out.0.extend(kept_local.iter().cloned());
+            out.1.extend(kept_remote.iter().cloned());
+            out.2 += 1;
+        }
+    }
+    out
+}
+
 #[test]
 fn no_merge_files_take_the_later_version_without_copies() {
     let mut w = World::new(quiet(2));
@@ -1158,6 +1176,13 @@ fn no_merge_files_take_the_later_version_without_copies() {
             .all(|n| !matches!(n, Notice::Conflict { .. }))),
         "без уведомления о конфликте"
     );
+    // ...но с уведомлением о перезаписи настроек: у 0 оставлена серверная версия,
+    // его собственная — в корзине; у 1 расхождения не было
+    assert_eq!(
+        settings_overwritten(&w, 0),
+        (vec![], vec!["cfg/hotkeys.json".to_owned()], 1)
+    );
+    assert_eq!(settings_overwritten(&w, 1), (vec![], vec![], 0));
     // проигравшая версия не потеряна: в корзине устройства
     w.check_no_loss().unwrap();
     // своя версия новее серверной — уходит поверх, серверная остаётся в истории
@@ -1177,6 +1202,15 @@ fn no_merge_files_take_the_later_version_without_copies() {
     );
     w.sync(0);
     assert!(server_text(&w, "cfg/hotkeys.json").contains(&t0b));
+    assert_eq!(
+        settings_overwritten(&w, 0),
+        (
+            vec!["cfg/hotkeys.json".to_owned()],
+            vec!["cfg/hotkeys.json".to_owned()],
+            2
+        ),
+        "своя версия оставлена — тоже уведомление"
+    );
     let history = w.server_history_texts();
     assert!(
         history
@@ -1204,6 +1238,42 @@ fn regular_files_still_merge_next_to_no_merge_ones() {
         text.contains(&a) && text.contains(&b),
         "заметки сливаются как раньше: {text}"
     );
+    for c in 0..2 {
+        assert_eq!(settings_overwritten(&w, c).2, 0, "слияние — не перезапись");
+    }
+    finish(&mut w);
+}
+
+#[test]
+fn several_settings_overwritten_in_one_cycle_give_one_notice() {
+    let mut w = World::new(quiet(2));
+    for c in 0..2 {
+        set_no_merge(&mut w, c, &["cfg/**"]);
+    }
+    let files = [
+        "cfg/app.json",
+        "cfg/hotkeys.json",
+        "cfg/plugins/x/data.json",
+    ];
+    for f in files {
+        w.user_write(0, f, b"{}\n".to_vec());
+    }
+    w.sync(0);
+    w.sync(1);
+    for f in files {
+        let t = w.ledger.fresh(0);
+        w.user_write(0, f, format!("{{\"v\":\"{t}\"}}\n").into_bytes());
+    }
+    w.now += 5_000;
+    for f in files {
+        let t = w.ledger.fresh(1);
+        w.user_write(1, f, format!("{{\"v\":\"{t}\"}}\n").into_bytes());
+    }
+    w.sync(1);
+    w.sync(0);
+    let all: Vec<String> = files.iter().map(|f| (*f).to_owned()).collect();
+    assert_eq!(settings_overwritten(&w, 0), (vec![], all, 1));
+    assert!(conflict_copies(&w).is_empty());
     finish(&mut w);
 }
 

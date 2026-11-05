@@ -53,6 +53,7 @@ const ptBr: Dict = {
   "notice.massDelete": "Faltam aqui {count} de {total} arquivos — sincronização interrompida, nada foi excluído no servidor. Se for um erro (permissões da pasta, unidade desconectada), restaure-os e sincronize novamente. Clique para excluí-los em todos os dispositivos",
   "massDelete.confirm": "Excluir {count} arquivos ausentes em todos os dispositivos? Eles ficam nos arquivos excluídos do servidor durante o período de retenção.",
   "massDelete.action": "Excluir em todos os dispositivos",
+  "notice.settingsOverwritten": "As configurações foram alteradas aqui e em outro dispositivo: {paths}. A versão mais recente foi mantida (pelos relógios dos dispositivos); a outra está na lixeira ou no histórico do arquivo no servidor.",
   "notice.error": "Sincronização: {message}",
   "notice.engineStopped": "selfsync: o mecanismo de sincronização falhou {n} vezes seguidas e foi parado. Execute “{cmd}” para tentar de novo; os detalhes estão no registro de sincronização.",
 

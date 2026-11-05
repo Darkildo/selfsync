@@ -53,6 +53,7 @@ const eu: Dict = {
   "notice.massDelete": "Hemen {total} fitxategitik {count} falta dira — sinkronizazioa geldituta, zerbitzarian ez da ezer ezabatu. Akatsa bada (karpetaren baimenak, deskonektatutako unitatea), berreskuratu eta sinkronizatu berriro. Egin klik gailu guztietan ezabatzeko",
   "massDelete.confirm": "Falta diren {count} fitxategi gailu guztietan ezabatu? Zerbitzariko ezabatutako fitxategietan geratzen dira gordetze-epean.",
   "massDelete.action": "Ezabatu gailu guztietan",
+  "notice.settingsOverwritten": "Ezarpenak hemen eta beste gailu batean aldatu dira: {paths}. Geroagoko bertsioa gorde da (gailuen erlojuen arabera); bestea zakarrontzian edo zerbitzariko fitxategiaren historian dago.",
   "notice.error": "Sinkronizazioa: {message}",
   "notice.engineStopped": "selfsync: sinkronizazio-motorrak {n} aldiz jarraian huts egin du eta gelditu egin da. Exekutatu «{cmd}» berriro saiatzeko; xehetasunak sinkronizazio-erregistroan daude.",
 

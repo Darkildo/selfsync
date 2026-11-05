@@ -53,6 +53,7 @@ const vi: Dict = {
   "notice.massDelete": "Thiếu {count} trên {total} tệp ở đây — đã dừng đồng bộ, không có gì bị xóa trên máy chủ. Nếu đây là lỗi (quyền thư mục, ổ đĩa bị ngắt kết nối), hãy khôi phục chúng và đồng bộ lại. Nhấp để xóa chúng trên mọi thiết bị",
   "massDelete.confirm": "Xóa {count} tệp bị thiếu trên mọi thiết bị? Chúng vẫn nằm trong tệp đã xóa của máy chủ trong thời gian lưu giữ.",
   "massDelete.action": "Xóa trên mọi thiết bị",
+  "notice.settingsOverwritten": "Cài đặt đã được thay đổi cả ở đây và trên một thiết bị khác: {paths}. Phiên bản sau đã được giữ lại (theo đồng hồ của thiết bị); phiên bản kia nằm trong thùng rác hoặc trong lịch sử tệp trên máy chủ.",
   "notice.error": "Đồng bộ: {message}",
   "notice.engineStopped": "selfsync: bộ máy đồng bộ đã lỗi {n} lần liên tiếp và bị dừng. Chạy “{cmd}” để thử lại; chi tiết có trong nhật ký đồng bộ.",
 

@@ -371,9 +371,10 @@ pub(crate) async fn resolve_content(cx: &Ctx, key: &str, r: Remote) -> SyncResul
 }
 
 /// Файл из `no_merge` разошёлся с сервером: побеждает более поздняя mtime, без
-/// копии рядом и без уведомления. Наша новее — серверная становится базой, и
-/// следующий push кладёт нашу поверх (серверная остаётся в истории). Серверная
-/// новее — наша уходит в корзину, на место встаёт серверная.
+/// копии рядом. Наша новее — серверная становится базой, и следующий push кладёт
+/// нашу поверх (серверная остаётся в истории). Серверная новее — наша уходит в
+/// корзину, на место встаёт серверная. В конце цикла — одно уведомление
+/// `Notice::SettingsOverwritten` на все такие файлы.
 async fn last_write_wins(
     cx: &Ctx,
     key: &str,
@@ -392,6 +393,7 @@ async fn last_write_wins(
                 f.rejected = None;
                 f.pending_put = None;
             }
+            s.kept_local.insert(key.to_owned());
         });
         cx.log(
             LogLevel::Info,
@@ -415,6 +417,9 @@ async fn last_write_wins(
         });
         return Ok(());
     }
+    cx.with_mut(|s| {
+        s.kept_remote.insert(key.to_owned());
+    });
     let written = match remote_bytes {
         Some(sb) => {
             let sp = Hash::of(&sb);
