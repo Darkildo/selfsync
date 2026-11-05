@@ -164,6 +164,10 @@ pub(crate) struct State {
     /// В конце цикла — `Notice::Synced`.
     pub pulled: BTreeSet<String>,
     pub pushed: BTreeSet<String>,
+    /// Файлы `no_merge`, разошедшиеся с сервером в этом цикле: оставлена своя
+    /// версия / серверная. В конце цикла — `Notice::SettingsOverwritten`.
+    pub kept_local: BTreeSet<String>,
+    pub kept_remote: BTreeSet<String>,
 
     /// Синк остановлен до вмешательства пользователя (код причины).
     pub blocked: Option<String>,
@@ -267,6 +271,8 @@ impl State {
             quota_full_notified: false,
             quota_soft_notified: false,
             pulled: BTreeSet::new(),
+            kept_local: BTreeSet::new(),
+            kept_remote: BTreeSet::new(),
             pushed: BTreeSet::new(),
             blocked: None,
             paused: None,

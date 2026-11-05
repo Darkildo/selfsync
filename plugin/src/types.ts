@@ -135,6 +135,10 @@ export type Notice =
   /** Полный обход не нашёл `count` из `total` файлов: синк остановлен, удаления не
    *  отправлены — до возврата файлов и «Синхронизировать» или `allowDeletes`. */
   | { kind: "massDelete"; count: number; total: number }
+  /** Настройки (`noMerge`) изменены здесь и на другом устройстве: оставлена версия
+   *  с более поздней mtime, без копий. `keptLocal` — своя (серверная в истории
+   *  версий), `keptRemote` — серверная (своя в корзине). Одно на цикл синка. */
+  | { kind: "settingsOverwritten"; keptLocal: string[]; keptRemote: string[] }
   | { kind: "error"; code: string; message: string };
 
 export interface ConflictRecord {

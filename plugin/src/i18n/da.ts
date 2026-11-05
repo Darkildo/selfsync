@@ -53,6 +53,7 @@ const da: Dict = {
   "notice.massDelete": "{count} af {total} filer mangler her — synkronisering stoppet, intet er slettet på serveren. Hvis det er en fejl (mappetilladelser, et frakoblet drev), så gendan dem og synkroniser igen. Klik for at slette dem på alle enheder",
   "massDelete.confirm": "Slet {count} manglende filer på alle enheder? De bliver i serverens slettede filer i opbevaringsperioden.",
   "massDelete.action": "Slet på alle enheder",
+  "notice.settingsOverwritten": "Indstillingerne er ændret både her og på en anden enhed: {paths}. Den seneste version er beholdt (efter enhedernes ure); den anden ligger i papirkurven eller i filens historik på serveren.",
   "notice.error": "Synkronisering: {message}",
   "notice.engineStopped": "selfsync: synkroniseringsmotoren fejlede {n} gange i træk og er stoppet. Kør »{cmd}« for at prøve igen; detaljerne står i synkroniseringsloggen.",
 

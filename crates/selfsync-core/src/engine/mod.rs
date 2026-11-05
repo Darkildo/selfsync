@@ -480,6 +480,18 @@ async fn sync_task(cx: Ctx) {
             pushed: pushed.into_iter().collect(),
         });
     }
+    let (kept_local, kept_remote) = cx.with_mut(|s| {
+        (
+            std::mem::take(&mut s.kept_local),
+            std::mem::take(&mut s.kept_remote),
+        )
+    });
+    if !kept_local.is_empty() || !kept_remote.is_empty() {
+        cx.notify(Notice::SettingsOverwritten {
+            kept_local: kept_local.into_iter().collect(),
+            kept_remote: kept_remote.into_iter().collect(),
+        });
+    }
     cx.set_status(|_| {});
 }
 

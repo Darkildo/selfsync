@@ -53,6 +53,7 @@ const kab: Dict = {
   "notice.massDelete": "{count} seg {total} n yifuyla ulac-iten da — amtawi yeḥbes, ulac ayen yettwakksen deg uqeddac. Ma d tuccḍa (tisirag n ukaram, aḍebsi ur yeqqinen ara), err-iten-id syen mtawi tikkelt nniḍen. Sit akken ad ten-tekkseḍ deg yibenkan meṛṛa",
   "massDelete.confirm": "Kkes {count} n yifuyla ixuṣṣen deg yibenkan meṛṛa? Ad qqimen deg yifuyla yettwakksen n uqeddac lawan n uḥraz.",
   "massDelete.action": "Kkes deg yibenkan meṛṛa",
+  "notice.settingsOverwritten": "Iɣewwaṛen ttwabeddlen da akked deg yibenk-nniḍen: {paths}. Lqem aneggaru yeqqim (s tsragin n yibenkan); wayeḍ atan deg tqecwalt neɣ deg uzray n ufaylu ɣef uqeddac.",
   "notice.error": "Amtawa: {message}",
   "notice.engineStopped": "selfsync: amsedday n umtawa yeccḍ {n} n tikkal yemḍafaren, yettwaḥbes. Sedde “{cmd}” akken ad tɛerḍeḍ tikkelt-nniḍen; talqayt tella deg uɣmis n umtawa.",
 

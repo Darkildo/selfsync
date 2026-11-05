@@ -53,6 +53,7 @@ const nanTw: Dict = {
   "notice.massDelete": "Tsia ū {total} ê tóng-àn, kî-tiong {count} ê bô--khì — tông-pōo thîng--leh, sū-hōo-khì tíng bô thâi tiāu siánn-mih. Nā-sī tshò-ngōo (tóng-àn-kah ê khuân-hān, bô liân-tsiap ê tshoo-tsûn-khì), tshiánn kā in hîng--tńg-lâi koh tông-pōo. Tshiah--loh-khì tī só͘-ū ê siat-pī thâi tiāu",
   "massDelete.confirm": "Beh tī só͘-ū ê siat-pī thâi tiāu {count} ê bô--khì ê tóng-àn bô? Pó-liû kî-kan in ē lâu tī sū-hōo-khì ê í thâi tóng-àn.",
   "massDelete.action": "Tī só͘-ū ê siat-pī thâi tiāu",
+  "notice.settingsOverwritten": "Siat-tīng tī tsia kah koh tsi̍t tâi siat-pī lóng ū kái: {paths}. Khah òaⁿ ê pán-pún lâu leh (tsiàu siat-pī ê sî-tsing); lēng-guā tsi̍t ê tī pùn-sò-tháng iah-sī su-ho̍k-khì tíng ê tóng-àn le̍k-sú.",
   "notice.error": "Tông-pōo: {message}",
   "notice.engineStopped": "selfsync: tông-pōo ián-jín liân-sòa {n} pái tshut-tshò, í-king thîng--khì. Tsò “{cmd}” tsài tshì tsi̍t-pái; siông-sè tī tông-pōo kì-lo̍k.",
 

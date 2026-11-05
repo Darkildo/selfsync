@@ -53,6 +53,7 @@ const cs: Dict = {
   "notice.massDelete": "Zde chybí {count} z {total} souborů — synchronizace zastavena, na serveru nebylo nic smazáno. Pokud jde o chybu (oprávnění složky, odpojený disk), obnovte je a synchronizujte znovu. Kliknutím je smažete na všech zařízeních",
   "massDelete.confirm": "Smazat {count} chybějících souborů na všech zařízeních? Po dobu uchování zůstanou ve smazaných souborech na serveru.",
   "massDelete.action": "Smazat na všech zařízeních",
+  "notice.settingsOverwritten": "Nastavení bylo změněno zde i na jiném zařízení: {paths}. Zachována byla pozdější verze (podle hodin zařízení); druhá je v koši nebo v historii souboru na serveru.",
   "notice.error": "Synchronizace: {message}",
   "notice.engineStopped": "selfsync: jádro synchronizace selhalo {n}× po sobě a bylo zastaveno. Spusťte „{cmd}“ a zkuste to znovu; podrobnosti jsou v protokolu synchronizace.",
 

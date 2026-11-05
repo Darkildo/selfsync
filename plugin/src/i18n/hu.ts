@@ -53,6 +53,7 @@ const hu: Dict = {
   "notice.massDelete": "{total} fájlból {count} hiányzik itt — a szinkronizálás leállt, a szerveren semmi sem törlődött. Ha ez hiba (mappa jogosultságai, leválasztott meghajtó), állítsa vissza őket, és szinkronizáljon újra. Kattintson a törlésükhöz minden eszközön",
   "massDelete.confirm": "Törli a(z) {count} hiányzó fájlt minden eszközön? A megőrzési időig a szerver törölt fájljai között maradnak.",
   "massDelete.action": "Törlés minden eszközön",
+  "notice.settingsOverwritten": "A beállítások itt és egy másik eszközön is megváltoztak: {paths}. A későbbi verzió maradt meg (az eszközök órái szerint); a másik a lomtárban vagy a fájl előzményeiben van a kiszolgálón.",
   "notice.error": "Szinkronizálás: {message}",
   "notice.engineStopped": "selfsync: a szinkronizáló motor egymás után {n} alkalommal hibával leállt, ezért megállítottuk. Az újrapróbáláshoz futtassa a következőt: „{cmd}”; a részletek a szinkronizálási naplóban vannak.",
 

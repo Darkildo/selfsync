@@ -53,6 +53,7 @@ const es: Dict = {
   "notice.massDelete": "Faltan aquí {count} de {total} archivos — sincronización detenida, no se borró nada en el servidor. Si es un error (permisos de la carpeta, una unidad desconectada), restáuralos y vuelve a sincronizar. Haz clic para eliminarlos en todos los dispositivos",
   "massDelete.confirm": "¿Eliminar {count} archivos que faltan en todos los dispositivos? Se conservan en los archivos eliminados del servidor durante el periodo de retención.",
   "massDelete.action": "Eliminar en todos los dispositivos",
+  "notice.settingsOverwritten": "La configuración se cambió aquí y en otro dispositivo: {paths}. Se conservó la versión posterior (según los relojes de los dispositivos); la otra está en la papelera o en el historial del archivo en el servidor.",
   "notice.error": "Sincronización: {message}",
   "notice.engineStopped": "selfsync: el motor de sincronización falló {n} veces seguidas y se detuvo. Ejecuta «{cmd}» para volver a intentarlo; los detalles están en el registro de sincronización.",
 

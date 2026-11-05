@@ -53,6 +53,7 @@ const nl: Dict = {
   "notice.massDelete": "{count} van {total} bestanden ontbreken hier — synchronisatie gestopt, er is niets verwijderd op de server. Als dit een vergissing is (mapmachtigingen, een losgekoppelde schijf), zet ze terug en synchroniseer opnieuw. Klik om ze op alle apparaten te verwijderen",
   "massDelete.confirm": "{count} ontbrekende bestanden op alle apparaten verwijderen? Ze blijven tijdens de bewaartermijn in de verwijderde bestanden van de server.",
   "massDelete.action": "Op alle apparaten verwijderen",
+  "notice.settingsOverwritten": "De instellingen zijn hier en op een ander apparaat gewijzigd: {paths}. De latere versie is behouden (volgens de klokken van de apparaten); de andere staat in de prullenbak of in de bestandsgeschiedenis op de server.",
   "notice.error": "Synchronisatie: {message}",
   "notice.engineStopped": "selfsync: de synchronisatie-engine is {n} keer achter elkaar mislukt en gestopt. Voer “{cmd}” uit om het opnieuw te proberen; de details staan in het synchronisatielogboek.",
 

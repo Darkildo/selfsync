@@ -19,6 +19,20 @@ test("хранилище на сервере: строка настроек и �
   setLanguage("en");
 });
 
+test("перезапись настроек: пути в уведомлении, длинный список сокращён", () => {
+  setLanguage("ru");
+  const one = noticeText({ kind: "settingsOverwritten", keptLocal: [".obsidian/app.json"], keptRemote: [] }) ?? "";
+  assert.match(one, /и здесь, и на другом устройстве: .*\.obsidian\/app\.json.*по часам устройств/);
+  const many = noticeText({
+    kind: "settingsOverwritten",
+    keptLocal: ["c/4.json", "c/1.json"],
+    keptRemote: ["c/3.json", "c/2.json", "c/5.json"],
+  }) ?? "";
+  assert.match(many, /c\/1\.json, c\/2\.json, c\/3\.json …\+2/);
+  assert.ok(!many.includes("c/4.json"));
+  setLanguage("en");
+});
+
 test("место на сервере: строка настроек", async () => {
   const { quotaText } = await import("../src/i18n.ts");
   setLanguage("ru");

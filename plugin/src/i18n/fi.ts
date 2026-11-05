@@ -53,6 +53,7 @@ const fi: Dict = {
   "notice.massDelete": "Täältä puuttuu {count}/{total} tiedostoa — synkronointi pysäytetty, palvelimelta ei poistettu mitään. Jos kyse on virheestä (kansion oikeudet, irrotettu asema), palauta ne ja synkronoi uudelleen. Napsauta poistaaksesi ne kaikilta laitteilta",
   "massDelete.confirm": "Poistetaanko {count} puuttuvaa tiedostoa kaikilta laitteilta? Ne säilyvät palvelimen poistetuissa tiedostoissa säilytysajan.",
   "massDelete.action": "Poista kaikilta laitteilta",
+  "notice.settingsOverwritten": "Asetuksia on muutettu sekä täällä että toisella laitteella: {paths}. Myöhempi versio säilytettiin (laitteiden kellojen mukaan); toinen on roskakorissa tai tiedoston historiassa palvelimella.",
   "notice.error": "Synkronointi: {message}",
   "notice.engineStopped": "selfsync: synkronointimoottori kaatui {n} kertaa peräkkäin ja pysäytettiin. Yritä uudelleen suorittamalla ”{cmd}”; tiedot ovat synkronointilokissa.",
 

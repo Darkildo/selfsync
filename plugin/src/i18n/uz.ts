@@ -53,6 +53,7 @@ const uz: Dict = {
   "notice.massDelete": "Bu yerda {total} ta fayldan {count} tasi yo'q — sinxronlash to'xtatildi, serverda hech narsa o'chirilmadi. Agar bu xato bo'lsa (jild ruxsatlari, ulanmagan disk), ularni tiklab, qayta sinxronlang. Barcha qurilmalarda o'chirish uchun bosing",
   "massDelete.confirm": "{count} ta yo'qolgan fayl barcha qurilmalarda o'chirilsinmi? Saqlash muddati davomida ular serverning o'chirilgan fayllarida qoladi.",
   "massDelete.action": "Barcha qurilmalarda o'chirish",
+  "notice.settingsOverwritten": "Sozlamalar bu yerda ham, boshqa qurilmada ham o'zgartirildi: {paths}. Keyingi versiya saqlab qolindi (qurilmalar soatiga ko'ra); ikkinchisi chiqindilar qutisida yoki serverdagi fayl tarixida.",
   "notice.error": "Sinxronizatsiya: {message}",
   "notice.engineStopped": "selfsync: sinxronizatsiya dvigateli ketma-ket {n} marta ishdan chiqdi va toʻxtatildi. Qayta urinish uchun “{cmd}” buyrugʻini bajaring; tafsilotlar sinxronizatsiya jurnalida.",
 

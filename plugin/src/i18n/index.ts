@@ -220,6 +220,12 @@ export function noticeText(n: Notice): string | null {
       return t("notice.encryptionMismatch");
     case "massDelete":
       return t("notice.massDelete", { count: n.count, total: n.total });
+    case "settingsOverwritten": {
+      // Полный список — в журнале (showNotice), здесь — начало.
+      const paths = [...n.keptLocal, ...n.keptRemote].sort();
+      const more = paths.length > 3 ? ` …+${paths.length - 3}` : "";
+      return t("notice.settingsOverwritten", { paths: paths.slice(0, 3).join(", ") + more });
+    }
     case "error":
       return t("notice.error", { message: n.code === "read_only" ? t("readOnly.error") : n.message });
   }

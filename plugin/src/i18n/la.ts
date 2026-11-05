@@ -53,6 +53,7 @@ const la: Dict = {
   "notice.massDelete": "Hic desunt {count} ex {total} fasciculis — synchronizatio intermissa est, nihil in servitore deletum est. Si error est (permissiones scrinii, discus disiunctus), eos restitue et iterum synchroniza. Preme ut eos in omnibus machinis deleas",
   "massDelete.confirm": "Delerene {count} fasciculos deficientes in omnibus machinis? In fasciculis deletis servitoris manent per tempus retentionis.",
   "massDelete.action": "Dele in omnibus machinis",
+  "notice.settingsOverwritten": "Optiones et hic et in alia machina mutatae sunt: {paths}. Versio posterior servata est (secundum horologia machinarum); altera in quisquiliis est aut in historia fasciculi in servitore.",
   "notice.error": "Synchronizatio: {message}",
   "notice.engineStopped": "selfsync: machina synchronizationis {n} vicibus continuis defecit et sistitur. Exsequere “{cmd}” ut iterum coneris; singula in actis synchronizationis sunt.",
 

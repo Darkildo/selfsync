@@ -53,6 +53,7 @@ const pl: Dict = {
   "notice.massDelete": "Brakuje tu {count} z {total} plików — synchronizacja zatrzymana, na serwerze nic nie usunięto. Jeśli to błąd (uprawnienia folderu, odłączony dysk), przywróć je i zsynchronizuj ponownie. Kliknij, aby usunąć je na wszystkich urządzeniach",
   "massDelete.confirm": "Usunąć {count} brakujących plików na wszystkich urządzeniach? Pozostaną w usuniętych plikach serwera przez okres przechowywania.",
   "massDelete.action": "Usuń na wszystkich urządzeniach",
+  "notice.settingsOverwritten": "Ustawienia zmieniono zarówno tutaj, jak i na innym urządzeniu: {paths}. Zachowano późniejszą wersję (według zegarów urządzeń); druga jest w koszu lub w historii pliku na serwerze.",
   "notice.error": "Synchronizacja: {message}",
   "notice.engineStopped": "selfsync: silnik synchronizacji zawiódł {n} razy z rzędu i został zatrzymany. Uruchom „{cmd}”, aby spróbować ponownie; szczegóły są w dzienniku synchronizacji.",
 
