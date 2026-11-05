@@ -699,7 +699,10 @@ impl Ctx {
                 mtime: meta.mtime,
             };
             if let Err(e) = self.trash(path, expect).await {
-                self.log(LogLevel::Warn, format!("{path}: не удалось убрать обрезанный файл: {e}"));
+                self.log(
+                    LogLevel::Warn,
+                    format!("{path}: не удалось убрать обрезанный файл: {e}"),
+                );
             }
         }
         let message = format!("{path}: записано {} байт из {size}", meta.size);
