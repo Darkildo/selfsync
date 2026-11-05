@@ -41,6 +41,9 @@ export interface FileMeta {
   size: number;
   mtime: number;
   dir: boolean;
+  /** Символическая ссылка — сам путь или папка на пути к нему: не синхронизируется
+   *  (может вести за пределы vault'а). */
+  link?: boolean;
 }
 
 export type Expect = { kind: "any" } | { kind: "absent" } | { kind: "stat"; size: number; mtime: number };
@@ -139,6 +142,8 @@ export type Notice =
    *  с более поздней mtime, без копий. `keptLocal` — своя (серверная в истории
    *  версий), `keptRemote` — серверная (своя в корзине). Одно на цикл синка. */
   | { kind: "settingsOverwritten"; keptLocal: string[]; keptRemote: string[] }
+  /** Найдены символические ссылки: они и всё под ними не синхронизируются. */
+  | { kind: "linksSkipped"; paths: string[] }
   | { kind: "error"; code: string; message: string };
 
 export interface ConflictRecord {

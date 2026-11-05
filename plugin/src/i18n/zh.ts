@@ -54,6 +54,7 @@ const zh: Dict = {
   "massDelete.confirm": "在所有设备上删除 {count} 个缺失的文件?在保留期内它们仍保存在服务器的已删除文件中。",
   "massDelete.action": "在所有设备上删除",
   "notice.settingsOverwritten": "设置在此设备和另一台设备上都被修改了：{paths}。已保留较晚的版本（按设备时钟）；另一个版本在回收站或服务器上的文件历史中。",
+  "notice.linksSkipped": "符号链接不会同步——其中的内容不会被下载、删除或上传：{paths}",
   "notice.error": "同步：{message}",
   "notice.engineStopped": "selfsync：同步引擎连续 {n} 次出错，已停止。运行“{cmd}”重试；详情见同步日志。",
 

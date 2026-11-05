@@ -54,6 +54,7 @@ const ko: Dict = {
   "massDelete.confirm": "없어진 파일 {count}개를 모든 기기에서 삭제할까요? 보관 기간 동안 서버의 삭제된 파일에 남아 있습니다.",
   "massDelete.action": "모든 기기에서 삭제",
   "notice.settingsOverwritten": "설정이 이 기기와 다른 기기에서 모두 변경되었습니다: {paths}. 더 나중 버전을 유지했습니다(기기 시계 기준). 다른 버전은 휴지통 또는 서버의 파일 기록에 있습니다.",
+  "notice.linksSkipped": "심볼릭 링크는 동기화되지 않습니다 — 그 안의 어떤 것도 다운로드, 삭제, 업로드되지 않습니다: {paths}",
   "notice.error": "동기화: {message}",
   "notice.engineStopped": "selfsync: 동기화 엔진이 {n}번 연속 실패하여 중지되었습니다. 다시 시도하려면 “{cmd}”을(를) 실행하세요. 자세한 내용은 동기화 기록에 있습니다.",
 

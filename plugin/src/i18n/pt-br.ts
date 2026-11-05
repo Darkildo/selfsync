@@ -54,6 +54,7 @@ const ptBr: Dict = {
   "massDelete.confirm": "Excluir {count} arquivos ausentes em todos os dispositivos? Eles ficam nos arquivos excluídos do servidor durante o período de retenção.",
   "massDelete.action": "Excluir em todos os dispositivos",
   "notice.settingsOverwritten": "As configurações foram alteradas aqui e em outro dispositivo: {paths}. A versão mais recente foi mantida (pelos relógios dos dispositivos); a outra está na lixeira ou no histórico do arquivo no servidor.",
+  "notice.linksSkipped": "Links simbólicos não são sincronizados — nada dentro deles é baixado, excluído ou enviado: {paths}",
   "notice.error": "Sincronização: {message}",
   "notice.engineStopped": "selfsync: o mecanismo de sincronização falhou {n} vezes seguidas e foi parado. Execute “{cmd}” para tentar de novo; os detalhes estão no registro de sincronização.",
 

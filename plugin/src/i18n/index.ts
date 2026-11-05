@@ -226,6 +226,10 @@ export function noticeText(n: Notice): string | null {
       const more = paths.length > 3 ? ` …+${paths.length - 3}` : "";
       return t("notice.settingsOverwritten", { paths: paths.slice(0, 3).join(", ") + more });
     }
+    case "linksSkipped": {
+      const more = n.paths.length > 3 ? ` …+${n.paths.length - 3}` : "";
+      return t("notice.linksSkipped", { paths: n.paths.slice(0, 3).join(", ") + more });
+    }
     case "error":
       return t("notice.error", { message: n.code === "read_only" ? t("readOnly.error") : n.message });
   }

@@ -56,6 +56,9 @@ export class TestServer {
       stdio: ["ignore", "ignore", "pipe"],
       env: { ...process.env, RUST_LOG: "warn" },
     });
+    // Журнал сервера вычитывается: иначе, когда буфер канала заполнится (~64 КБ
+    // предупреждений за весь прогон), сервер встанет на записи в него.
+    proc.stderr?.resume();
     const url = `http://127.0.0.1:${port}`;
     for (let i = 0; i < 100; i++) {
       const ok = await fetch(`${url}/v1/health`).then((r) => r.ok, () => false);

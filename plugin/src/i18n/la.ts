@@ -54,6 +54,7 @@ const la: Dict = {
   "massDelete.confirm": "Delerene {count} fasciculos deficientes in omnibus machinis? In fasciculis deletis servitoris manent per tempus retentionis.",
   "massDelete.action": "Dele in omnibus machinis",
   "notice.settingsOverwritten": "Optiones et hic et in alia machina mutatae sunt: {paths}. Versio posterior servata est (secundum horologia machinarum); altera in quisquiliis est aut in historia fasciculi in servitore.",
+  "notice.linksSkipped": "Nexus symbolici non synchronizantur — nihil in eis descenditur, deletur aut sursum mittitur: {paths}",
   "notice.error": "Synchronizatio: {message}",
   "notice.engineStopped": "selfsync: machina synchronizationis {n} vicibus continuis defecit et sistitur. Exsequere “{cmd}” ut iterum coneris; singula in actis synchronizationis sunt.",
 

@@ -54,6 +54,7 @@ const sw: Dict = {
   "massDelete.confirm": "Futa faili {count} zilizokosekana kwenye vifaa vyote? Zinabaki kwenye faili zilizofutwa za seva kwa muda wa kuhifadhi.",
   "massDelete.action": "Futa kwenye vifaa vyote",
   "notice.settingsOverwritten": "Mipangilio ilibadilishwa hapa na kwenye kifaa kingine: {paths}. Toleo la baadaye limehifadhiwa (kwa saa za vifaa); jingine liko kwenye tupio au kwenye historia ya faili kwenye seva.",
+  "notice.linksSkipped": "Viungo vya ishara havisawazishwi — hakuna kitu ndani yake kinachopakuliwa, kufutwa au kupakiwa: {paths}",
   "notice.error": "Usawazishaji: {message}",
   "notice.engineStopped": "selfsync: injini ya usawazishaji imeshindwa mara {n} mfululizo na imesimamishwa. Endesha “{cmd}” ili ujaribu tena; maelezo yako kwenye kumbukumbu ya usawazishaji.",
 

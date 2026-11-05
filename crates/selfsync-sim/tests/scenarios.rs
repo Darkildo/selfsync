@@ -3746,3 +3746,111 @@ fn short_write_is_not_synced_back() {
         w.clients[0].fs.read_file("b.md")
     );
 }
+
+fn links_notices(w: &World, c: usize) -> Vec<Vec<String>> {
+    w.clients[c]
+        .notices
+        .iter()
+        .filter_map(|n| match n {
+            Notice::LinksSkipped { paths } => Some(paths.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Синхронизированная папка и заметка в корне на обоих клиентах.
+fn linked_folder(w: &mut World) {
+    for i in 0..3 {
+        base_note(w, 0, &format!("linked/{i}.md"));
+    }
+    base_note(w, 0, "top.md");
+    w.sync(0);
+    w.sync(1);
+}
+
+#[test]
+fn folder_replaced_by_link_is_left_alone() {
+    // #10: папку перенесли за пределы vault'а и оставили на её месте символическую
+    // ссылку. Её содержимое не удаляется ни здесь, ни на других устройствах, под
+    // ссылку ничего не скачивается; ссылку убрали — пропущенное скачивается.
+    let mut w = World::new(quiet(2));
+    linked_folder(&mut w);
+    w.clients[1].fs.user_link("linked");
+    w.kill(1);
+    w.drain(1);
+    assert_eq!(links_notices(&w, 1), vec![vec!["linked".to_owned()]]);
+    assert_eq!(blocked_reason(&w, 1), None);
+    w.sync(0);
+    assert_eq!(w.server_files().len(), 4, "удаления не ушли на сервер");
+    assert_eq!(w.clients[0].fs.snapshot().len(), 4);
+
+    // Новый файл и правка под этим именем с другого устройства — не скачиваются.
+    base_note(&mut w, 0, "linked/new.md");
+    edit_line(&mut w, 0, "linked/0.md", 1);
+    w.sync(0);
+    w.sync(1);
+    assert_eq!(
+        w.clients[1].fs.link_writes, 0,
+        "через ссылку ничего не меняли"
+    );
+    assert!(w.clients[1].fs.read_file("linked/new.md").is_none());
+
+    // Перезапуск со ссылкой на месте: она известна, уведомление не повторяется.
+    w.kill(1);
+    w.drain(1);
+    assert_eq!(links_notices(&w, 1).len(), 1);
+
+    // Ссылку убрали: всё, что под ней на сервере, скачивается.
+    w.clients[1].fs.user_unlink("linked");
+    w.kill(1);
+    w.drain(1);
+    finish(&mut w);
+    assert_eq!(w.clients[1].fs.snapshot().len(), 5);
+    assert_eq!(w.clients[1].fs.link_writes, 0);
+}
+
+#[test]
+fn folder_replaced_by_link_while_running() {
+    // То же, но без перезапуска: Obsidian сообщает, что папка исчезла, а на её
+    // месте уже ссылка. Удаление не уходит, полный обход находит ссылку.
+    let mut w = World::new(quiet(2));
+    linked_folder(&mut w);
+    w.clients[1].fs.user_link("linked");
+    w.deliver(
+        1,
+        Event::Deleted {
+            path: "linked".into(),
+        },
+    );
+    w.deliver(
+        1,
+        Event::Changed {
+            path: "linked/1.md".into(),
+        },
+    );
+    w.sync(1);
+    w.sync(0);
+    assert_eq!(w.server_files().len(), 4, "удаления не ушли на сервер");
+    assert_eq!(w.clients[0].fs.snapshot().len(), 4);
+    assert_eq!(links_notices(&w, 1), vec![vec!["linked".to_owned()]]);
+    assert_eq!(w.clients[1].fs.link_writes, 0);
+}
+
+#[test]
+fn link_before_first_download_gets_nothing() {
+    // Ссылка с тем же именем, что папка на сервере, была ещё до подключения: под
+    // неё ничего не пишется (иначе файлы с сервера легли бы за пределы vault'а).
+    let mut w = World::new(quiet(2));
+    for i in 0..3 {
+        base_note(&mut w, 0, &format!("linked/{i}.md"));
+    }
+    w.sync(0);
+    w.clients[1].fs.user_link("linked");
+    w.kill(1);
+    w.drain(1);
+    w.sync(1);
+    assert_eq!(w.clients[1].fs.link_writes, 0);
+    assert!(w.clients[1].fs.snapshot().is_empty());
+    assert_eq!(links_notices(&w, 1), vec![vec!["linked".to_owned()]]);
+    assert_eq!(w.server_files().len(), 3);
+}

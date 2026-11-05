@@ -54,6 +54,7 @@ const sk: Dict = {
   "massDelete.confirm": "Vymazať {count} chýbajúcich súborov na všetkých zariadeniach? Počas doby uchovania zostanú vo vymazaných súboroch servera.",
   "massDelete.action": "Vymazať na všetkých zariadeniach",
   "notice.settingsOverwritten": "Nastavenia boli zmenené tu aj na inom zariadení: {paths}. Zachovala sa neskoršia verzia (podľa hodín zariadení); druhá je v koši alebo v histórii súboru na serveri.",
+  "notice.linksSkipped": "Symbolické odkazy sa nesynchronizujú — nič v nich sa nesťahuje, nemaže ani nenahráva: {paths}",
   "notice.error": "Synchronizácia: {message}",
   "notice.engineStopped": "selfsync: jadro synchronizácie zlyhalo {n}× po sebe a bolo zastavené. Spustite „{cmd}“ a skúste to znova; podrobnosti sú v denníku synchronizácie.",
 

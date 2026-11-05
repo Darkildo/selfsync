@@ -54,6 +54,7 @@ const nn: Dict = {
   "massDelete.confirm": "Slette {count} manglande filer på alle einingar? Dei blir verande i dei sletta filene på tenaren i lagringsperioden.",
   "massDelete.action": "Slett på alle einingar",
   "notice.settingsOverwritten": "Innstillingane er endra både her og på ei anna eining: {paths}. Den seinaste versjonen er halden på (etter klokkene til einingane); den andre ligg i papirkorga eller i historikken til fila på tenaren.",
+  "notice.linksSkipped": "Symbolske lenkjer vert ikkje synkroniserte — ingenting i dei vert lasta ned, sletta eller lasta opp: {paths}",
   "notice.error": "Synkronisering: {message}",
   "notice.engineStopped": "selfsync: synkroniseringsmotoren feila {n} gonger på rad og er stoppa. Køyr «{cmd}» for å prøve igjen; detaljane står i synkroniseringsloggen.",
 

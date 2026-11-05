@@ -54,6 +54,7 @@ const lv: Dict = {
   "massDelete.confirm": "Dzēst {count} trūkstošos failus visās ierīcēs? Glabāšanas periodā tie paliek servera dzēstajos failos.",
   "massDelete.action": "Dzēst visās ierīcēs",
   "notice.settingsOverwritten": "Iestatījumi ir mainīti gan šeit, gan citā ierīcē: {paths}. Saglabāta vēlākā versija (pēc ierīču pulksteņiem); otra ir atkritnē vai faila vēsturē serverī.",
+  "notice.linksSkipped": "Simboliskās saites netiek sinhronizētas — tajās nekas netiek lejupielādēts, dzēsts vai augšupielādēts: {paths}",
   "notice.error": "Sinhronizācija: {message}",
   "notice.engineStopped": "selfsync: sinhronizācijas dzinējs {n} reizes pēc kārtas avarēja un ir apturēts. Izpildiet „{cmd}“, lai mēģinātu vēlreiz; sīkāka informācija ir sinhronizācijas žurnālā.",
 

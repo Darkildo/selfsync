@@ -187,6 +187,47 @@ async fn mass_delete_needs_allow_deletes() {
     assert!(!a.path().join("n/3.md").exists());
 }
 
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn symlinked_folder_is_not_synced() {
+    // #10: ссылка на папку за пределами папки синка.
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "links", "a");
+    let (b, cb) = folder(&srv, "links", "b");
+    let ext = tempfile::tempdir().unwrap();
+    std::fs::write(ext.path().join("pre.md"), "external original\n").unwrap();
+    std::os::unix::fs::symlink(ext.path(), b.path().join("linked")).unwrap();
+    std::fs::create_dir_all(a.path().join("linked")).unwrap();
+    std::fs::write(a.path().join("linked/new.md"), "from a\n").unwrap();
+    std::fs::write(a.path().join("linked/pre.md"), "remote version\n").unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    // Повторный запуск — полный обход: файлы под ссылкой не считаются удалёнными.
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+
+    let mut outside: Vec<String> = std::fs::read_dir(ext.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    outside.sort();
+    assert_eq!(outside, ["pre.md"], "за пределы папки ничего не записано");
+    assert_eq!(
+        std::fs::read_to_string(ext.path().join("pre.md")).unwrap(),
+        "external original\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(a.path().join("linked/new.md")).unwrap(),
+        "from a\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(a.path().join("linked/pre.md")).unwrap(),
+        "remote version\n"
+    );
+    let copies = std::fs::read_dir(a.path().join("linked")).unwrap().count();
+    assert_eq!(copies, 2, "внешний файл не ушёл на сервер копией");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn connect_by_code() {
     let srv = server().await;

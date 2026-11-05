@@ -4,14 +4,14 @@
 //! Хранится бинарным снимком (postcard) с версией формата и сохраняется после
 //! каждого файла: процесс могут убить в любой момент.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::hash::Hash;
 
 /// Версия формата снимка. Старые версии читаются и поднимаются в [`Index::decode`].
-pub const INDEX_FORMAT: u32 = 3;
+pub const INDEX_FORMAT: u32 = 4;
 const MAGIC: &[u8; 4] = b"NSI\0";
 
 /// Режим vault'а с точки зрения клиента.
@@ -218,6 +218,57 @@ pub struct Index {
     /// Поколение ключа шифрования, с которым построен индекс (0 — первое; смена
     /// ключа создаёт новое).
     pub key_epoch: u32,
+    /// Символические ссылки в vault'е (формат 4): они и всё под ними не
+    /// синхронизируются, пока ссылка на месте. Хранятся между запусками: ссылка
+    /// исчезла — журнал перечитывается, чтобы скачать пропущенное под ней.
+    pub links: BTreeSet<String>,
+}
+
+/// Формат 3: то же без `links`.
+#[derive(Deserialize)]
+struct IndexV3 {
+    format: u32,
+    last_seq: u64,
+    initial_done: bool,
+    mode: VaultMode,
+    files: BTreeMap<String, FileState>,
+    conflicts: Vec<ConflictRecord>,
+    next_conflict_id: u64,
+    migration: Option<MigrationState>,
+    cache: Vec<(Hash, u64)>,
+    rebaselined: bool,
+    rebaseline_seen: BTreeSet<String>,
+    rewound: bool,
+    excludes: Option<Vec<String>>,
+    skipped: BTreeMap<String, SkippedFile>,
+    max_download: u64,
+    offloadable: BTreeMap<String, LocalObs>,
+    key_epoch: u32,
+}
+
+impl From<IndexV3> for Index {
+    fn from(v: IndexV3) -> Index {
+        Index {
+            format: v.format,
+            last_seq: v.last_seq,
+            initial_done: v.initial_done,
+            mode: v.mode,
+            files: v.files,
+            conflicts: v.conflicts,
+            next_conflict_id: v.next_conflict_id,
+            migration: v.migration,
+            cache: v.cache,
+            rebaselined: v.rebaselined,
+            rebaseline_seen: v.rebaseline_seen,
+            rewound: v.rewound,
+            excludes: v.excludes,
+            skipped: v.skipped,
+            max_download: v.max_download,
+            offloadable: v.offloadable,
+            key_epoch: v.key_epoch,
+            links: BTreeSet::new(),
+        }
+    }
 }
 
 /// Формат 2: то же без полей формата 3.
@@ -332,6 +383,13 @@ impl Index {
             INDEX_FORMAT => {
                 let mut idx: Index =
                     postcard::from_bytes(&bytes[8..]).map_err(|_| IndexError::Corrupt)?;
+                idx.format = INDEX_FORMAT;
+                Ok(idx)
+            }
+            3 => {
+                let v3: IndexV3 =
+                    postcard::from_bytes(&bytes[8..]).map_err(|_| IndexError::Corrupt)?;
+                let mut idx = Index::from(v3);
                 idx.format = INDEX_FORMAT;
                 Ok(idx)
             }
@@ -458,7 +516,16 @@ mod tests {
             },
         );
         i.key_epoch = 2;
+        i.links = ["linked".to_owned(), "notes/leaf.md".to_owned()].into();
         i
+    }
+
+    /// `sample()` без полей формата 4.
+    fn sample_v3() -> Index {
+        Index {
+            links: BTreeSet::new(),
+            ..sample()
+        }
     }
 
     /// `sample()` без полей формата 3.
@@ -468,7 +535,7 @@ mod tests {
             max_download: 0,
             offloadable: BTreeMap::new(),
             key_epoch: 0,
-            ..sample()
+            ..sample_v3()
         };
         if let Some(m) = i.migration.as_mut() {
             m.to_epoch = 0;
@@ -479,6 +546,7 @@ mod tests {
     const FIXTURE_V1: &[u8] = include_bytes!("../tests/fixtures/index-v1.bin");
     const FIXTURE_V2: &[u8] = include_bytes!("../tests/fixtures/index-v2.bin");
     const FIXTURE_V3: &[u8] = include_bytes!("../tests/fixtures/index-v3.bin");
+    const FIXTURE_V4: &[u8] = include_bytes!("../tests/fixtures/index-v4.bin");
 
     /// Замороженный снимок формата v1 читается и после смены формата.
     #[test]
@@ -496,22 +564,29 @@ mod tests {
         assert_eq!(Index::decode(FIXTURE_V2).unwrap(), sample_v2());
     }
 
-    /// Замороженный снимок формата v3. Если тест упал, формат индекса изменился
-    /// несовместимо: поднимите INDEX_FORMAT и научите decode читать v3, а эталон
+    /// Замороженный снимок формата v3 читается и после смены формата.
+    #[test]
+    fn format_v3_fixture_still_reads() {
+        assert_eq!(&FIXTURE_V3[..8], b"NSI\0\x03\x00\x00\x00");
+        assert_eq!(Index::decode(FIXTURE_V3).unwrap(), sample_v3());
+    }
+
+    /// Замороженный снимок формата v4. Если тест упал, формат индекса изменился
+    /// несовместимо: поднимите INDEX_FORMAT и научите decode читать v4, а эталон
     /// не перезаписывайте. (Новый эталон: SELFSYNC_WRITE_FIXTURES=1.)
     #[test]
-    fn format_v3_fixture() {
+    fn format_v4_fixture() {
         if std::env::var_os("SELFSYNC_WRITE_FIXTURES").is_some() {
             std::fs::write(
-                concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/index-v3.bin"),
+                concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/index-v4.bin"),
                 sample().encode(),
             )
             .unwrap();
             return;
         }
-        assert_eq!(&FIXTURE_V3[..8], b"NSI\0\x03\x00\x00\x00");
-        assert_eq!(Index::decode(FIXTURE_V3).unwrap(), sample());
-        assert_eq!(sample().encode(), FIXTURE_V3, "кодирование v3 изменилось");
+        assert_eq!(&FIXTURE_V4[..8], b"NSI\0\x04\x00\x00\x00");
+        assert_eq!(Index::decode(FIXTURE_V4).unwrap(), sample());
+        assert_eq!(sample().encode(), FIXTURE_V4, "кодирование v4 изменилось");
     }
 
     #[test]

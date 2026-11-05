@@ -54,6 +54,7 @@ const ja: Dict = {
   "massDelete.confirm": "見つからない {count} 個のファイルをすべてのデバイスで削除しますか?保持期間中はサーバーの削除済みファイルに残ります。",
   "massDelete.action": "すべてのデバイスで削除",
   "notice.settingsOverwritten": "設定がこのデバイスと別のデバイスの両方で変更されました: {paths}。より新しいバージョンを残しました(デバイスの時計による)。もう一方はゴミ箱、またはサーバー上のファイル履歴にあります。",
+  "notice.linksSkipped": "シンボリックリンクは同期されません — その中のファイルはダウンロード・削除・アップロードされません: {paths}",
   "notice.error": "同期: {message}",
   "notice.engineStopped": "selfsync: 同期エンジンが {n} 回続けて失敗したため停止しました。もう一度試すには「{cmd}」を実行してください。詳細は同期ログにあります。",
 

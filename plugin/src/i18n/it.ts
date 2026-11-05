@@ -54,6 +54,7 @@ const it: Dict = {
   "massDelete.confirm": "Eliminare {count} file mancanti su tutti i dispositivi? Restano nei file eliminati del server per il periodo di conservazione.",
   "massDelete.action": "Elimina su tutti i dispositivi",
   "notice.settingsOverwritten": "Le impostazioni sono state modificate qui e su un altro dispositivo: {paths}. È stata mantenuta la versione più recente (secondo gli orologi dei dispositivi); l'altra è nel cestino o nella cronologia del file sul server.",
+  "notice.linksSkipped": "I collegamenti simbolici non vengono sincronizzati — al loro interno nulla viene scaricato, eliminato o caricato: {paths}",
   "notice.error": "Sincronizzazione: {message}",
   "notice.engineStopped": "selfsync: il motore di sincronizzazione è andato in errore {n} volte di seguito ed è stato fermato. Esegui «{cmd}» per riprovare; i dettagli sono nel registro di sincronizzazione.",
 

@@ -54,6 +54,7 @@ const nanTw: Dict = {
   "massDelete.confirm": "Beh tī só͘-ū ê siat-pī thâi tiāu {count} ê bô--khì ê tóng-àn bô? Pó-liû kî-kan in ē lâu tī sū-hōo-khì ê í thâi tóng-àn.",
   "massDelete.action": "Tī só͘-ū ê siat-pī thâi tiāu",
   "notice.settingsOverwritten": "Siat-tīng tī tsia kah koh tsi̍t tâi siat-pī lóng ū kái: {paths}. Khah òaⁿ ê pán-pún lâu leh (tsiàu siat-pī ê sî-tsing); lēng-guā tsi̍t ê tī pùn-sò-tháng iah-sī su-ho̍k-khì tíng ê tóng-àn le̍k-sú.",
+  "notice.linksSkipped": "Sù-hō liân-kiat bē tông-pō͘ — lāi-bīn ê mi̍h-kiāⁿ lóng bē hē-chài, thâi-tiāu iah-sī chiūⁿ-thoân: {paths}",
   "notice.error": "Tông-pōo: {message}",
   "notice.engineStopped": "selfsync: tông-pōo ián-jín liân-sòa {n} pái tshut-tshò, í-king thîng--khì. Tsò “{cmd}” tsài tshì tsi̍t-pái; siông-sè tī tông-pōo kì-lo̍k.",
 

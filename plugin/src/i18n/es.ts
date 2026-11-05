@@ -54,6 +54,7 @@ const es: Dict = {
   "massDelete.confirm": "¿Eliminar {count} archivos que faltan en todos los dispositivos? Se conservan en los archivos eliminados del servidor durante el periodo de retención.",
   "massDelete.action": "Eliminar en todos los dispositivos",
   "notice.settingsOverwritten": "La configuración se cambió aquí y en otro dispositivo: {paths}. Se conservó la versión posterior (según los relojes de los dispositivos); la otra está en la papelera o en el historial del archivo en el servidor.",
+  "notice.linksSkipped": "Los enlaces simbólicos no se sincronizan — no se descarga, elimina ni sube nada dentro de ellos: {paths}",
   "notice.error": "Sincronización: {message}",
   "notice.engineStopped": "selfsync: el motor de sincronización falló {n} veces seguidas y se detuvo. Ejecuta «{cmd}» para volver a intentarlo; los detalles están en el registro de sincronización.",
 
