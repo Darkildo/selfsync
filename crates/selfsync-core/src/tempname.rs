@@ -72,6 +72,17 @@ pub fn shortened_hash(base: &str) -> Option<&str> {
     hash.bytes().all(hex).then_some(hash)
 }
 
+/// Имя, под которое атомарная запись отодвигает заменяемый файл `path`
+/// (`IoResult::Displaced`): `{база}.aside.selfsync-tmp`, если занято — `.aside-N`.
+pub fn aside(path: &str, n: u32) -> String {
+    let base = temp_base(path);
+    if n <= 1 {
+        format!("{base}.aside{TEMP_SUFFIX}")
+    } else {
+        format!("{base}.aside-{n}{TEMP_SUFFIX}")
+    }
+}
+
 /// Каталог пути (`a/b/c.md` → `a/b/`, `c.md` → ``).
 pub fn dir_of(path: &str) -> &str {
     split_name(path).0

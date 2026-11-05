@@ -721,8 +721,43 @@ impl Ctx {
         if let Ok(Some(meta)) = &r {
             self.touched(path);
             self.check_written(path, meta, size).await?;
+            super::scan::note_ctime(self, path, meta);
         }
         r
+    }
+
+    /// Запись удалась, но заменённый файл изменили между проверкой условия и
+    /// заменой (`IoResult::Displaced`): его версия, лежащая под временным именем
+    /// `aside`, становится копией конфликта рядом с `path`. Не вышло — она остаётся
+    /// под временным именем, и её подберёт следующий полный обход (`recover_temp`).
+    async fn keep_displaced(&self, path: &str, aside: &str) {
+        let label = super::resolve::conflict_label(self, false);
+        let copy = match super::resolve::unique_copy(self, path, &label).await {
+            Ok(c) => c,
+            Err(e) => {
+                self.log(
+                    LogLevel::Warn,
+                    format!("{path}: вытесненная версия осталась в {aside}: {e}"),
+                );
+                self.with_mut(|s| s.need_full_scan = true);
+                return;
+            }
+        };
+        match self.rename_inner(aside, &copy).await {
+            Ok(Some(_)) => {
+                self.with_mut(|s| {
+                    s.dirty.insert(copy.clone());
+                });
+                super::resolve::add_conflict(self, path, &copy, false);
+            }
+            r => {
+                self.log(
+                    LogLevel::Warn,
+                    format!("{path}: вытесненная версия осталась в {aside}: {r:?}"),
+                );
+                self.with_mut(|s| s.need_full_scan = true);
+            }
+        }
     }
 
     /// Бэкенд сообщил о записи, а файл на месте другого размера (короткая запись
@@ -789,6 +824,7 @@ impl Ctx {
                     mtime: 0,
                     dir: false,
                     link: false,
+                    ctime: 0,
                 })
             })),
             IoResult::Done => Ok(Some(FileMeta {
@@ -797,7 +833,12 @@ impl Ctx {
                 mtime: 0,
                 dir: false,
                 link: false,
+                ctime: 0,
             })),
+            IoResult::Displaced { meta, aside } => {
+                self.keep_displaced(path, &aside).await;
+                Ok(Some(meta))
+            }
             IoResult::Precondition => Ok(None),
             other => Err(io_err("write", other)),
         }
@@ -855,6 +896,7 @@ impl Ctx {
         if let Ok(Some(meta)) = &r {
             self.touched(path);
             self.check_written(path, meta, size).await?;
+            super::scan::note_ctime(self, path, meta);
         }
         r
     }
@@ -883,6 +925,7 @@ impl Ctx {
                     mtime: 0,
                     dir: false,
                     link: false,
+                    ctime: 0,
                 })
             })),
             IoResult::Done => Ok(Some(FileMeta {
@@ -891,7 +934,12 @@ impl Ctx {
                 mtime: 0,
                 dir: false,
                 link: false,
+                ctime: 0,
             })),
+            IoResult::Displaced { meta, aside } => {
+                self.keep_displaced(path, &aside).await;
+                Ok(Some(meta))
+            }
             IoResult::Precondition => Ok(None),
             other => Err(io_err("commit_temp", other)),
         }
@@ -1003,6 +1051,7 @@ impl Ctx {
                     mtime: 0,
                     dir: false,
                     link: false,
+                    ctime: 0,
                 })
             })),
             IoResult::Done => Ok(Some(FileMeta {
@@ -1011,6 +1060,7 @@ impl Ctx {
                 mtime: 0,
                 dir: false,
                 link: false,
+                ctime: 0,
             })),
             IoResult::Precondition | IoResult::NotFound => Ok(None),
             other => Err(io_err("rename", other)),

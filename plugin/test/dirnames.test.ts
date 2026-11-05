@@ -14,6 +14,8 @@ import { NodeBackend } from "../src/io/node.ts";
 import type { IoAction } from "../src/types.ts";
 import { StubAdapter } from "./stub-adapter.ts";
 
+const ANY = { kind: "any" } as const;
+
 const noHttp: HttpBackend = {
   request: () => Promise.reject(new Error("сеть в этом тесте не нужна")),
 };
@@ -70,7 +72,7 @@ test("Node: настоящее имя после своего переимено
     const fs = new NodeBackend(vault, join(root, "store"), realFsp, {
       caseSensitive: false,
     });
-    await fs.writeAtomic("a.md", bytes("x"));
+    await fs.writeAtomic("a.md", bytes("x"), ANY);
     assert.equal((await fs.stat("a.md"))?.path, "a.md");
     await fs.rename("a.md", "b.md");
     assert.equal(await fs.stat("a.md"), null);

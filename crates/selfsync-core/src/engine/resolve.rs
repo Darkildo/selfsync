@@ -96,7 +96,7 @@ pub(crate) async fn unique_copy(cx: &Ctx, key: &str, label: &str) -> SyncResult<
     Err(SyncError::Io("не найдено свободное имя для копии".into()))
 }
 
-fn conflict_label(cx: &Ctx, initial: bool) -> String {
+pub(crate) fn conflict_label(cx: &Ctx, initial: bool) -> String {
     cx.with(|s| {
         let (date, time) = stamp(s.now, s.cfg.tz_offset_min);
         if initial {
@@ -135,7 +135,7 @@ fn adopt(cx: &Ctx, key: &str, r: &Remote, plain: Hash) {
     });
 }
 
-fn add_conflict(cx: &Ctx, path: &str, copy: &str, initial: bool) {
+pub(crate) fn add_conflict(cx: &Ctx, path: &str, copy: &str, initial: bool) {
     let id = cx.with_mut(|s| {
         s.index.next_conflict_id += 1;
         let id = s.index.next_conflict_id;

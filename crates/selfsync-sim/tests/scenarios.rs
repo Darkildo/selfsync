@@ -3943,3 +3943,162 @@ fn link_before_first_download_gets_nothing() {
     assert_eq!(links_notices(&w, 1), vec![vec!["linked".to_owned()]]);
     assert_eq!(w.server_files().len(), 3);
 }
+
+// Гонка записи: пользователь сохраняет файл между проверкой условия и заменой его
+// серверной версией. Его правка не теряется — она становится копией конфликта.
+
+fn conflicts_of(w: &World, c: usize) -> Vec<(String, String)> {
+    w.clients[c]
+        .notices
+        .iter()
+        .filter_map(|n| match n {
+            Notice::Conflict { path, copy, .. } => Some((path.clone(), copy.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn edit_during_download_becomes_conflict_copy() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    let remote = edit_line(&mut w, 0, "a.md", 1);
+    w.sync(0);
+    let mine = w.ledger.fresh(1);
+    w.race_edits.insert(
+        (1, "a.md".into()),
+        format!("only mine {mine}\n").into_bytes(),
+    );
+    w.sync(1);
+    let conflicts = conflicts_of(&w, 1);
+    assert_eq!(conflicts.len(), 1, "{:?}", w.clients[1].notices);
+    let (path, copy) = &conflicts[0];
+    assert_eq!(path, "a.md");
+    let copy_text = String::from_utf8(w.clients[1].fs.read_file(copy).cloned().unwrap()).unwrap();
+    assert!(copy_text.contains(&mine), "{copy_text}");
+    // Временного имени не осталось, на месте — серверная версия.
+    assert!(
+        w.clients[1]
+            .fs
+            .snapshot()
+            .keys()
+            .all(|p| !p.ends_with(TEMP_SUFFIX))
+    );
+    assert!(String::from_utf8_lossy(w.clients[1].fs.read_file("a.md").unwrap()).contains(&remote));
+    finish(&mut w);
+    assert!(server_tokens(&w).contains(&mine));
+    assert!(server_tokens(&w).contains(&remote));
+}
+
+#[test]
+fn edit_during_big_download_becomes_conflict_copy() {
+    let mut w = World::new(quiet(2));
+    let t = w.ledger.fresh(0);
+    let mut big = format!("big {t}\n").into_bytes();
+    big.resize(9 * 1024 * 1024, b'.');
+    w.user_write(0, "big.bin", big.clone());
+    w.sync(0);
+    w.sync(1);
+    big[0] = b'B';
+    w.user_write(0, "big.bin", big);
+    w.sync(0);
+    let mine = w.ledger.fresh(1);
+    w.race_edits
+        .insert((1, "big.bin".into()), format!("mine {mine}\n").into_bytes());
+    w.sync(1);
+    assert_eq!(conflicts_of(&w, 1).len(), 1, "{:?}", w.clients[1].notices);
+    finish(&mut w);
+    assert!(server_tokens(&w).contains(&mine));
+}
+
+#[test]
+fn abandoned_aside_becomes_conflict_copy_or_goes_away() {
+    // Процесс убит после вытеснения, но до того, как версия стала копией: её
+    // подбирает полный обход. Такая же, как сейчас в файле, — лишняя и удаляется.
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    shared_note(&mut w, "b.md");
+    let mine = w.ledger.fresh(1);
+    let aside = |p: &str| format!("{}.aside{TEMP_SUFFIX}", temp_base(p));
+    let now = 0;
+    w.clients[1]
+        .fs
+        .user_write(&aside("a.md"), format!("lost? {mine}\n").into_bytes(), now);
+    let same = w.clients[1].fs.read_file("b.md").cloned().unwrap();
+    w.clients[1].fs.user_write(&aside("b.md"), same, now);
+    w.kill(1);
+    w.drain(1);
+    w.sync(1);
+    let conflicts = conflicts_of(&w, 1);
+    assert_eq!(conflicts.len(), 1, "{:?}", w.clients[1].notices);
+    assert_eq!(conflicts[0].0, "a.md");
+    assert!(
+        w.clients[1]
+            .fs
+            .snapshot()
+            .keys()
+            .all(|p| !p.ends_with(TEMP_SUFFIX)),
+        "{:?}",
+        w.clients[1].fs.snapshot().keys().collect::<Vec<_>>()
+    );
+    finish(&mut w);
+    assert!(server_tokens(&w).contains(&mine));
+}
+
+// Правка того же размера с восстановленным mtime (`cp -p`, `rsync -t`).
+
+/// Тот же текст с другим токеном той же длины.
+fn same_size_edit(w: &mut World, c: usize, path: &str, old: &str) -> (String, Vec<u8>) {
+    let text = String::from_utf8(w.clients[c].fs.read_file(path).cloned().unwrap()).unwrap();
+    let new = w.ledger.fresh(c);
+    assert_eq!(new.len(), old.len(), "токены разной длины");
+    let edited = text.replace(old, &new).into_bytes();
+    assert_eq!(edited.len(), text.len());
+    (new, edited)
+}
+
+#[test]
+fn edit_keeping_size_and_mtime_is_seen_by_ctime() {
+    let mut w = World::new(quiet(2));
+    let old = shared_note(&mut w, "a.md");
+    let (new, edited) = same_size_edit(&mut w, 1, "a.md", &old);
+    w.user_write_keep_mtime(1, "a.md", edited.clone());
+    w.sync(1);
+    assert!(server_text(&w, "a.md").contains(&new), "правка по событию");
+
+    // Без события — её находит полный обход.
+    let (newer, edited) = same_size_edit(&mut w, 1, "a.md", &new);
+    let now = 0;
+    w.clients[1].fs.user_write_keep_mtime("a.md", edited, now);
+    w.kill(1);
+    w.drain(1);
+    w.sync(1);
+    assert!(
+        server_text(&w, "a.md").contains(&newer),
+        "правка полным обходом"
+    );
+    finish(&mut w);
+}
+
+#[test]
+fn unnoticed_edit_is_not_overwritten_by_remote() {
+    // ФС без ctime (мобильные): правку того же размера с тем же mtime скан не видит,
+    // но серверная версия не затирает её молча — содержимое сверяется перед записью.
+    let mut w = World::new(quiet(2));
+    let old = shared_note(&mut w, "a.md");
+    w.clients[1].fs.no_ctime = true;
+    let (mine, edited) = same_size_edit(&mut w, 1, "a.md", &old);
+    let now = 0;
+    w.clients[1].fs.user_write_keep_mtime("a.md", edited, now);
+    let remote = edit_line(&mut w, 0, "a.md", 3);
+    w.sync(0);
+    w.sync(1);
+    finish(&mut w);
+    let text = server_text(&w, "a.md");
+    assert!(text.contains(&remote), "{text}");
+    assert!(
+        server_tokens(&w).contains(&mine),
+        "правка c1 потеряна: {:?}",
+        w.server_files().keys().collect::<Vec<_>>()
+    );
+}

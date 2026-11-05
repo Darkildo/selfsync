@@ -7,6 +7,8 @@ import { test } from "node:test";
 import { AdapterBackend } from "../src/io/adapter.ts";
 import { StubAdapter } from "./stub-adapter.ts";
 
+const ANY = { kind: "any" } as const;
+
 class CountingAdapter extends StubAdapter {
   reads = 0;
   override async readBinary(p: string): Promise<ArrayBuffer> {
@@ -32,7 +34,7 @@ test("файл по частям читается с устройства оди
   const a = new CountingAdapter();
   const b = new AdapterBackend(a, ".obsidian/plugins/selfsync");
   const data = Uint8Array.from({ length: 30 }, (_, i) => i);
-  await b.writeAtomic("big.bin", data);
+  await b.writeAtomic("big.bin", data, ANY);
   a.reads = 0;
   assert.deepEqual(await readAll(b, "big.bin"), data);
   assert.equal(a.reads, 1);
@@ -44,13 +46,13 @@ test("файл по частям читается с устройства оди
 test("изменённый файл не берётся из кэша", async () => {
   const a = new CountingAdapter();
   const b = new AdapterBackend(a, ".obsidian/plugins/selfsync");
-  await b.writeAtomic("a.bin", Uint8Array.from({ length: 12 }, () => 1));
+  await b.writeAtomic("a.bin", Uint8Array.from({ length: 12 }, () => 1), ANY);
   assert.deepEqual(await b.read("a.bin", 0, CHUNK), Uint8Array.of(1, 1, 1, 1));
   // Файл переписан снаружи (другой плагин) — размер и mtime другие.
   await a.writeBinary("a.bin", Uint8Array.from({ length: 12 }, () => 2).buffer);
   assert.deepEqual(await b.read("a.bin", CHUNK, CHUNK), Uint8Array.of(2, 2, 2, 2));
   // Запись через бэкенд сбрасывает кэш.
-  await b.writeAtomic("a.bin", Uint8Array.from({ length: 12 }, () => 3));
+  await b.writeAtomic("a.bin", Uint8Array.from({ length: 12 }, () => 3), ANY);
   assert.deepEqual(await b.read("a.bin", 0, CHUNK), Uint8Array.of(3, 3, 3, 3));
 });
 

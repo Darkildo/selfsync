@@ -2,8 +2,8 @@
 // IoResult. Решений о синке здесь нет — только честное выполнение контракта из
 // types.rs (условия записи, коды Precondition/NotFound, настоящие имена файлов).
 
-import type { FileBackend, HttpBackend } from "./io/backend.ts";
-import type { Expect, FileMeta, IoAction, IoResult } from "./types.ts";
+import { type FileBackend, type HttpBackend, matches, type WriteOutcome } from "./io/backend.ts";
+import type { IoAction, IoResult } from "./types.ts";
 
 const INDEX_FILE = "index.bin";
 const CACHE_DIR = "cache";
@@ -59,13 +59,9 @@ export class Executor {
         const data = await this.fs.read(a.path, a.offset, a.len ?? undefined);
         return data ? { type: "data", data } : { type: "notFound" };
       }
-      case "write": {
-        // Один stat на условие и проверку «не папка»: на мобильном каждый — вызов
-        // через мост приложения.
-        const cur = await this.fs.stat(a.path);
-        if (cur?.dir || !satisfies(cur, a.expect)) return { type: "precondition" };
-        return { type: "stat", meta: await this.fs.writeAtomic(a.path, a.data) };
-      }
+      case "write":
+        // Условие проверяет бэкенд — вплотную к замене файла.
+        return written(await this.fs.writeAtomic(a.path, a.data, a.expect));
       case "writeTemp":
         await this.fs.tempWrite(a.temp, a.offset, a.data);
         return { type: "done" };
@@ -73,10 +69,8 @@ export class Executor {
         const data = await this.fs.tempRead(a.temp, a.offset, a.len);
         return data ? { type: "data", data } : { type: "notFound" };
       }
-      case "commitTemp": {
-        if (!(await this.holds(a.path, a.expect))) return { type: "precondition" };
-        return { type: "stat", meta: await this.fs.tempCommit(a.temp, a.path) };
-      }
+      case "commitTemp":
+        return written(await this.fs.tempCommit(a.temp, a.path, a.expect));
       case "deleteTemp":
         await this.fs.tempDelete(a.temp);
         return { type: "done" };
@@ -136,28 +130,10 @@ export class Executor {
         return { type: "done" };
     }
   }
-
-  /** Условие записи на текущее состояние пути. */
-  private async holds(path: string, e: Expect): Promise<boolean> {
-    if (e.kind === "any") return true;
-    return satisfies(await this.fs.stat(path), e);
-  }
 }
 
-/** Условие записи на уже прочитанное состояние пути (`null` — пути нет). */
-function satisfies(cur: FileMeta | null, e: Expect): boolean {
-  if (e.kind === "any") return true;
-  if (e.kind === "absent") return cur === null;
-  return cur !== null && matches(cur, e);
-}
-
-function matches(m: FileMeta, e: Expect): boolean {
-  switch (e.kind) {
-    case "any":
-      return true;
-    case "absent":
-      return false;
-    case "stat":
-      return !m.dir && m.size === e.size && m.mtime === e.mtime;
-  }
+function written(o: WriteOutcome): IoResult {
+  if (o.kind === "precondition") return { type: "precondition" };
+  if (o.displaced !== undefined) return { type: "displaced", meta: o.meta, aside: o.displaced };
+  return { type: "stat", meta: o.meta };
 }

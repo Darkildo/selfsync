@@ -44,6 +44,9 @@ export interface FileMeta {
   /** Символическая ссылка — сам путь или папка на пути к нему: не синхронизируется
    *  (может вести за пределы vault'а). */
   link?: boolean;
+  /** Время изменения inode (мс), только на десктопе: правка того же размера с
+   *  восстановленным mtime видна по нему. Нет — неизвестно. */
+  ctime?: number;
 }
 
 export type Expect = { kind: "any" } | { kind: "absent" } | { kind: "stat"; size: number; mtime: number };
@@ -279,6 +282,8 @@ export type IoResult =
   | { type: "done" }
   | { type: "notFound" }
   | { type: "precondition" }
+  /** Записано, но заменённый файл изменили после проверки условия: его версия — в `aside`. */
+  | { type: "displaced"; meta: FileMeta; aside: string }
   | { type: "failed"; message: string };
 
 export type Action =

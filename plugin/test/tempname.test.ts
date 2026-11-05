@@ -10,6 +10,8 @@ import { test } from "node:test";
 import { pathHash, TEMP_SUFFIX, tempBase } from "../src/io/backend.ts";
 import { NodeBackend } from "../src/io/node.ts";
 
+const ANY = { kind: "any" } as const;
+
 const bytes = (s: string): number => new TextEncoder().encode(s).length;
 
 test("pathHash и tempBase совпадают с ядром", () => {
@@ -35,7 +37,7 @@ test("Node writeAtomic и корзина: имя на 255 байт", async () =>
     await fsp.mkdir(join(root, "vault"));
     const fs = new NodeBackend(join(root, "vault"), join(root, "store"), fsp, { caseSensitive: true });
     const name = `${"я".repeat(126)}.md`;
-    await fs.writeAtomic(name, new TextEncoder().encode("x"));
+    await fs.writeAtomic(name, new TextEncoder().encode("x"), ANY);
     assert.deepEqual(await fsp.readdir(join(root, "vault")), [name]);
     await fs.trash(name);
     assert.deepEqual(await fsp.readdir(join(root, "vault")), []);
