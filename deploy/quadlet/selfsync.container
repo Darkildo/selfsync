@@ -4,7 +4,12 @@ Requires=selfsync.socket
 After=selfsync.socket
 
 [Container]
-Image=ghcr.io/selfsync/selfsync:latest
+# Готового публичного образа нет: соберите его заранее из бинаря релиза
+# (сверяется с SHA256SUMS, Rust не нужен), из корня репозитория:
+#   podman build -t localhost/selfsync:local --build-arg VERSION=X.Y.Z deploy/quickstart
+# X.Y.Z — версия релиза server-X.Y.Z. Pull=never: образ не ищется в реестрах.
+Image=localhost/selfsync:local
+Pull=never
 Exec=socket --idle-timeout 10m
 Volume=%h/selfsync-data:/data:Z
 ReadOnly=true

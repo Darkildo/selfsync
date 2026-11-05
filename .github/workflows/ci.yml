@@ -101,6 +101,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: sh -n deploy/install.sh && shellcheck -s sh deploy/install.sh
+      # Готового образа в реестре нет, а пространство ghcr.io/selfsync — чужое:
+      # примеры развёртывания собирают образ локально и ничего не скачивают.
+      - name: В примерах нет ссылок на образы в ghcr.io
+        run: |
+          if grep -rnI 'ghcr\.io/' deploy README.md README.ru.md; then
+            echo "примеры развёртывания не должны ссылаться на образы в ghcr.io" >&2
+            exit 1
+          fi
       # Без systemd в контейнере: проверяется раскладка файлов, обновление с архивом
       # данных и то, что чужой Caddyfile не трогается. Бинарь не запускается.
       - name: install.sh в Debian, Ubuntu, Fedora

@@ -138,11 +138,17 @@ docker compose --profile always up -d           # или --profile ondemand (Sab
 docker compose run --rm selfsync token add --vault notes --name laptop
 ```
 
+Готового публичного образа нет: `docker compose` собирает его из исходников (тег `localhost/selfsync:local`) и не скачивает из реестра. Собрать образ из бинаря релиза, без Rust, можно через [deploy/quickstart](deploy/quickstart/).
+
 Образ основан на distroless/static: в нём нет оболочки, файловая система только для чтения, процесс работает без привилегий. Данные хранятся в `./data` через bind mount, а не в именованном volume: именованный volume стирается командой `docker compose down -v` вместе со всеми заметками.
 
 ### Podman Quadlet
 
-[deploy/quadlet/](deploy/quadlet/) - контейнер с socket activation для rootless Podman.
+[deploy/quadlet/](deploy/quadlet/) - контейнер с socket activation для rootless Podman. Готового публичного образа нет: сначала соберите его из бинаря релиза, затем запускайте юниты:
+
+```sh
+podman build -t localhost/selfsync:local --build-arg VERSION=X.Y.Z deploy/quickstart
+```
 
 ### Настройки
 
