@@ -26,6 +26,7 @@ const ga: Dict = {
   "cmd.deleted": "Athchóirigh comhaid scriosta",
   "cmd.history": "Stair an chomhaid",
   "cmd.log": "Taispeáin logchomhad an tsioncrónaithe",
+  "cmd.verifyContent": "Seiceáil ábhar na gcomhad",
 
   "notice.conflict": "Coinbhleacht in {path}: sábháladh do leagan mar {copy}",
   "notice.localCopySaved": "Bhí {path} difriúil ón bhfreastalaí: sábháladh do leagan mar {copy}",
@@ -55,6 +56,7 @@ const ga: Dict = {
   "massDelete.action": "Scrios ar gach gléas",
   "notice.settingsOverwritten": "Athraíodh na socruithe anseo agus ar ghléas eile: {paths}. Coinníodh an leagan is déanaí (de réir chloig na ngléasanna); tá an ceann eile sa bhruscar nó i stair an chomhaid ar an bhfreastalaí.",
   "notice.linksSkipped": "Ní shioncronaítear naisc shiombalacha — ní íoslódáiltear, ní scriostar agus ní uaslódáiltear aon rud iontu: {paths}",
+  "notice.verifyContent": "Tá ábhar gach comhaid á sheiceáil: déanfar athruithe nár athraigh méid ná am athraithe an chomhaid a shioncrónú",
   "notice.error": "Sioncrónú: {message}",
   "notice.engineStopped": "selfsync: theip ar an inneall sioncrónaithe {n} uair as a chéile agus stopadh é. Rith “{cmd}” chun triail eile a bhaint as; tá na sonraí i logchomhad an tsioncrónaithe.",
 

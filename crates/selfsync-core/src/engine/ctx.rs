@@ -176,6 +176,15 @@ pub(crate) struct State {
     /// Пользователь подтвердил массовое удаление (`UiCommand::AllowDeletes`):
     /// действует на один полный обход.
     pub allow_deletes: bool,
+    /// Проверить содержимое (`UiCommand::VerifyContent`): ближайший полный обход
+    /// хэширует все файлы, не доверяя размеру и mtime.
+    pub verify_content: bool,
+    /// Файлы, наблюдённые, когда их mtime был ближе `RACY_MS` к текущему времени
+    /// («racily clean», как в git): правка того же размера в ту же единицу времени ФС
+    /// оставила бы mtime прежним. Таким наблюдениям размер и mtime не доказывают, что
+    /// файл не менялся, — при следующем наблюдении он хэшируется заново. Только в
+    /// памяти: после перезапуска — как до этого.
+    pub racy: BTreeSet<String>,
     pub server_state: Option<pb::VaultState>,
 
     // Запросы пользователя к задаче синка.
@@ -280,6 +289,8 @@ impl State {
             blocked: None,
             paused: None,
             allow_deletes: false,
+            verify_content: false,
+            racy: BTreeSet::new(),
             server_state: None,
             enable: None,
             rekey: None,
@@ -544,6 +555,10 @@ pub use crate::tempname::TEMP_SUFFIX;
 
 /// Порог «маленького» блоба: одним запросом, целиком в памяти.
 pub const SMALL_BLOB: u64 = 8 * 1024 * 1024;
+/// Грубейшая единица mtime среди ФС, где живут vault'ы (FAT/exFAT — 2 с; HFS+ и
+/// часть сетевых — 1 с): mtime ближе этого к моменту наблюдения ещё может не
+/// измениться при следующей правке (см. `State::racy`).
+pub const RACY_MS: i64 = 2000;
 /// Размер части resumable-загрузки и Range-скачивания.
 pub const PART: u64 = 4 * 1024 * 1024;
 /// Размер чтения локального файла частями.
@@ -722,6 +737,7 @@ impl Ctx {
             self.touched(path);
             self.check_written(path, meta, size).await?;
             super::scan::note_ctime(self, path, meta);
+            super::scan::note_racy(self, path, meta.size, meta.mtime);
         }
         r
     }
@@ -825,6 +841,7 @@ impl Ctx {
                     dir: false,
                     link: false,
                     ctime: 0,
+                    unreadable: false,
                 })
             })),
             IoResult::Done => Ok(Some(FileMeta {
@@ -834,6 +851,7 @@ impl Ctx {
                 dir: false,
                 link: false,
                 ctime: 0,
+                unreadable: false,
             })),
             IoResult::Displaced { meta, aside } => {
                 self.keep_displaced(path, &aside).await;
@@ -897,6 +915,7 @@ impl Ctx {
             self.touched(path);
             self.check_written(path, meta, size).await?;
             super::scan::note_ctime(self, path, meta);
+            super::scan::note_racy(self, path, meta.size, meta.mtime);
         }
         r
     }
@@ -926,6 +945,7 @@ impl Ctx {
                     dir: false,
                     link: false,
                     ctime: 0,
+                    unreadable: false,
                 })
             })),
             IoResult::Done => Ok(Some(FileMeta {
@@ -935,6 +955,7 @@ impl Ctx {
                 dir: false,
                 link: false,
                 ctime: 0,
+                unreadable: false,
             })),
             IoResult::Displaced { meta, aside } => {
                 self.keep_displaced(path, &aside).await;
@@ -1052,6 +1073,7 @@ impl Ctx {
                     dir: false,
                     link: false,
                     ctime: 0,
+                    unreadable: false,
                 })
             })),
             IoResult::Done => Ok(Some(FileMeta {
@@ -1061,6 +1083,7 @@ impl Ctx {
                 dir: false,
                 link: false,
                 ctime: 0,
+                unreadable: false,
             })),
             IoResult::Precondition | IoResult::NotFound => Ok(None),
             other => Err(io_err("rename", other)),

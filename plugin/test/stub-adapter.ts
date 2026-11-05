@@ -24,6 +24,10 @@ export class StubAdapter implements AdapterLike {
   rewrites = 0;
   /** Переименование в такой путь падает — как будто приложение убито на этом шаге. */
   failRenameTo: ((to: string) => boolean) | null = null;
+  /** stat этих путей отвечает «нет файла», хотя файл на месте (ошибка чтения). */
+  failStat = new Set<string>();
+  /** Файлы, удаляемые при первом же stat — исчезли между листингом и stat. */
+  vanishOnStat = new Set<string>();
 
   constructor(private caseInsensitive = false) {}
 
@@ -60,6 +64,8 @@ export class StubAdapter implements AdapterLike {
   }
 
   async stat(p: string): Promise<{ type: "file" | "folder"; size: number; mtime: number } | null> {
+    if (this.failStat.has(this.key(p))) return null;
+    if (this.vanishOnStat.delete(this.key(p))) this.nodes.delete(this.key(p));
     const n = this.get(p);
     if (!n) return null;
     return { type: n.dir ? "folder" : "file", size: n.data.length, mtime: n.mtime };
@@ -158,6 +164,14 @@ export class StubAdapter implements AdapterLike {
     void this.mkdir(parent(p));
     const name = this.get(p)?.name ?? p;
     this.nodes.set(this.key(p), { name, dir: false, data: new TextEncoder().encode(text), mtime: this.tick() });
+  }
+
+  /** Новое содержимое с прежним mtime (`cp -p`, восстановление из копии): размер и
+   *  mtime те же, ctime адаптер не сообщает. */
+  putKeepMtime(p: string, text: string): void {
+    const n = this.get(p);
+    if (!n) throw new Error(`${p}: нет файла`);
+    n.data = new TextEncoder().encode(text);
   }
 
   text(p: string): string | null {

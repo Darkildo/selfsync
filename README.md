@@ -293,6 +293,7 @@ From Obsidian's community plugins (search for "Selfsync"), or by hand: copy `mai
 - **Conflicts** raise a notice; the "Unresolved conflicts" window lets you keep both versions, yours or the server's. A note you save at the very moment a newer version from another device is being written over it is not lost either: it becomes a conflict copy next to the file.
 - **Deleted files** - the "Restore deleted files" command opens the server's trash.
 - **Many files missing at once** - if a full scan does not find at least 50 files that were there (and at least a quarter of them), or finds no files at all when 10 or more were there, sync stops and nothing is deleted on the server: this usually means a disconnected drive or a folder the plugin cannot read, not a cleanup. Bring the files back and click the status bar to sync again, or click the notice to delete them on all devices. Files removed while Obsidian is running are deleted as usual.
+- **Edits that keep size and time.** A change is normally noticed by the file's size and modification time (and, on the desktop, its change time, which tools cannot restore). An edit that keeps both - a copy with `cp -p` or `rsync -t`, or a same-length edit within the same 2 seconds on FAT and other file systems with coarse times - may go unnoticed on mobile. Files changed within 2 seconds of being seen are read again on the next check, and the "Check file contents for unnoticed changes" command (`selfsync-cli run --verify-content`) reads every file once and syncs whatever differs.
 - **Symbolic links** (to folders or files) are not synced: they may point outside the vault. Nothing is downloaded into a linked folder or deleted inside it, its contents are not uploaded, and its files stay on the other devices. A notice names each new link once. If the link is removed (a real folder in its place, or nothing), whatever was skipped under it is downloaded again. The command-line client works the same way.
 - **File history** - from the file context menu or a command. With server 0.4.0+, "Delete old versions" there frees space on the server; the current version stays.
 - **Space on the server** (server 0.4.0+): the settings show how much the vault takes and its limits, if the server has [quotas](#configuration). When the vault is out of space, new files wait on the device (the status bar shows how many) and are sent as soon as there is room; everything else keeps syncing.
@@ -350,6 +351,7 @@ selfsync-cli connect --dir ~/notes --server https://notes.example.com --code COD
 selfsync-cli run --dir ~/notes            # watch the folder until Ctrl-C
 selfsync-cli run --dir ~/notes --once     # one cycle (cron); exit codes: 1 network, 2 password needed, 3 sync stopped (device revoked, many files missing)
 selfsync-cli run --dir ~/notes --once --allow-deletes   # many files are missing on purpose: delete them on the server too
+selfsync-cli run --dir ~/notes --once --verify-content  # read every file, not trusting size and time
 selfsync-cli encrypt --dir ~/notes --password-file ~/.notes-pass
 selfsync-cli rekey --dir ~/notes --password-file ~/.notes-pass
 selfsync-cli status --dir ~/notes

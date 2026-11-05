@@ -26,6 +26,7 @@ const vi: Dict = {
   "cmd.deleted": "Khôi phục tệp đã xóa",
   "cmd.history": "Lịch sử tệp",
   "cmd.log": "Hiện nhật ký đồng bộ",
+  "cmd.verifyContent": "Kiểm tra nội dung tệp",
 
   "notice.conflict": "Xung đột ở {path}: phiên bản của bạn được lưu thành {copy}",
   "notice.localCopySaved": "{path} khác với bản trên máy chủ: phiên bản của bạn được lưu thành {copy}",
@@ -55,6 +56,7 @@ const vi: Dict = {
   "massDelete.action": "Xóa trên mọi thiết bị",
   "notice.settingsOverwritten": "Cài đặt đã được thay đổi cả ở đây và trên một thiết bị khác: {paths}. Phiên bản sau đã được giữ lại (theo đồng hồ của thiết bị); phiên bản kia nằm trong thùng rác hoặc trong lịch sử tệp trên máy chủ.",
   "notice.linksSkipped": "Liên kết tượng trưng không được đồng bộ — không có gì bên trong được tải xuống, xóa hoặc tải lên: {paths}",
+  "notice.verifyContent": "Đang kiểm tra nội dung tất cả các tệp: những chỉnh sửa không làm thay đổi kích thước và thời gian sửa đổi của tệp sẽ được đồng bộ",
   "notice.error": "Đồng bộ: {message}",
   "notice.engineStopped": "selfsync: bộ máy đồng bộ đã lỗi {n} lần liên tiếp và bị dừng. Chạy “{cmd}” để thử lại; chi tiết có trong nhật ký đồng bộ.",
 

@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::ctx::{Ctx, SyncError, SyncResult};
+use super::ctx::{Ctx, RACY_MS, SMALL_BLOB, SyncError, SyncResult};
 use super::transfer::read_local;
 use super::types::{FileMeta, LogLevel, Notice};
 use crate::hash::Hash;
@@ -329,8 +329,15 @@ async fn apply_rename_events(cx: &Ctx) -> SyncResult<()> {
     Ok(())
 }
 
-/// Обновляет наблюдение одного пути.
-async fn observe(cx: &Ctx, path: &str, meta: &FileMeta, delta: &mut ScanDelta) -> SyncResult<()> {
+/// Обновляет наблюдение одного пути. `verify` — не доверять размеру и mtime
+/// (`UiCommand::VerifyContent`): файл хэшируется в любом случае.
+async fn observe(
+    cx: &Ctx,
+    path: &str,
+    meta: &FileMeta,
+    verify: bool,
+    delta: &mut ScanDelta,
+) -> SyncResult<()> {
     if meta.dir {
         cx.with_mut(|s| {
             let e = s.index.files.entry(path.to_owned()).or_insert_with(|| {
@@ -352,7 +359,9 @@ async fn observe(cx: &Ctx, path: &str, meta: &FileMeta, delta: &mut ScanDelta) -
         // (мобильные, индекс старого формата) — не помеха.
         let same_ctime =
             meta.ctime == 0 || s.index.ctimes.get(path).is_none_or(|c| *c == meta.ctime);
-        let unchanged = same_ctime
+        let unchanged = !verify
+            && same_ctime
+            && !s.racy.contains(path)
             && f.and_then(|f| f.local.as_ref())
                 .is_some_and(|l| l.size == meta.size && l.mtime == meta.mtime);
         (f.is_some(), unchanged, s.max_upload())
@@ -406,6 +415,19 @@ async fn observe(cx: &Ctx, path: &str, meta: &FileMeta, delta: &mut ScanDelta) -
         delta.new.push(path.to_owned());
     }
     Ok(())
+}
+
+/// Наблюдение `path` с этими размером и mtime сделано сейчас: «racily clean»,
+/// если mtime ещё в пределах `RACY_MS` от текущего времени (см. `State::racy`).
+/// Большие файлы не в счёт: перечитывать их ради такой маловероятной правки дорого.
+pub(crate) fn note_racy(cx: &Ctx, path: &str, size: u64, mtime: i64) {
+    cx.with_mut(|s| {
+        if size <= SMALL_BLOB && mtime.saturating_add(RACY_MS) > s.now {
+            s.racy.insert(path.to_owned());
+        } else {
+            s.racy.remove(path);
+        }
+    });
 }
 
 /// Запомнить ctime наблюдённого файла (см. `Index::ctimes`).
@@ -654,17 +676,34 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
             );
         }
         let listing = take_links(cx, cx.list().await?);
-        cx.with_mut(|s| {
+        let verify = cx.with_mut(|s| {
             s.need_full_scan = false;
             s.last_full_scan = s.now;
             s.dirty.clear();
+            std::mem::take(&mut s.verify_content)
         });
+        if verify {
+            cx.log(
+                LogLevel::Info,
+                "проверка содержимого: все файлы хэшируются заново".to_owned(),
+            );
+        }
         let mut present: BTreeMap<String, FileMeta> = BTreeMap::new();
         // Файлы, с которыми не вышло (переименование в NFC, доведение брошенного
         // временного файла): они на диске, удалёнными не считаются.
         let mut stuck: BTreeSet<String> = BTreeSet::new();
         for mut m in listing {
             let raw = m.path.clone();
+            if m.unreadable {
+                // В листинге есть, а метаданных нет: не наблюдается, но и удалённым
+                // не считается (иначе удаление ушло бы на все устройства).
+                stuck.extend(skip_stuck(
+                    cx,
+                    &raw,
+                    SyncError::Io("метаданные файла недоступны".into()),
+                )?);
+                continue;
+            }
             let p = async {
                 if m.path.ends_with(super::ctx::TEMP_SUFFIX)
                     && !cx.with(|s| s.excludes.is_excluded(&m.path))
@@ -686,9 +725,12 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
             }
         }
         for (p, m) in &present {
-            observe(cx, p, m, &mut delta).await?;
+            observe(cx, p, m, verify, &mut delta).await?;
         }
-        cx.with_mut(|s| s.index.ctimes.retain(|k, _| present.contains_key(k)));
+        cx.with_mut(|s| {
+            s.index.ctimes.retain(|k, _| present.contains_key(k));
+            s.racy.retain(|k| present.contains_key(k));
+        });
         let tracked: Vec<String> = cx.with(|s| {
             s.index
                 .files
@@ -725,7 +767,7 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
                         mark_gone(cx, vp.as_str(), &mut delta);
                     }
                     match canonical(cx, &actual, m.dir).await {
-                        Ok(Some(p)) => observe(cx, &p, &m, &mut delta).await?,
+                        Ok(Some(p)) => observe(cx, &p, &m, false, &mut delta).await?,
                         Ok(None) => {}
                         Err(e) => {
                             skip_stuck(cx, &actual, e)?;

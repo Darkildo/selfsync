@@ -26,6 +26,7 @@ const tr: Dict = {
   "cmd.deleted": "Silinen dosyaları geri yükle",
   "cmd.history": "Dosya geçmişi",
   "cmd.log": "Senkronizasyon günlüğünü göster",
+  "cmd.verifyContent": "Dosya içeriklerini denetle",
 
   "notice.conflict": "{path} içinde çakışma: sizin sürümünüz {copy} olarak kaydedildi",
   "notice.localCopySaved": "{path} sunucudakinden farklıydı: sizin sürümünüz {copy} olarak kaydedildi",
@@ -55,6 +56,7 @@ const tr: Dict = {
   "massDelete.action": "Tüm cihazlarda sil",
   "notice.settingsOverwritten": "Ayarlar hem burada hem de başka bir cihazda değiştirildi: {paths}. Daha sonraki sürüm tutuldu (cihazların saatlerine göre); diğeri çöp kutusunda veya sunucudaki dosya geçmişinde.",
   "notice.linksSkipped": "Sembolik bağlantılar eşitlenmez — içlerindeki hiçbir şey indirilmez, silinmez veya yüklenmez: {paths}",
+  "notice.verifyContent": "Tüm dosyaların içeriği denetleniyor: dosya boyutunu ve değiştirilme zamanını değiştirmeyen düzenlemeler eşitlenecek",
   "notice.error": "Senkronizasyon: {message}",
   "notice.engineStopped": "selfsync: senkronizasyon motoru art arda {n} kez çöktü ve durduruldu. Yeniden denemek için “{cmd}” komutunu çalıştırın; ayrıntılar senkronizasyon günlüğünde.",
 

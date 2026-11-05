@@ -26,6 +26,7 @@ const hr: Dict = {
   "cmd.deleted": "Vrati izbrisane datoteke",
   "cmd.history": "Povijest datoteke",
   "cmd.log": "Prikaži zapisnik sinkronizacije",
+  "cmd.verifyContent": "Provjeri sadržaj datoteka",
 
   "notice.conflict": "Sukob u {path}: vaša je verzija spremljena kao {copy}",
   "notice.localCopySaved": "Datoteka {path} razlikovala se od one na poslužitelju: vaša je verzija spremljena kao {copy}",
@@ -55,6 +56,7 @@ const hr: Dict = {
   "massDelete.action": "Izbriši na svim uređajima",
   "notice.settingsOverwritten": "Postavke su promijenjene i ovdje i na drugom uređaju: {paths}. Zadržana je kasnija verzija (prema satovima uređaja); druga je u smeću ili u povijesti datoteke na poslužitelju.",
   "notice.linksSkipped": "Simboličke poveznice se ne sinkroniziraju — ništa se u njima ne preuzima, ne briše niti prenosi: {paths}",
+  "notice.verifyContent": "Provjerava se sadržaj svih datoteka: izmjene koje nisu promijenile veličinu i vrijeme izmjene datoteke bit će sinkronizirane",
   "notice.error": "Sinkronizacija: {message}",
   "notice.engineStopped": "selfsync: mehanizam sinkronizacije zakazao je {n} puta zaredom i zaustavljen je. Pokrenite „{cmd}” za novi pokušaj; pojedinosti su u zapisniku sinkronizacije.",
 

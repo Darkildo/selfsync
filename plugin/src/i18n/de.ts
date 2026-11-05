@@ -26,6 +26,7 @@ const de: Dict = {
   "cmd.deleted": "Gelöschte Dateien wiederherstellen",
   "cmd.history": "Dateiverlauf",
   "cmd.log": "Synchronisierungsprotokoll anzeigen",
+  "cmd.verifyContent": "Dateiinhalte auf unbemerkte Änderungen prüfen",
 
   "notice.conflict": "Konflikt in {path}: Ihre Version wurde als {copy} gespeichert",
   "notice.localCopySaved": "{path} unterschied sich vom Server: Ihre Version wurde als {copy} gespeichert",
@@ -55,6 +56,7 @@ const de: Dict = {
   "massDelete.action": "Auf allen Geräten löschen",
   "notice.settingsOverwritten": "Die Einstellungen wurden hier und auf einem anderen Gerät geändert: {paths}. Die spätere Version wurde behalten (nach den Uhren der Geräte); die andere liegt im Papierkorb oder im Dateiverlauf auf dem Server.",
   "notice.linksSkipped": "Symbolische Links werden nicht synchronisiert — darin wird nichts heruntergeladen, gelöscht oder hochgeladen: {paths}",
+  "notice.verifyContent": "Der Inhalt aller Dateien wird geprüft: Änderungen, bei denen Dateigröße und Änderungszeit gleich geblieben sind, werden synchronisiert",
   "notice.error": "Synchronisierung: {message}",
   "notice.engineStopped": "selfsync: Die Synchronisierung ist {n}-mal hintereinander abgestürzt und wurde angehalten. Führen Sie „{cmd}“ aus, um es erneut zu versuchen; Details stehen im Synchronisierungsprotokoll.",
 

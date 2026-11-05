@@ -26,6 +26,7 @@ const gl: Dict = {
   "cmd.deleted": "Restaurar ficheiros eliminados",
   "cmd.history": "Historial do ficheiro",
   "cmd.log": "Amosar o rexistro de sincronización",
+  "cmd.verifyContent": "Comprobar o contido dos ficheiros",
 
   "notice.conflict": "Conflito en {path}: a túa versión gardouse como {copy}",
   "notice.localCopySaved": "{path} era distinto do do servidor: a túa versión gardouse como {copy}",
@@ -55,6 +56,7 @@ const gl: Dict = {
   "massDelete.action": "Eliminar en todos os dispositivos",
   "notice.settingsOverwritten": "A configuración cambiouse aquí e noutro dispositivo: {paths}. Conservouse a versión posterior (segundo os reloxos dos dispositivos); a outra está no lixo ou no historial do ficheiro no servidor.",
   "notice.linksSkipped": "As ligazóns simbólicas non se sincronizan — non se descarga, elimina nin sobe nada dentro delas: {paths}",
+  "notice.verifyContent": "Compróbase o contido de todos os ficheiros: os cambios que non alteraron o tamaño nin a data de modificación sincronizaranse",
   "notice.error": "Sincronización: {message}",
   "notice.engineStopped": "selfsync: o motor de sincronización fallou {n} veces seguidas e detívose. Executa «{cmd}» para tentalo de novo; os detalles están no rexistro de sincronización.",
 

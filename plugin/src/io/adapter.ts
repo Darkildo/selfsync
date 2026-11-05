@@ -92,10 +92,36 @@ export class AdapterBackend implements FileBackend {
       // телефоне полный обход большого vault'а шёл бы минутами.
       const files = l.files.map((f) => joinPath(f));
       const stats = await mapLimit(files, LIST_CONCURRENCY, (path) => this.a.stat(path));
+      const failed: string[] = [];
       files.forEach((path, i) => {
         const st = stats[i];
         if (st?.type === "file") out.push({ path, size: st.size, mtime: Math.trunc(st.mtime), dir: false });
+        else if (!st) failed.push(path);
       });
+      if (failed.length > 0) out.push(...(await this.recheck(dir, failed)));
+    }
+    return out;
+  }
+
+  /**
+   * Файлы из листинга, на которые `stat` ответил «нет файла». Исчезнуть между
+   * листингом и `stat` файл может, но адаптер отвечает так и на ошибку чтения: тогда
+   * ядро сочло бы файл удалённым и удалило бы его на всех устройствах. Повторный
+   * `stat`, затем повторный листинг папки: файл в нём есть — метаданные недоступны
+   * (`unreadable`), ядро не трогает его до следующего обхода; нет — исчез.
+   */
+  private async recheck(dir: string, paths: string[]): Promise<FileMeta[]> {
+    const out: FileMeta[] = [];
+    const missing: string[] = [];
+    for (const path of paths) {
+      const st = await this.a.stat(path);
+      if (st?.type === "file") out.push({ path, size: st.size, mtime: Math.trunc(st.mtime), dir: false });
+      else if (!st) missing.push(path);
+    }
+    if (missing.length === 0) return out;
+    const again = new Set((await this.a.list(dir === "" ? "/" : dir)).files.map((f) => joinPath(f)));
+    for (const path of missing) {
+      if (again.has(path)) out.push({ path, size: 0, mtime: 0, dir: false, unreadable: true });
     }
     return out;
   }

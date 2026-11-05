@@ -67,6 +67,7 @@ pub(crate) async fn read_local(
             mtime: meta.mtime,
             plain: Hash::of(&data),
         };
+        super::scan::note_racy(cx, path, obs.size, obs.mtime);
         return Ok(Some(LocalContent {
             obs,
             data: Some(data),

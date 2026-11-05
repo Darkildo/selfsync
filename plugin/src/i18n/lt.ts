@@ -26,6 +26,7 @@ const lt: Dict = {
   "cmd.deleted": "Atkurti ištrintus failus",
   "cmd.history": "Failo istorija",
   "cmd.log": "Rodyti sinchronizavimo žurnalą",
+  "cmd.verifyContent": "Patikrinti failų turinį",
 
   "notice.conflict": "Konfliktas: {path} — jūsų versija išsaugota kaip {copy}",
   "notice.localCopySaved": "{path} skyrėsi nuo serverio versijos: jūsų versija išsaugota kaip {copy}",
@@ -55,6 +56,7 @@ const lt: Dict = {
   "massDelete.action": "Ištrinti visuose įrenginiuose",
   "notice.settingsOverwritten": "Nustatymai pakeisti ir čia, ir kitame įrenginyje: {paths}. Palikta vėlesnė versija (pagal įrenginių laikrodžius); kita yra šiukšlinėje arba failo istorijoje serveryje.",
   "notice.linksSkipped": "Simbolinės nuorodos nesinchronizuojamos — jose niekas neatsisiunčiama, netrinama ir neįkeliama: {paths}",
+  "notice.verifyContent": "Tikrinamas visų failų turinys: pakeitimai, nepakeitę failo dydžio ir keitimo laiko, bus sinchronizuoti",
   "notice.error": "Sinchronizavimas: {message}",
   "notice.engineStopped": "selfsync: sinchronizavimo variklis {n} kartus iš eilės sutriko ir buvo sustabdytas. Paleiskite „{cmd}“, kad bandytumėte dar kartą; išsami informacija – sinchronizavimo žurnale.",
 

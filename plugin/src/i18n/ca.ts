@@ -26,6 +26,7 @@ const ca: Dict = {
   "cmd.deleted": "Restaura fitxers suprimits",
   "cmd.history": "Historial del fitxer",
   "cmd.log": "Mostra el registre de sincronització",
+  "cmd.verifyContent": "Comprova el contingut dels fitxers",
 
   "notice.conflict": "Conflicte a {path}: la teva versió s'ha desat com a {copy}",
   "notice.localCopySaved": "{path} era diferent del servidor: la teva versió s'ha desat com a {copy}",
@@ -55,6 +56,7 @@ const ca: Dict = {
   "massDelete.action": "Suprimeix a tots els dispositius",
   "notice.settingsOverwritten": "La configuració s'ha canviat aquí i en un altre dispositiu: {paths}. S'ha mantingut la versió posterior (segons els rellotges dels dispositius); l'altra és a la paperera o a l'historial del fitxer al servidor.",
   "notice.linksSkipped": "Els enllaços simbòlics no se sincronitzen — no s'hi baixa, suprimeix ni puja res: {paths}",
+  "notice.verifyContent": "Es comprova el contingut de tots els fitxers: els canvis que no han alterat la mida ni la data de modificació es sincronitzaran",
   "notice.error": "Sincronització: {message}",
   "notice.engineStopped": "selfsync: el motor de sincronització ha fallat {n} vegades seguides i s'ha aturat. Executa «{cmd}» per tornar-ho a provar; els detalls són al registre de sincronització.",
 

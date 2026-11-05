@@ -37,6 +37,12 @@ pub struct FakeFs {
     /// ФС не сообщает ctime (мобильные): правку с восстановленным mtime видно
     /// только по содержимому.
     pub no_ctime: bool,
+    /// Единица mtime, мс (FAT — 2000): mtime округляется вниз до неё, и правка в
+    /// ту же единицу времени оставляет его прежним. 0 — точный mtime.
+    pub mtime_granularity: i64,
+    /// Файлы, которые адаптер не может прочитать (мобильный: `stat` отвечает «нет
+    /// файла», хотя листинг папки его показывает).
+    pub unreadable: std::collections::BTreeSet<String>,
     clock: i64,
 }
 
@@ -155,24 +161,20 @@ impl FakeFs {
     /// Запись пользователем (без условий).
     pub fn user_write(&mut self, p: &str, data: Vec<u8>, now: i64) {
         self.ensure_parents(p);
-        let mtime = self.tick(now);
+        let ctime = self.tick(now);
+        let mtime = if self.mtime_granularity > 0 {
+            ctime - ctime.rem_euclid(self.mtime_granularity)
+        } else {
+            ctime
+        };
         let k = self.key(p);
         let name = self
             .nodes
             .get(&k)
             .map(|(n, _)| n.clone())
             .unwrap_or_else(|| p.to_owned());
-        self.nodes.insert(
-            k,
-            (
-                name,
-                Node::File {
-                    data,
-                    mtime,
-                    ctime: mtime,
-                },
-            ),
-        );
+        self.nodes
+            .insert(k, (name, Node::File { data, mtime, ctime }));
     }
 
     /// Пользователь (`cp -p`, `rsync -t`) меняет содержимое и восстанавливает прежний
@@ -320,6 +322,7 @@ impl FakeFs {
                 dir: false,
                 link: false,
                 ctime: *ctime,
+                unreadable: false,
             },
             Node::Dir => FileMeta {
                 path: name.to_owned(),
@@ -328,6 +331,7 @@ impl FakeFs {
                 dir: true,
                 link: false,
                 ctime: 0,
+                unreadable: false,
             },
             Node::Link => FileMeta {
                 path: name.to_owned(),
@@ -336,6 +340,7 @@ impl FakeFs {
                 dir: false,
                 link: true,
                 ctime: 0,
+                unreadable: false,
             },
         }
     }
@@ -357,12 +362,25 @@ impl FakeFs {
             files: self
                 .nodes
                 .values()
-                .map(|(n, node)| self.meta_of(n, node))
+                .map(|(n, node)| {
+                    let mut m = self.meta_of(n, node);
+                    if self.unreadable.contains(n) {
+                        m = FileMeta {
+                            path: n.clone(),
+                            unreadable: true,
+                            ..FileMeta::default()
+                        };
+                    }
+                    m
+                })
                 .collect(),
         }
     }
 
     pub fn stat(&self, p: &str) -> IoResult {
+        if self.unreadable.contains(p) {
+            return IoResult::Stat { meta: None };
+        }
         if self.link_on(p) {
             return IoResult::Stat {
                 meta: Some(Self::meta(p, &Node::Link)),
@@ -377,7 +395,7 @@ impl FakeFs {
     }
 
     pub fn read(&self, p: &str, offset: u64, len: Option<u64>) -> IoResult {
-        if self.link_on(p) {
+        if self.link_on(p) || self.unreadable.contains(p) {
             return IoResult::NotFound;
         }
         match self.get(p) {

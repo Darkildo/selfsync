@@ -26,6 +26,7 @@ const sv: Dict = {
   "cmd.deleted": "Återställ borttagna filer",
   "cmd.history": "Filhistorik",
   "cmd.log": "Visa synkroniseringslogg",
+  "cmd.verifyContent": "Kontrollera filernas innehåll",
 
   "notice.conflict": "Konflikt i {path}: din version sparades som {copy}",
   "notice.localCopySaved": "{path} skilde sig från servern: din version sparades som {copy}",
@@ -55,6 +56,7 @@ const sv: Dict = {
   "massDelete.action": "Ta bort på alla enheter",
   "notice.settingsOverwritten": "Inställningarna har ändrats både här och på en annan enhet: {paths}. Den senare versionen behölls (enligt enheternas klockor); den andra finns i papperskorgen eller i filens historik på servern.",
   "notice.linksSkipped": "Symboliska länkar synkroniseras inte — inget i dem laddas ned, tas bort eller laddas upp: {paths}",
+  "notice.verifyContent": "Innehållet i alla filer kontrolleras: ändringar där filens storlek och ändringstid är oförändrade synkroniseras",
   "notice.error": "Synkronisering: {message}",
   "notice.engineStopped": "selfsync: synkroniseringsmotorn misslyckades {n} gånger i rad och har stoppats. Kör ”{cmd}” för att försöka igen; detaljerna finns i synkroniseringsloggen.",
 

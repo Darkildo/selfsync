@@ -36,6 +36,9 @@ pub struct Options {
     pub recovery: bool,
     /// Подтвердить массовое удаление, на котором остановился прошлый запуск.
     pub allow_deletes: bool,
+    /// Полный обход хэширует все файлы, не доверяя размеру и mtime (`run
+    /// --verify-content`).
+    pub verify_content: bool,
 }
 
 /// Чем закончился запуск.
@@ -444,6 +447,7 @@ pub async fn with_vault(
         hook: None,
         recovery: false,
         allow_deletes: false,
+        verify_content: false,
     };
     let end = run_loop(dir, cfg, opts, None, Some(cmd)).await?;
     Ok((end.outcome, end.result))
@@ -467,6 +471,7 @@ enum Stage {
 
 const COMMAND_REQ: u64 = 1;
 const ALLOW_DELETES_REQ: u64 = 2;
+const VERIFY_CONTENT_REQ: u64 = 3;
 
 async fn run_loop(
     dir: &Path,
@@ -504,6 +509,12 @@ async fn run_loop(
         lp.feed(Event::Command {
             req: ALLOW_DELETES_REQ,
             command: UiCommand::AllowDeletes,
+        });
+    }
+    if opts.verify_content {
+        lp.feed(Event::Command {
+            req: VERIFY_CONTENT_REQ,
+            command: UiCommand::VerifyContent,
         });
     }
     if opts.enable_encryption {

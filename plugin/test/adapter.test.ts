@@ -198,3 +198,56 @@ test("адаптер: имена на пределе 255 байт приходя
   await phone.stop();
   await desk.stop();
 });
+
+test("адаптер: stat «нет файла» для файла из листинга — не удаление", async () => {
+  const stub = new StubAdapter(true);
+  const backend = new AdapterBackend(stub, PLUGIN_DIR, "system");
+  stub.put("a.md", "a\n");
+  stub.put("dir/b.md", "b\n");
+  stub.put("dir/gone.md", "x\n");
+  stub.failStat.add("a.md");
+  stub.vanishOnStat.add("dir/gone.md");
+  const list = await backend.list();
+  const a = list.find((m) => m.path === "a.md");
+  assert.deepEqual(a, { path: "a.md", size: 0, mtime: 0, dir: false, unreadable: true });
+  assert.ok(list.some((m) => m.path === "dir/b.md" && !m.unreadable && m.size === 2));
+  assert.ok(!list.some((m) => m.path === "dir/gone.md"), "исчезнувший между листингом и stat — исчез");
+
+  const [phone, stub2, desk] = await mobileAndDesktop("adapter-unreadable");
+  stub2.put("keep.md", "keep\n");
+  stub2.put("other.md", "other\n");
+  await phone.sync();
+  await desk.sync();
+  stub2.failStat.add("keep.md");
+  await phone.restart({ caseInsensitive: true, hardExcludes: [".obsidian/"] });
+  await phone.sync();
+  await desk.sync();
+  assert.equal(await desk.read("keep.md"), "keep\n", "ложное удаление ушло на другие устройства");
+  assert.ok(phone.logs.some((l) => l.includes("keep.md") && l.includes("пропущен")), phone.logs.join("\n"));
+  stub2.failStat.clear();
+  await phone.sync();
+  assert.equal(stub2.text("keep.md"), "keep\n");
+  await phone.stop();
+  await desk.stop();
+});
+
+test("адаптер: «Проверить содержимое» находит правку с тем же размером и mtime", async () => {
+  const [phone, stub, desk] = await mobileAndDesktop("adapter-verify");
+  stub.put("n.md", "AAAA\n");
+  await phone.sync();
+  await desk.sync();
+  stub.putKeepMtime("n.md", "BBBB\n");
+  await phone.restart({ caseInsensitive: true, hardExcludes: [".obsidian/"] });
+  await phone.sync();
+  await desk.sync();
+  assert.equal(await desk.read("n.md"), "AAAA\n", "обычный обход такую правку не видит");
+
+  const res = await phone.runner.command({ type: "verifyContent" });
+  assert.equal(res.type, "ok");
+  await phone.runner.idle();
+  await phone.sync();
+  await desk.sync();
+  assert.equal(await desk.read("n.md"), "BBBB\n");
+  await phone.stop();
+  await desk.stop();
+});

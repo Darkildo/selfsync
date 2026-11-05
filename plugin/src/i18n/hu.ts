@@ -26,6 +26,7 @@ const hu: Dict = {
   "cmd.deleted": "Törölt fájlok visszaállítása",
   "cmd.history": "Fájl előzményei",
   "cmd.log": "Szinkronizálási napló megjelenítése",
+  "cmd.verifyContent": "Fájlok tartalmának ellenőrzése",
 
   "notice.conflict": "Ütközés: {path} — az Ön verziója mentve ide: {copy}",
   "notice.localCopySaved": "{path} eltért a szerveren lévőtől — az Ön verziója mentve ide: {copy}",
@@ -55,6 +56,7 @@ const hu: Dict = {
   "massDelete.action": "Törlés minden eszközön",
   "notice.settingsOverwritten": "A beállítások itt és egy másik eszközön is megváltoztak: {paths}. A későbbi verzió maradt meg (az eszközök órái szerint); a másik a lomtárban vagy a fájl előzményeiben van a kiszolgálón.",
   "notice.linksSkipped": "A szimbolikus linkek nem szinkronizálódnak — bennük semmi sem töltődik le, törlődik vagy töltődik fel: {paths}",
+  "notice.verifyContent": "Az összes fájl tartalmának ellenőrzése: a fájl méretét és módosítási idejét nem változtató módosítások szinkronizálva lesznek",
   "notice.error": "Szinkronizálás: {message}",
   "notice.engineStopped": "selfsync: a szinkronizáló motor egymás után {n} alkalommal hibával leállt, ezért megállítottuk. Az újrapróbáláshoz futtassa a következőt: „{cmd}”; a részletek a szinkronizálási naplóban vannak.",
 

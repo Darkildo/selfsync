@@ -26,6 +26,7 @@ const az: Dict = {
   "cmd.deleted": "Silinmiş faylları bərpa et",
   "cmd.history": "Fayl tarixçəsi",
   "cmd.log": "Sinxronizasiya jurnalını göstər",
+  "cmd.verifyContent": "Faylların məzmununu yoxla",
 
   "notice.conflict": "{path} faylında konflikt: sizin versiyanız {copy} kimi saxlanıldı",
   "notice.localCopySaved": "{path} serverdəkindən fərqlənirdi: sizin versiyanız {copy} kimi saxlanıldı",
@@ -55,6 +56,7 @@ const az: Dict = {
   "massDelete.action": "Bütün cihazlarda sil",
   "notice.settingsOverwritten": "Parametrlər həm burada, həm də başqa cihazda dəyişdirilib: {paths}. Daha gec versiya saxlanıldı (cihazların saatına görə); digəri zibil qutusunda və ya serverdə faylın tarixçəsindədir.",
   "notice.linksSkipped": "Simvolik keçidlər sinxronlaşdırılmır — onların içində heç nə endirilmir, silinmir və yüklənmir: {paths}",
+  "notice.verifyContent": "Bütün faylların məzmunu yoxlanılır: faylın ölçüsünü və dəyişmə vaxtını dəyişməyən düzəlişlər sinxronlaşdırılacaq",
   "notice.error": "Sinxronizasiya: {message}",
   "notice.engineStopped": "selfsync: sinxronizasiya mühərriki ardıcıl {n} dəfə uğursuz oldu və dayandırıldı. Yenidən cəhd etmək üçün «{cmd}» əmrini işə salın; təfərrüatlar sinxronizasiya jurnalındadır.",
 

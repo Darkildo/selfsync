@@ -26,6 +26,7 @@ const la: Dict = {
   "cmd.deleted": "Restitue fasciculos deletos",
   "cmd.history": "Historia fasciculi",
   "cmd.log": "Monstra acta synchronizationis",
+  "cmd.verifyContent": "Contenta fasciculorum inspice",
 
   "notice.conflict": "Conflictus in {path}: versio tua servata est ut {copy}",
   "notice.localCopySaved": "{path} a servitro differebat: versio tua servata est ut {copy}",
@@ -55,6 +56,7 @@ const la: Dict = {
   "massDelete.action": "Dele in omnibus machinis",
   "notice.settingsOverwritten": "Optiones et hic et in alia machina mutatae sunt: {paths}. Versio posterior servata est (secundum horologia machinarum); altera in quisquiliis est aut in historia fasciculi in servitore.",
   "notice.linksSkipped": "Nexus symbolici non synchronizantur — nihil in eis descenditur, deletur aut sursum mittitur: {paths}",
+  "notice.verifyContent": "Contenta omnium fasciculorum inspiciuntur: mutationes quae magnitudinem et tempus mutationis non mutaverunt synchronizabuntur",
   "notice.error": "Synchronizatio: {message}",
   "notice.engineStopped": "selfsync: machina synchronizationis {n} vicibus continuis defecit et sistitur. Exsequere “{cmd}” ut iterum coneris; singula in actis synchronizationis sunt.",
 

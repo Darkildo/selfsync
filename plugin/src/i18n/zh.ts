@@ -26,6 +26,7 @@ const zh: Dict = {
   "cmd.deleted": "恢复已删除的文件",
   "cmd.history": "文件历史",
   "cmd.log": "显示同步日志",
+  "cmd.verifyContent": "检查文件内容",
 
   "notice.conflict": "{path} 发生冲突：你的版本已另存为 {copy}",
   "notice.localCopySaved": "{path} 与服务器上的不同：你的版本已另存为 {copy}",
@@ -55,6 +56,7 @@ const zh: Dict = {
   "massDelete.action": "在所有设备上删除",
   "notice.settingsOverwritten": "设置在此设备和另一台设备上都被修改了：{paths}。已保留较晚的版本（按设备时钟）；另一个版本在回收站或服务器上的文件历史中。",
   "notice.linksSkipped": "符号链接不会同步——其中的内容不会被下载、删除或上传：{paths}",
+  "notice.verifyContent": "正在检查所有文件的内容：未改变文件大小和修改时间的编辑也会被同步",
   "notice.error": "同步：{message}",
   "notice.engineStopped": "selfsync：同步引擎连续 {n} 次出错，已停止。运行“{cmd}”重试；详情见同步日志。",
 

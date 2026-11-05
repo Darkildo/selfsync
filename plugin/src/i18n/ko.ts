@@ -26,6 +26,7 @@ const ko: Dict = {
   "cmd.deleted": "삭제된 파일 복원",
   "cmd.history": "파일 기록",
   "cmd.log": "동기화 기록 보기",
+  "cmd.verifyContent": "파일 내용 확인",
 
   "notice.conflict": "{path}에서 충돌 발생: 내 버전은 {copy}(으)로 저장되었습니다",
   "notice.localCopySaved": "{path}이(가) 서버와 달랐습니다: 내 버전은 {copy}(으)로 저장되었습니다",
@@ -55,6 +56,7 @@ const ko: Dict = {
   "massDelete.action": "모든 기기에서 삭제",
   "notice.settingsOverwritten": "설정이 이 기기와 다른 기기에서 모두 변경되었습니다: {paths}. 더 나중 버전을 유지했습니다(기기 시계 기준). 다른 버전은 휴지통 또는 서버의 파일 기록에 있습니다.",
   "notice.linksSkipped": "심볼릭 링크는 동기화되지 않습니다 — 그 안의 어떤 것도 다운로드, 삭제, 업로드되지 않습니다: {paths}",
+  "notice.verifyContent": "모든 파일의 내용을 확인하는 중입니다: 파일 크기와 수정 시간이 바뀌지 않은 편집도 동기화됩니다",
   "notice.error": "동기화: {message}",
   "notice.engineStopped": "selfsync: 동기화 엔진이 {n}번 연속 실패하여 중지되었습니다. 다시 시도하려면 “{cmd}”을(를) 실행하세요. 자세한 내용은 동기화 기록에 있습니다.",
 

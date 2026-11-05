@@ -47,6 +47,9 @@ export interface FileMeta {
   /** Время изменения inode (мс), только на десктопе: правка того же размера с
    *  восстановленным mtime видна по нему. Нет — неизвестно. */
   ctime?: number;
+  /** Файл есть в листинге, а метаданные прочитать не удалось: ядро не наблюдает
+   *  его и не считает удалённым до следующего обхода. */
+  unreadable?: boolean;
 }
 
 export type Expect = { kind: "any" } | { kind: "absent" } | { kind: "stat"; size: number; mtime: number };
@@ -270,7 +273,9 @@ export type UiCommand =
   | { type: "skipped" }
   | { type: "download"; path: string }
   | { type: "removeLocal"; path: string }
-  | { type: "allowDeletes" };
+  | { type: "allowDeletes" }
+  /** Ближайший полный обход хэширует все файлы, не доверяя размеру и mtime. */
+  | { type: "verifyContent" };
 
 export type ConflictChoice = "keepBoth" | "keepMine" | "keepServer";
 

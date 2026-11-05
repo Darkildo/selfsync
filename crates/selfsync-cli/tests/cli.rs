@@ -113,6 +113,7 @@ fn once(password: Option<&str>) -> Options {
         hook: None,
         recovery: false,
         allow_deletes: false,
+        verify_content: false,
     }
 }
 
@@ -152,6 +153,30 @@ async fn two_folders_sync_edit_delete() {
     assert_eq!(trash.len(), 1, "удалённое — в корзину, а не стёрто");
     // Служебный каталог не синхронизируется: у b осталась своя конфигурация.
     assert_eq!(Config::load(b.path()).unwrap().token, cb.token);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn verify_content_reads_every_file_and_syncs() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "verify", "a");
+    let (b, cb) = folder(&srv, "verify", "b");
+    std::fs::write(a.path().join("n.md"), "AAAA\n").unwrap();
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    std::fs::write(b.path().join("n.md"), "BBBB\n").unwrap();
+    let verify = Options {
+        verify_content: true,
+        ..once(None)
+    };
+    assert_eq!(
+        runner::run(b.path(), &cb, verify).await.unwrap(),
+        Outcome::Synced
+    );
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert_eq!(
+        std::fs::read_to_string(a.path().join("n.md")).unwrap(),
+        "BBBB\n"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

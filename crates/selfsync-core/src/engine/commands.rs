@@ -466,6 +466,14 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             cx.log(LogLevel::Info, "удаления подтверждены: полный обход");
             Ok(UiResult::Ok)
         }
+        UiCommand::VerifyContent => {
+            cx.with_mut(|s| {
+                s.verify_content = true;
+                s.need_full_scan = true;
+                s.sync_due = Some(s.now);
+            });
+            Ok(UiResult::Ok)
+        }
         UiCommand::Conflicts => Ok(UiResult::Conflicts {
             items: cx.with(|s| s.index.conflicts.clone()),
         }),

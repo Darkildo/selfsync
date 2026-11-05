@@ -26,6 +26,7 @@ const nl: Dict = {
   "cmd.deleted": "Verwijderde bestanden herstellen",
   "cmd.history": "Bestandsgeschiedenis",
   "cmd.log": "Synchronisatielogboek tonen",
+  "cmd.verifyContent": "Inhoud van bestanden controleren",
 
   "notice.conflict": "Conflict in {path}: je versie is opgeslagen als {copy}",
   "notice.localCopySaved": "{path} week af van de server: je versie is opgeslagen als {copy}",
@@ -55,6 +56,7 @@ const nl: Dict = {
   "massDelete.action": "Op alle apparaten verwijderen",
   "notice.settingsOverwritten": "De instellingen zijn hier en op een ander apparaat gewijzigd: {paths}. De latere versie is behouden (volgens de klokken van de apparaten); de andere staat in de prullenbak of in de bestandsgeschiedenis op de server.",
   "notice.linksSkipped": "Symbolische koppelingen worden niet gesynchroniseerd — daarin wordt niets gedownload, verwijderd of geüpload: {paths}",
+  "notice.verifyContent": "De inhoud van alle bestanden wordt gecontroleerd: wijzigingen waarbij bestandsgrootte en wijzigingstijd gelijk bleven, worden gesynchroniseerd",
   "notice.error": "Synchronisatie: {message}",
   "notice.engineStopped": "selfsync: de synchronisatie-engine is {n} keer achter elkaar mislukt en gestopt. Voer “{cmd}” uit om het opnieuw te proberen; de details staan in het synchronisatielogboek.",
 

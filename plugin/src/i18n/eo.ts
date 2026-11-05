@@ -26,6 +26,7 @@ const eo: Dict = {
   "cmd.deleted": "Restaŭri forigitajn dosierojn",
   "cmd.history": "Historio de dosiero",
   "cmd.log": "Montri sinkronigan protokolon",
+  "cmd.verifyContent": "Kontroli enhavon de dosieroj",
 
   "notice.conflict": "Konflikto en {path}: via versio konserviĝis kiel {copy}",
   "notice.localCopySaved": "{path} diferencis de la servilo: via versio konserviĝis kiel {copy}",
@@ -55,6 +56,7 @@ const eo: Dict = {
   "massDelete.action": "Forigi en ĉiuj aparatoj",
   "notice.settingsOverwritten": "La agordoj ŝanĝiĝis kaj ĉi tie kaj en alia aparato: {paths}. La pli posta versio estis konservita (laŭ la horloĝoj de la aparatoj); la alia estas en la rubujo aŭ en la historio de la dosiero en la servilo.",
   "notice.linksSkipped": "Simbolaj ligiloj ne estas sinkronigataj — nenio en ili estas elŝutata, forigata aŭ alŝutata: {paths}",
+  "notice.verifyContent": "La enhavo de ĉiuj dosieroj estas kontrolata: ŝanĝoj, kiuj ne ŝanĝis la grandon kaj modifan tempon de la dosiero, estos sinkronigitaj",
   "notice.error": "Sinkronigo: {message}",
   "notice.engineStopped": "selfsync: la sinkroniga motoro malsukcesis {n} fojojn sinsekve kaj estis haltigita. Rulu “{cmd}” por reprovi; detaloj estas en la sinkroniga protokolo.",
 
