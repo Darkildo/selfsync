@@ -14,7 +14,7 @@ version = "0.8.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.97"
-repository = "https://github.com/selfsync/selfsync"
+repository = "https://github.com/Darkildo/selfsync"
 
 [workspace.dependencies]
 selfsync-proto = { path = "crates/selfsync-proto" }

@@ -9,7 +9,11 @@
 #   mkdir -p data && sudo chown 65532:65532 data
 
 x-selfsync: &selfsync
-  image: ghcr.io/selfsync/selfsync:latest
+  # Готового публичного образа нет: образ собирается здесь, из исходников.
+  # Префикс localhost/ и pull_policy: build не дают docker/podman скачать
+  # одноимённый образ из реестра.
+  image: localhost/selfsync:local
+  pull_policy: build
   # Контекст — корень репозитория (собирается весь workspace); исключения —
   # в deploy/Dockerfile.dockerignore (BuildKit берёт файл рядом с Dockerfile).
   build:

@@ -138,11 +138,17 @@ docker compose --profile always up -d           # or --profile ondemand (Sablier
 docker compose run --rm selfsync token add --vault notes --name laptop
 ```
 
+There is no prebuilt public image: `docker compose` builds it from the source (tag `localhost/selfsync:local`) and never pulls it from a registry. To build from the release binary instead, without Rust, use [deploy/quickstart](deploy/quickstart/).
+
 The image is based on distroless/static: no shell, read-only file system, unprivileged process. Data is kept in `./data` through a bind mount rather than a named volume, because `docker compose down -v` deletes named volumes together with all your notes.
 
 ### Podman Quadlet
 
-[deploy/quadlet/](deploy/quadlet/) runs the container with socket activation under rootless Podman.
+[deploy/quadlet/](deploy/quadlet/) runs the container with socket activation under rootless Podman. There is no prebuilt public image: build it first from the release binary, then start the units:
+
+```sh
+podman build -t localhost/selfsync:local --build-arg VERSION=X.Y.Z deploy/quickstart
+```
 
 ### Configuration
 
