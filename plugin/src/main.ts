@@ -99,6 +99,7 @@ export default class SelfsyncPlugin extends Plugin {
       }),
     );
     this.addCommand({ id: "log", name: t("cmd.log"), callback: () => this.showLog() });
+    this.addCommand({ id: "verify-content", name: t("cmd.verifyContent"), callback: () => this.whenRunning(() => void this.verifyContent()) });
     this.settingTab = this.createSettingTab();
     this.addSettingTab(this.settingTab);
 
@@ -588,6 +589,14 @@ export default class SelfsyncPlugin extends Plugin {
     if (!(await confirm(this.app, t("massDelete.confirm", { count }), t("massDelete.action")))) return;
     const res = await this.runner?.command({ type: "allowDeletes" });
     if (res?.type === "error") new Notice(t("notice.error", { message: res.message }));
+  }
+
+  /** Полный обход, который хэширует все файлы: правки, не изменившие размер и
+   *  mtime (`cp -p`, грубое время на FAT), уходят как обычные. */
+  private async verifyContent(): Promise<void> {
+    const res = await this.runner?.command({ type: "verifyContent" });
+    if (res?.type === "error") new Notice(t("notice.error", { message: res.message }));
+    else if (res) new Notice(t("notice.verifyContent"));
   }
 
   private addLog(level: LogLevel, message: string): void {

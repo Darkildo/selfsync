@@ -26,6 +26,7 @@ const sk: Dict = {
   "cmd.deleted": "Obnoviť odstránené súbory",
   "cmd.history": "História súboru",
   "cmd.log": "Zobraziť denník synchronizácie",
+  "cmd.verifyContent": "Skontrolovať obsah súborov",
 
   "notice.conflict": "Konflikt v {path}: vaša verzia bola uložená ako {copy}",
   "notice.localCopySaved": "{path} sa líšil od verzie na serveri: vaša verzia bola uložená ako {copy}",
@@ -55,6 +56,7 @@ const sk: Dict = {
   "massDelete.action": "Vymazať na všetkých zariadeniach",
   "notice.settingsOverwritten": "Nastavenia boli zmenené tu aj na inom zariadení: {paths}. Zachovala sa neskoršia verzia (podľa hodín zariadení); druhá je v koši alebo v histórii súboru na serveri.",
   "notice.linksSkipped": "Symbolické odkazy sa nesynchronizujú — nič v nich sa nesťahuje, nemaže ani nenahráva: {paths}",
+  "notice.verifyContent": "Kontroluje sa obsah všetkých súborov: úpravy, ktoré nezmenili veľkosť ani čas zmeny súboru, sa zosynchronizujú",
   "notice.error": "Synchronizácia: {message}",
   "notice.engineStopped": "selfsync: jadro synchronizácie zlyhalo {n}× po sebe a bolo zastavené. Spustite „{cmd}“ a skúste to znova; podrobnosti sú v denníku synchronizácie.",
 

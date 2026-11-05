@@ -26,6 +26,7 @@ const ro: Dict = {
   "cmd.deleted": "Restaurează fișierele șterse",
   "cmd.history": "Istoricul fișierului",
   "cmd.log": "Arată jurnalul de sincronizare",
+  "cmd.verifyContent": "Verifică conținutul fișierelor",
 
   "notice.conflict": "Conflict în {path}: versiunea dvs. a fost salvată ca {copy}",
   "notice.localCopySaved": "{path} diferea de server: versiunea dvs. a fost salvată ca {copy}",
@@ -55,6 +56,7 @@ const ro: Dict = {
   "massDelete.action": "Șterge pe toate dispozitivele",
   "notice.settingsOverwritten": "Setările au fost modificate atât aici, cât și pe alt dispozitiv: {paths}. A fost păstrată versiunea mai recentă (după ceasurile dispozitivelor); cealaltă este în coșul de gunoi sau în istoricul fișierului de pe server.",
   "notice.linksSkipped": "Legăturile simbolice nu sunt sincronizate — nimic din interiorul lor nu este descărcat, șters sau încărcat: {paths}",
+  "notice.verifyContent": "Se verifică conținutul tuturor fișierelor: modificările care nu au schimbat dimensiunea și ora modificării vor fi sincronizate",
   "notice.error": "Sincronizare: {message}",
   "notice.engineStopped": "selfsync: motorul de sincronizare a eșuat de {n} ori la rând și a fost oprit. Rulați „{cmd}” pentru a încerca din nou; detaliile sunt în jurnalul de sincronizare.",
 

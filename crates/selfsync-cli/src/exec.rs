@@ -390,6 +390,7 @@ impl Exec {
                         dir: true,
                         link: false,
                         ctime: 0,
+                        unreadable: false,
                     });
                     stack.push(path);
                 } else if ft.is_file() {
@@ -401,6 +402,7 @@ impl Exec {
                         dir: false,
                         link: false,
                         ctime: ctime_ms(&md),
+                        unreadable: false,
                     });
                 } else if ft.is_symlink() {
                     // Ссылка (на папку или файл) может вести за пределы vault'а: не
@@ -412,6 +414,7 @@ impl Exec {
                         dir: false,
                         link: true,
                         ctime: 0,
+                        unreadable: false,
                     });
                 }
             }
@@ -466,6 +469,7 @@ impl Exec {
                 dir: false,
                 link: true,
                 ctime: 0,
+                unreadable: false,
             }));
         }
         let md = match tokio::fs::symlink_metadata(self.abs(path)).await {
@@ -488,6 +492,7 @@ impl Exec {
                 dir: true,
                 link: false,
                 ctime: 0,
+                unreadable: false,
             }
         } else {
             FileMeta {
@@ -497,6 +502,7 @@ impl Exec {
                 dir: false,
                 link: false,
                 ctime: ctime_ms(&md),
+                unreadable: false,
             }
         }))
     }

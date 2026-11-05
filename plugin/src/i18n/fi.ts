@@ -26,6 +26,7 @@ const fi: Dict = {
   "cmd.deleted": "Palauta poistetut tiedostot",
   "cmd.history": "Tiedoston historia",
   "cmd.log": "Näytä synkronointiloki",
+  "cmd.verifyContent": "Tarkista tiedostojen sisältö",
 
   "notice.conflict": "Ristiriita tiedostossa {path}: versiosi tallennettiin nimellä {copy}",
   "notice.localCopySaved": "{path} poikkesi palvelimen versiosta: versiosi tallennettiin nimellä {copy}",
@@ -55,6 +56,7 @@ const fi: Dict = {
   "massDelete.action": "Poista kaikilta laitteilta",
   "notice.settingsOverwritten": "Asetuksia on muutettu sekä täällä että toisella laitteella: {paths}. Myöhempi versio säilytettiin (laitteiden kellojen mukaan); toinen on roskakorissa tai tiedoston historiassa palvelimella.",
   "notice.linksSkipped": "Symbolisia linkkejä ei synkronoida — niiden sisältä ei ladata, poisteta eikä lähetetä mitään: {paths}",
+  "notice.verifyContent": "Kaikkien tiedostojen sisältö tarkistetaan: muutokset, joissa tiedoston koko ja muokkausaika pysyivät samoina, synkronoidaan",
   "notice.error": "Synkronointi: {message}",
   "notice.engineStopped": "selfsync: synkronointimoottori kaatui {n} kertaa peräkkäin ja pysäytettiin. Yritä uudelleen suorittamalla ”{cmd}”; tiedot ovat synkronointilokissa.",
 

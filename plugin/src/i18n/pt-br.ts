@@ -26,6 +26,7 @@ const ptBr: Dict = {
   "cmd.deleted": "Restaurar arquivos excluídos",
   "cmd.history": "Histórico do arquivo",
   "cmd.log": "Mostrar registro de sincronização",
+  "cmd.verifyContent": "Verificar o conteúdo dos arquivos",
 
   "notice.conflict": "Conflito em {path}: sua versão foi salva como {copy}",
   "notice.localCopySaved": "{path} era diferente do servidor: sua versão foi salva como {copy}",
@@ -55,6 +56,7 @@ const ptBr: Dict = {
   "massDelete.action": "Excluir em todos os dispositivos",
   "notice.settingsOverwritten": "As configurações foram alteradas aqui e em outro dispositivo: {paths}. A versão mais recente foi mantida (pelos relógios dos dispositivos); a outra está na lixeira ou no histórico do arquivo no servidor.",
   "notice.linksSkipped": "Links simbólicos não são sincronizados — nada dentro deles é baixado, excluído ou enviado: {paths}",
+  "notice.verifyContent": "Verificando o conteúdo de todos os arquivos: as alterações que mantiveram o tamanho e a data de modificação serão sincronizadas",
   "notice.error": "Sincronização: {message}",
   "notice.engineStopped": "selfsync: o mecanismo de sincronização falhou {n} vezes seguidas e foi parado. Execute “{cmd}” para tentar de novo; os detalhes estão no registro de sincronização.",
 

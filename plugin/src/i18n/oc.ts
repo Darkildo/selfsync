@@ -26,6 +26,7 @@ const oc: Dict = {
   "cmd.deleted": "Restaurar de fichièrs suprimits",
   "cmd.history": "Istoric del fichièr",
   "cmd.log": "Afichar lo jornal de sincronizacion",
+  "cmd.verifyContent": "Verificar lo contengut dels fichièrs",
 
   "notice.conflict": "Conflicte dins {path} : vòstra version es estada enregistrada coma {copy}",
   "notice.localCopySaved": "{path} èra diferent del servidor : vòstra version es estada enregistrada coma {copy}",
@@ -55,6 +56,7 @@ const oc: Dict = {
   "massDelete.action": "Suprimir sus totes los aparelhs",
   "notice.settingsOverwritten": "Los paramètres son estats modificats aicí e sus un autre aparelh: {paths}. La version mai recenta es estada gardada (segon los relòtges dels aparelhs) ; l'autra es dins l'escobilhièr o dins l'istoric del fichièr sul servidor.",
   "notice.linksSkipped": "Los ligams simbolics son pas sincronizats — res es pas telecargat, suprimit o mandat dins eles : {paths}",
+  "notice.verifyContent": "Verificacion del contengut de totes los fichièrs: las modificacions que cambièron pas la talha ni la data de modificacion seràn sincronizadas",
   "notice.error": "Sincronizacion : {message}",
   "notice.engineStopped": "selfsync : lo motor de sincronizacion a fracassat {n} còps de seguida e es estat arrestat. Executatz « {cmd} » per tornar ensajar ; los detalhs son dins lo jornal de sincronizacion.",
 

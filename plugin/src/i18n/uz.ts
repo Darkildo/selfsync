@@ -26,6 +26,7 @@ const uz: Dict = {
   "cmd.deleted": "Oʻchirilgan fayllarni tiklash",
   "cmd.history": "Fayl tarixi",
   "cmd.log": "Sinxronizatsiya jurnalini koʻrsatish",
+  "cmd.verifyContent": "Fayllar tarkibini tekshirish",
 
   "notice.conflict": "{path} faylida ziddiyat: sizning versiyangiz {copy} sifatida saqlandi",
   "notice.localCopySaved": "{path} serverdagidan farq qilardi: sizning versiyangiz {copy} sifatida saqlandi",
@@ -55,6 +56,7 @@ const uz: Dict = {
   "massDelete.action": "Barcha qurilmalarda o'chirish",
   "notice.settingsOverwritten": "Sozlamalar bu yerda ham, boshqa qurilmada ham o'zgartirildi: {paths}. Keyingi versiya saqlab qolindi (qurilmalar soatiga ko'ra); ikkinchisi chiqindilar qutisida yoki serverdagi fayl tarixida.",
   "notice.linksSkipped": "Ramziy havolalar sinxronlanmaydi — ularning ichida hech narsa yuklab olinmaydi, o'chirilmaydi yoki yuklanmaydi: {paths}",
+  "notice.verifyContent": "Barcha fayllar tarkibi tekshirilmoqda: fayl hajmi va oʻzgartirilgan vaqtini oʻzgartirmagan tahrirlar sinxronlanadi",
   "notice.error": "Sinxronizatsiya: {message}",
   "notice.engineStopped": "selfsync: sinxronizatsiya dvigateli ketma-ket {n} marta ishdan chiqdi va toʻxtatildi. Qayta urinish uchun “{cmd}” buyrugʻini bajaring; tafsilotlar sinxronizatsiya jurnalida.",
 

@@ -26,6 +26,7 @@ const it: Dict = {
   "cmd.deleted": "Ripristina i file eliminati",
   "cmd.history": "Cronologia del file",
   "cmd.log": "Mostra il registro di sincronizzazione",
+  "cmd.verifyContent": "Controlla il contenuto dei file",
 
   "notice.conflict": "Conflitto in {path}: la tua versione è stata salvata come {copy}",
   "notice.localCopySaved": "{path} era diverso dal server: la tua versione è stata salvata come {copy}",
@@ -55,6 +56,7 @@ const it: Dict = {
   "massDelete.action": "Elimina su tutti i dispositivi",
   "notice.settingsOverwritten": "Le impostazioni sono state modificate qui e su un altro dispositivo: {paths}. È stata mantenuta la versione più recente (secondo gli orologi dei dispositivi); l'altra è nel cestino o nella cronologia del file sul server.",
   "notice.linksSkipped": "I collegamenti simbolici non vengono sincronizzati — al loro interno nulla viene scaricato, eliminato o caricato: {paths}",
+  "notice.verifyContent": "Controllo del contenuto di tutti i file: le modifiche che non hanno cambiato dimensione e data di modifica verranno sincronizzate",
   "notice.error": "Sincronizzazione: {message}",
   "notice.engineStopped": "selfsync: il motore di sincronizzazione è andato in errore {n} volte di seguito ed è stato fermato. Esegui «{cmd}» per riprovare; i dettagli sono nel registro di sincronizzazione.",
 

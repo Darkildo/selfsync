@@ -26,6 +26,7 @@ const tl: Dict = {
   "cmd.deleted": "Ibalik ang mga na-delete na file",
   "cmd.history": "History ng file",
   "cmd.log": "Ipakita ang log ng pag-sync",
+  "cmd.verifyContent": "Suriin ang nilalaman ng mga file",
 
   "notice.conflict": "Conflict sa {path}: na-save ang iyong bersyon bilang {copy}",
   "notice.localCopySaved": "Iba ang {path} sa nasa server: na-save ang iyong bersyon bilang {copy}",
@@ -55,6 +56,7 @@ const tl: Dict = {
   "massDelete.action": "Burahin sa lahat ng device",
   "notice.settingsOverwritten": "Binago ang mga setting dito at sa ibang device: {paths}. Itinago ang mas huling bersyon (ayon sa orasan ng mga device); ang isa ay nasa basurahan o sa kasaysayan ng file sa server.",
   "notice.linksSkipped": "Hindi sini-sync ang mga symbolic link — walang anumang nasa loob nito ang dina-download, binubura o ina-upload: {paths}",
+  "notice.verifyContent": "Sinusuri ang nilalaman ng lahat ng file: masi-sync ang mga pagbabagong hindi nagbago sa laki at oras ng pagbabago ng file",
   "notice.error": "Pag-sync: {message}",
   "notice.engineStopped": "selfsync: pumalya ang sync engine nang {n} beses nang sunod-sunod at itinigil na. Patakbuhin ang “{cmd}” para subukang muli; nasa log ng pag-sync ang mga detalye.",
 

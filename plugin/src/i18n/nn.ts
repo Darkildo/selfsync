@@ -26,6 +26,7 @@ const nn: Dict = {
   "cmd.deleted": "Gjenopprett sletta filer",
   "cmd.history": "Filhistorikk",
   "cmd.log": "Vis synkroniseringsloggen",
+  "cmd.verifyContent": "Kontroller innhaldet i filene",
 
   "notice.conflict": "Konflikt i {path}: versjonen din er lagra som {copy}",
   "notice.localCopySaved": "{path} skilde seg frå tenaren: versjonen din er lagra som {copy}",
@@ -55,6 +56,7 @@ const nn: Dict = {
   "massDelete.action": "Slett på alle einingar",
   "notice.settingsOverwritten": "Innstillingane er endra både her og på ei anna eining: {paths}. Den seinaste versjonen er halden på (etter klokkene til einingane); den andre ligg i papirkorga eller i historikken til fila på tenaren.",
   "notice.linksSkipped": "Symbolske lenkjer vert ikkje synkroniserte — ingenting i dei vert lasta ned, sletta eller lasta opp: {paths}",
+  "notice.verifyContent": "Innhaldet i alle filer vert kontrollert: endringar der storleiken og endringstida til fila er uendra, vert synkroniserte",
   "notice.error": "Synkronisering: {message}",
   "notice.engineStopped": "selfsync: synkroniseringsmotoren feila {n} gonger på rad og er stoppa. Køyr «{cmd}» for å prøve igjen; detaljane står i synkroniseringsloggen.",
 

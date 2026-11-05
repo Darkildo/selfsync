@@ -26,6 +26,7 @@ const ms: Dict = {
   "cmd.deleted": "Pulihkan fail yang dipadam",
   "cmd.history": "Sejarah fail",
   "cmd.log": "Tunjukkan log penyegerakan",
+  "cmd.verifyContent": "Semak kandungan fail",
 
   "notice.conflict": "Konflik dalam {path}: versi anda disimpan sebagai {copy}",
   "notice.localCopySaved": "{path} berbeza daripada versi di pelayan: versi anda disimpan sebagai {copy}",
@@ -55,6 +56,7 @@ const ms: Dict = {
   "massDelete.action": "Padam pada semua peranti",
   "notice.settingsOverwritten": "Tetapan telah diubah di sini dan pada peranti lain: {paths}. Versi yang lebih lewat dikekalkan (mengikut jam peranti); yang satu lagi berada dalam tong sampah atau dalam sejarah fail pada pelayan.",
   "notice.linksSkipped": "Pautan simbolik tidak disegerakkan — tiada apa-apa di dalamnya dimuat turun, dipadam atau dimuat naik: {paths}",
+  "notice.verifyContent": "Kandungan semua fail sedang disemak: suntingan yang tidak mengubah saiz dan masa ubah suai fail akan disegerakkan",
   "notice.error": "Penyegerakan: {message}",
   "notice.engineStopped": "selfsync: enjin penyegerakan gagal {n} kali berturut-turut dan telah dihentikan. Jalankan “{cmd}” untuk mencuba lagi; butirannya ada dalam log penyegerakan.",
 

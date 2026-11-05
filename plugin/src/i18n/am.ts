@@ -26,6 +26,7 @@ const am: Dict = {
   "cmd.deleted": "የተሰረዙ ፋይሎችን እነበረበት መልስ",
   "cmd.history": "የፋይል ታሪክ",
   "cmd.log": "የማመሳሰል መዝገብ አሳይ",
+  "cmd.verifyContent": "የፋይሎችን ይዘት ፈትሽ",
 
   "notice.conflict": "በ{path} ላይ ግጭት: የእርስዎ ስሪት እንደ {copy} ተቀምጧል",
   "notice.localCopySaved": "{path} በአገልጋዩ ላይ ካለው ይለያል: የእርስዎ ስሪት እንደ {copy} ተቀምጧል",
@@ -55,6 +56,7 @@ const am: Dict = {
   "massDelete.action": "በሁሉም መሣሪያዎች ላይ ሰርዝ",
   "notice.settingsOverwritten": "ቅንብሮች እዚህም በሌላ መሣሪያም ተቀይረዋል፦ {paths}። የኋለኛው ስሪት ተይዟል (በመሣሪያዎቹ ሰዓት)፤ ሌላኛው በቆሻሻ መጣያ ወይም በአገልጋዩ ላይ ባለው የፋይሉ ታሪክ ውስጥ ነው።",
   "notice.linksSkipped": "ምሳሌያዊ አገናኞች አይሰመሩም — በውስጣቸው ምንም አይወርድም፣ አይሰረዝም ወይም አይሰቀልም፦ {paths}",
+  "notice.verifyContent": "የሁሉም ፋይሎች ይዘት እየተፈተሸ ነው፦ የፋይሉን መጠንና የተቀየረበትን ጊዜ ያልቀየሩ ለውጦች ይመሳሰላሉ",
   "notice.error": "ማመሳሰል: {message}",
   "notice.engineStopped": "selfsync: የማመሳሰል ሞተሩ {n} ጊዜ በተከታታይ አልተሳካም እና ቆሟል። እንደገና ለመሞከር «{cmd}»ን ያሂዱ፤ ዝርዝሩ በማመሳሰል መዝገብ ውስጥ አለ።",
 

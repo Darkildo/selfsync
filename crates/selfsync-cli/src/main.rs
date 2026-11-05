@@ -101,6 +101,11 @@ enum Cmd {
         /// многих файлов, которые здесь были (страховка от сбоя ФС).
         #[arg(long)]
         allow_deletes: bool,
+        /// Перечитать и сверить содержимое всех файлов, не доверяя размеру и времени
+        /// изменения (правки, которые их не изменили: `cp -p`, `rsync -t`, грубое
+        /// время на FAT): найденные отличия уходят как обычные правки.
+        #[arg(long)]
+        verify_content: bool,
     },
     /// Включить сквозное шифрование vault'а (пароль понадобится всем устройствам).
     Encrypt {
@@ -701,6 +706,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             exec,
             exec_timeout,
             allow_deletes,
+            verify_content,
         } => {
             let cfg = Config::load(&dir)?;
             let hook = match exec.or_else(|| cfg.exec.clone()) {
@@ -723,6 +729,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 hook,
                 recovery: false,
                 allow_deletes,
+                verify_content,
             };
             return Ok(outcome(runner::run(&dir, &cfg, opts).await?));
         }
@@ -807,6 +814,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 hook: None,
                 recovery: false,
                 allow_deletes: false,
+                verify_content: false,
             };
             return Ok(outcome(runner::run(&dir, &cfg, opts).await?));
         }
@@ -829,6 +837,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 hook: None,
                 recovery,
                 allow_deletes: false,
+                verify_content: false,
             };
             let code = outcome(runner::run(&dir, &cfg, opts).await?);
             if code == ExitCode::SUCCESS {

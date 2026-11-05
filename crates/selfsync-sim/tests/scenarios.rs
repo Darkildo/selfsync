@@ -4102,3 +4102,96 @@ fn unnoticed_edit_is_not_overwritten_by_remote() {
         w.server_files().keys().collect::<Vec<_>>()
     );
 }
+
+// «Racily clean»: ФС с грубым mtime (FAT — 2 с) и без ctime.
+
+#[test]
+fn edit_in_same_mtime_unit_after_download_is_seen() {
+    // c1 получил файл и тут же, в ту же единицу времени ФС, сохранил правку той же
+    // длины: размер и mtime те же, ctime нет. Наблюдению при скачивании нельзя было
+    // доверять (mtime слишком свежий) — файл хэшируется заново, правка уходит.
+    let mut w = World::new(quiet(2));
+    // Начало единицы времени ФС: скачивание и правка попадают в одну.
+    w.now = (w.now / 2000 + 1) * 2000;
+    w.clients[1].fs.no_ctime = true;
+    w.clients[1].fs.mtime_granularity = 2000;
+    let old = shared_note(&mut w, "a.md");
+    let (new, edited) = same_size_edit(&mut w, 1, "a.md", &old);
+    let before = w.clients[1].fs.get("a.md").cloned();
+    w.user_write(1, "a.md", edited);
+    let after = w.clients[1].fs.get("a.md").cloned();
+    let mtime = |n: &Option<selfsync_sim::fs::Node>| match n {
+        Some(selfsync_sim::fs::Node::File { mtime, .. }) => *mtime,
+        _ => panic!("нет файла"),
+    };
+    assert_eq!(
+        mtime(&before),
+        mtime(&after),
+        "mtime тот же — в этом и сложность"
+    );
+    w.sync(1);
+    assert!(server_text(&w, "a.md").contains(&new), "правка не ушла");
+    finish(&mut w);
+}
+
+#[test]
+fn verify_content_finds_edit_hidden_by_size_and_mtime() {
+    // Правка того же размера с восстановленным mtime на ФС без ctime: обычный обход
+    // её не видит (размер и mtime те же), «Проверить содержимое» — видит.
+    let mut w = World::new(quiet(2));
+    w.clients[1].fs.no_ctime = true;
+    let old = shared_note(&mut w, "a.md");
+    let (new, edited) = same_size_edit(&mut w, 1, "a.md", &old);
+    let now = w.client_now(1);
+    w.clients[1].fs.user_write_keep_mtime("a.md", edited, now);
+    w.kill(1);
+    w.drain(1);
+    w.sync(1);
+    assert!(
+        !server_text(&w, "a.md").contains(&new),
+        "обычный обход такую правку не видит"
+    );
+    w.deliver(
+        1,
+        Event::Command {
+            req: 9,
+            command: UiCommand::VerifyContent,
+        },
+    );
+    w.drain(1);
+    assert!(
+        w.clients[1]
+            .ui_results
+            .iter()
+            .any(|(r, res)| *r == 9 && matches!(res, UiResult::Ok))
+    );
+    w.sync(1);
+    assert!(
+        server_text(&w, "a.md").contains(&new),
+        "проверка не нашла правку"
+    );
+    finish(&mut w);
+}
+
+#[test]
+fn unreadable_file_in_listing_is_not_deleted() {
+    // Мобильный адаптер не смог прочитать метаданные файла, который есть в листинге:
+    // файл не наблюдается до следующего обхода, но и удалённым не считается.
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    base_note(&mut w, 1, "b.md");
+    w.sync(1);
+    w.clients[1].fs.unreadable.insert("a.md".to_owned());
+    w.kill(1);
+    w.drain(1);
+    w.sync(1);
+    w.sync(0);
+    assert!(
+        w.server_files().contains_key("a.md"),
+        "удаление ушло на сервер"
+    );
+    assert!(w.clients[0].fs.read_file("a.md").is_some());
+    w.clients[1].fs.unreadable.clear();
+    finish(&mut w);
+    assert!(w.server_files().contains_key("a.md"));
+}

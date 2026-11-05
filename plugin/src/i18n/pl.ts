@@ -26,6 +26,7 @@ const pl: Dict = {
   "cmd.deleted": "Przywróć usunięte pliki",
   "cmd.history": "Historia pliku",
   "cmd.log": "Pokaż dziennik synchronizacji",
+  "cmd.verifyContent": "Sprawdź zawartość plików",
 
   "notice.conflict": "Konflikt w {path}: Twoja wersja zapisana jako {copy}",
   "notice.localCopySaved": "{path} różnił się od wersji na serwerze: Twoja wersja zapisana jako {copy}",
@@ -55,6 +56,7 @@ const pl: Dict = {
   "massDelete.action": "Usuń na wszystkich urządzeniach",
   "notice.settingsOverwritten": "Ustawienia zmieniono zarówno tutaj, jak i na innym urządzeniu: {paths}. Zachowano późniejszą wersję (według zegarów urządzeń); druga jest w koszu lub w historii pliku na serwerze.",
   "notice.linksSkipped": "Dowiązania symboliczne nie są synchronizowane — nic w nich nie jest pobierane, usuwane ani wysyłane: {paths}",
+  "notice.verifyContent": "Sprawdzanie zawartości wszystkich plików: zmiany, które nie zmieniły rozmiaru ani czasu modyfikacji pliku, zostaną zsynchronizowane",
   "notice.error": "Synchronizacja: {message}",
   "notice.engineStopped": "selfsync: silnik synchronizacji zawiódł {n} razy z rzędu i został zatrzymany. Uruchom „{cmd}”, aby spróbować ponownie; szczegóły są w dzienniku synchronizacji.",
 

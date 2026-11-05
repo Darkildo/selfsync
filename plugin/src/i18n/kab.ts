@@ -26,6 +26,7 @@ const kab: Dict = {
   "cmd.deleted": "Err-d ifuyla yettwakksen",
   "cmd.history": "Azray n ufaylu",
   "cmd.log": "Sken aɣmis n umtawa",
+  "cmd.verifyContent": "Senqed agbur n yifuyla",
 
   "notice.conflict": "Ccwal deg {path}: lqem-ik·im yettwaḥrez am {copy}",
   "notice.localCopySaved": "{path} yemgarad ɣef uqeddac: lqem-ik·im yettwaḥrez am {copy}",
@@ -55,6 +56,7 @@ const kab: Dict = {
   "massDelete.action": "Kkes deg yibenkan meṛṛa",
   "notice.settingsOverwritten": "Iɣewwaṛen ttwabeddlen da akked deg yibenk-nniḍen: {paths}. Lqem aneggaru yeqqim (s tsragin n yibenkan); wayeḍ atan deg tqecwalt neɣ deg uzray n ufaylu ɣef uqeddac.",
   "notice.linksSkipped": "Iseɣwan izamulen ur ttemtawin ara — ulac ayen ara d-yettwasidar, ara yettwakksen neɣ ara yettwasalin deg-sen: {paths}",
+  "notice.verifyContent": "Agbur n yifuyla meṛṛa yettwasenqad: ibeddilen ur nbeddel ara teɣzi d wakud n ubeddel n ufaylu ad ttwamtawin",
   "notice.error": "Amtawa: {message}",
   "notice.engineStopped": "selfsync: amsedday n umtawa yeccḍ {n} n tikkal yemḍafaren, yettwaḥbes. Sedde “{cmd}” akken ad tɛerḍeḍ tikkelt-nniḍen; talqayt tella deg uɣmis n umtawa.",
 

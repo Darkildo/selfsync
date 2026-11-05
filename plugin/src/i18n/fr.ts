@@ -26,6 +26,7 @@ const fr: Dict = {
   "cmd.deleted": "Restaurer des fichiers supprimés",
   "cmd.history": "Historique du fichier",
   "cmd.log": "Afficher le journal de synchronisation",
+  "cmd.verifyContent": "Vérifier le contenu des fichiers",
 
   "notice.conflict": "Conflit dans {path} : votre version a été enregistrée sous {copy}",
   "notice.localCopySaved": "{path} différait de la version du serveur : votre version a été enregistrée sous {copy}",
@@ -55,6 +56,7 @@ const fr: Dict = {
   "massDelete.action": "Supprimer sur tous les appareils",
   "notice.settingsOverwritten": "Les paramètres ont été modifiés ici et sur un autre appareil : {paths}. La version la plus récente a été conservée (selon les horloges des appareils) ; l'autre se trouve dans la corbeille ou dans l'historique du fichier sur le serveur.",
   "notice.linksSkipped": "Les liens symboliques ne sont pas synchronisés — rien n'y est téléchargé, supprimé ou envoyé : {paths}",
+  "notice.verifyContent": "Vérification du contenu de tous les fichiers : les modifications qui n’ont changé ni la taille ni la date de modification du fichier seront synchronisées",
   "notice.error": "Synchronisation : {message}",
   "notice.engineStopped": "selfsync : le moteur de synchronisation a échoué {n} fois de suite et a été arrêté. Lancez « {cmd} » pour réessayer ; les détails sont dans le journal de synchronisation.",
 

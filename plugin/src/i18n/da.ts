@@ -26,6 +26,7 @@ const da: Dict = {
   "cmd.deleted": "Gendan slettede filer",
   "cmd.history": "Filhistorik",
   "cmd.log": "Vis synkroniseringslog",
+  "cmd.verifyContent": "Kontrollér filernes indhold",
 
   "notice.conflict": "Konflikt i {path}: din version er gemt som {copy}",
   "notice.localCopySaved": "{path} afveg fra serveren: din version er gemt som {copy}",
@@ -55,6 +56,7 @@ const da: Dict = {
   "massDelete.action": "Slet på alle enheder",
   "notice.settingsOverwritten": "Indstillingerne er ændret både her og på en anden enhed: {paths}. Den seneste version er beholdt (efter enhedernes ure); den anden ligger i papirkurven eller i filens historik på serveren.",
   "notice.linksSkipped": "Symbolske links synkroniseres ikke — intet i dem hentes, slettes eller uploades: {paths}",
+  "notice.verifyContent": "Indholdet af alle filer kontrolleres: ændringer, hvor filens størrelse og ændringstid er uændret, bliver synkroniseret",
   "notice.error": "Synkronisering: {message}",
   "notice.engineStopped": "selfsync: synkroniseringsmotoren fejlede {n} gange i træk og er stoppet. Kør »{cmd}« for at prøve igen; detaljerne står i synkroniseringsloggen.",
 

@@ -26,6 +26,7 @@ const nanTw: Dict = {
   "cmd.deleted": "Ho̍k-guân san-tû ê tóng-àn",
   "cmd.history": "Tóng-àn li̍k-sú",
   "cmd.log": "Hián-sī tông-pōo kì-lo̍k",
+  "cmd.verifyContent": "檢查檔案內容",
 
   "notice.conflict": "{path} ū tshiong-tu̍t: lí ê pán-pún pó-tsûn tsò {copy}",
   "notice.localCopySaved": "{path} kah sū-ho̍k-khì--ê bô-kâng: lí ê pán-pún pó-tsûn tsò {copy}",
@@ -55,6 +56,7 @@ const nanTw: Dict = {
   "massDelete.action": "Tī só͘-ū ê siat-pī thâi tiāu",
   "notice.settingsOverwritten": "Siat-tīng tī tsia kah koh tsi̍t tâi siat-pī lóng ū kái: {paths}. Khah òaⁿ ê pán-pún lâu leh (tsiàu siat-pī ê sî-tsing); lēng-guā tsi̍t ê tī pùn-sò-tháng iah-sī su-ho̍k-khì tíng ê tóng-àn le̍k-sú.",
   "notice.linksSkipped": "Sù-hō liân-kiat bē tông-pō͘ — lāi-bīn ê mi̍h-kiāⁿ lóng bē hē-chài, thâi-tiāu iah-sī chiūⁿ-thoân: {paths}",
+  "notice.verifyContent": "當咧檢查所有檔案的內容：無改著檔案大細佮修改時間的編輯嘛會同步",
   "notice.error": "Tông-pōo: {message}",
   "notice.engineStopped": "selfsync: tông-pōo ián-jín liân-sòa {n} pái tshut-tshò, í-king thîng--khì. Tsò “{cmd}” tsài tshì tsi̍t-pái; siông-sè tī tông-pōo kì-lo̍k.",
 

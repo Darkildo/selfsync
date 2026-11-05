@@ -26,6 +26,7 @@ const eu: Dict = {
   "cmd.deleted": "Leheneratu ezabatutako fitxategiak",
   "cmd.history": "Fitxategiaren historia",
   "cmd.log": "Erakutsi sinkronizazio-erregistroa",
+  "cmd.verifyContent": "Egiaztatu fitxategien edukia",
 
   "notice.conflict": "Gatazka {path} fitxategian: zure bertsioa {copy} gisa gorde da",
   "notice.localCopySaved": "{path} zerbitzarikoaren desberdina zen: zure bertsioa {copy} gisa gorde da",
@@ -55,6 +56,7 @@ const eu: Dict = {
   "massDelete.action": "Ezabatu gailu guztietan",
   "notice.settingsOverwritten": "Ezarpenak hemen eta beste gailu batean aldatu dira: {paths}. Geroagoko bertsioa gorde da (gailuen erlojuen arabera); bestea zakarrontzian edo zerbitzariko fitxategiaren historian dago.",
   "notice.linksSkipped": "Esteka sinbolikoak ez dira sinkronizatzen — barruan ez da ezer deskargatzen, ezabatzen edo igotzen: {paths}",
+  "notice.verifyContent": "Fitxategi guztien edukia egiaztatzen ari da: tamaina eta aldaketa-data aldatu ez duten aldaketak sinkronizatuko dira",
   "notice.error": "Sinkronizazioa: {message}",
   "notice.engineStopped": "selfsync: sinkronizazio-motorrak {n} aldiz jarraian huts egin du eta gelditu egin da. Exekutatu «{cmd}» berriro saiatzeko; xehetasunak sinkronizazio-erregistroan daude.",
 

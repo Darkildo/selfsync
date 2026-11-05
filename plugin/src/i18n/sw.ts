@@ -26,6 +26,7 @@ const sw: Dict = {
   "cmd.deleted": "Rejesha faili zilizofutwa",
   "cmd.history": "Historia ya faili",
   "cmd.log": "Onyesha kumbukumbu ya usawazishaji",
+  "cmd.verifyContent": "Kagua maudhui ya faili",
 
   "notice.conflict": "Mgongano katika {path}: toleo lako limehifadhiwa kama {copy}",
   "notice.localCopySaved": "{path} ilitofautiana na ile ya seva: toleo lako limehifadhiwa kama {copy}",
@@ -55,6 +56,7 @@ const sw: Dict = {
   "massDelete.action": "Futa kwenye vifaa vyote",
   "notice.settingsOverwritten": "Mipangilio ilibadilishwa hapa na kwenye kifaa kingine: {paths}. Toleo la baadaye limehifadhiwa (kwa saa za vifaa); jingine liko kwenye tupio au kwenye historia ya faili kwenye seva.",
   "notice.linksSkipped": "Viungo vya ishara havisawazishwi — hakuna kitu ndani yake kinachopakuliwa, kufutwa au kupakiwa: {paths}",
+  "notice.verifyContent": "Maudhui ya faili zote yanakaguliwa: mabadiliko ambayo hayakubadilisha ukubwa na wakati wa kubadilishwa kwa faili yatasawazishwa",
   "notice.error": "Usawazishaji: {message}",
   "notice.engineStopped": "selfsync: injini ya usawazishaji imeshindwa mara {n} mfululizo na imesimamishwa. Endesha “{cmd}” ili ujaribu tena; maelezo yako kwenye kumbukumbu ya usawazishaji.",
 

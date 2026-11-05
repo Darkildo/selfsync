@@ -26,6 +26,7 @@ const cs: Dict = {
   "cmd.deleted": "Obnovit smazané soubory",
   "cmd.history": "Historie souboru",
   "cmd.log": "Zobrazit protokol synchronizace",
+  "cmd.verifyContent": "Zkontrolovat obsah souborů",
 
   "notice.conflict": "Konflikt v {path}: vaše verze uložena jako {copy}",
   "notice.localCopySaved": "{path} se lišil od verze na serveru: vaše verze uložena jako {copy}",
@@ -55,6 +56,7 @@ const cs: Dict = {
   "massDelete.action": "Smazat na všech zařízeních",
   "notice.settingsOverwritten": "Nastavení bylo změněno zde i na jiném zařízení: {paths}. Zachována byla pozdější verze (podle hodin zařízení); druhá je v koši nebo v historii souboru na serveru.",
   "notice.linksSkipped": "Symbolické odkazy se nesynchronizují — nic v nich se nestahuje, nemaže ani nenahrává: {paths}",
+  "notice.verifyContent": "Kontroluje se obsah všech souborů: úpravy, které nezměnily velikost ani čas změny souboru, budou synchronizovány",
   "notice.error": "Synchronizace: {message}",
   "notice.engineStopped": "selfsync: jádro synchronizace selhalo {n}× po sobě a bylo zastaveno. Spusťte „{cmd}“ a zkuste to znovu; podrobnosti jsou v protokolu synchronizace.",
 

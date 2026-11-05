@@ -26,6 +26,7 @@ const id: Dict = {
   "cmd.deleted": "Pulihkan berkas yang dihapus",
   "cmd.history": "Riwayat berkas",
   "cmd.log": "Tampilkan log sinkronisasi",
+  "cmd.verifyContent": "Periksa isi berkas",
 
   "notice.conflict": "Konflik di {path}: versi Anda disimpan sebagai {copy}",
   "notice.localCopySaved": "{path} berbeda dari versi di server: versi Anda disimpan sebagai {copy}",
@@ -55,6 +56,7 @@ const id: Dict = {
   "massDelete.action": "Hapus di semua perangkat",
   "notice.settingsOverwritten": "Pengaturan diubah di sini dan di perangkat lain: {paths}. Versi yang lebih baru disimpan (menurut jam perangkat); yang lain ada di tempat sampah atau di riwayat berkas di server.",
   "notice.linksSkipped": "Tautan simbolik tidak disinkronkan — tidak ada isi di dalamnya yang diunduh, dihapus, atau diunggah: {paths}",
+  "notice.verifyContent": "Isi semua berkas sedang diperiksa: suntingan yang tidak mengubah ukuran dan waktu ubah berkas akan disinkronkan",
   "notice.error": "Sinkronisasi: {message}",
   "notice.engineStopped": "selfsync: mesin sinkronisasi gagal {n} kali berturut-turut dan dihentikan. Jalankan “{cmd}” untuk mencoba lagi; detailnya ada di log sinkronisasi.",
 
