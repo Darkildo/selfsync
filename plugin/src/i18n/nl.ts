@@ -50,6 +50,9 @@ const nl: Dict = {
   "notice.serverRewound": "De server is hersteld uit een back-up — volledige afstemming",
   "notice.indexReset": "De synchronisatie-index was beschadigd — een veilige volledige afstemming is gestart",
   "notice.encryptionMismatch": "De kluis is hier versleuteld, maar niet op de server — synchronisatie gestopt",
+  "notice.massDelete": "{count} van {total} bestanden ontbreken hier — synchronisatie gestopt, er is niets verwijderd op de server. Als dit een vergissing is (mapmachtigingen, een losgekoppelde schijf), zet ze terug en synchroniseer opnieuw. Klik om ze op alle apparaten te verwijderen",
+  "massDelete.confirm": "{count} ontbrekende bestanden op alle apparaten verwijderen? Ze blijven tijdens de bewaartermijn in de verwijderde bestanden van de server.",
+  "massDelete.action": "Op alle apparaten verwijderen",
   "notice.error": "Synchronisatie: {message}",
   "notice.engineStopped": "selfsync: de synchronisatie-engine is {n} keer achter elkaar mislukt en gestopt. Voer “{cmd}” uit om het opnieuw te proberen; de details staan in het synchronisatielogboek.",
 

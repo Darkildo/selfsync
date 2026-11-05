@@ -50,6 +50,9 @@ const fi: Dict = {
   "notice.serverRewound": "Palvelin palautettiin varmuuskopiosta — täysi täsmäytys",
   "notice.indexReset": "Synkronointihakemisto oli vioittunut — turvallinen täysi täsmäytys aloitettu",
   "notice.encryptionMismatch": "Holvi on salattu täällä mutta ei palvelimella — synkronointi pysäytetty",
+  "notice.massDelete": "Täältä puuttuu {count}/{total} tiedostoa — synkronointi pysäytetty, palvelimelta ei poistettu mitään. Jos kyse on virheestä (kansion oikeudet, irrotettu asema), palauta ne ja synkronoi uudelleen. Napsauta poistaaksesi ne kaikilta laitteilta",
+  "massDelete.confirm": "Poistetaanko {count} puuttuvaa tiedostoa kaikilta laitteilta? Ne säilyvät palvelimen poistetuissa tiedostoissa säilytysajan.",
+  "massDelete.action": "Poista kaikilta laitteilta",
   "notice.error": "Synkronointi: {message}",
   "notice.engineStopped": "selfsync: synkronointimoottori kaatui {n} kertaa peräkkäin ja pysäytettiin. Yritä uudelleen suorittamalla ”{cmd}”; tiedot ovat synkronointilokissa.",
 

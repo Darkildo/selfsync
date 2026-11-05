@@ -50,6 +50,9 @@ const sv: Dict = {
   "notice.serverRewound": "Servern återställdes från en säkerhetskopia — fullständig avstämning",
   "notice.indexReset": "Synkroniseringsindexet var skadat — en säker fullständig avstämning har startats",
   "notice.encryptionMismatch": "Valvet är krypterat här men inte på servern — synkroniseringen stoppad",
+  "notice.massDelete": "{count} av {total} filer saknas här — synkroniseringen har stoppats, inget har tagits bort på servern. Om det är ett misstag (mappbehörigheter, en frånkopplad enhet), återställ dem och synkronisera igen. Klicka för att ta bort dem på alla enheter",
+  "massDelete.confirm": "Ta bort {count} saknade filer på alla enheter? De finns kvar bland serverns borttagna filer under lagringstiden.",
+  "massDelete.action": "Ta bort på alla enheter",
   "notice.error": "Synkronisering: {message}",
   "notice.engineStopped": "selfsync: synkroniseringsmotorn misslyckades {n} gånger i rad och har stoppats. Kör ”{cmd}” för att försöka igen; detaljerna finns i synkroniseringsloggen.",
 

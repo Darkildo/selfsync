@@ -50,6 +50,9 @@ const ga: Dict = {
   "notice.serverRewound": "Athchóiríodh an freastalaí ó chúltaca — réiteach iomlán",
   "notice.indexReset": "Bhí innéacs an tsioncrónaithe damáistithe — tosaíodh réiteach iomlán sábháilte",
   "notice.encryptionMismatch": "Tá an boghta criptithe anseo ach ní ar an bhfreastalaí — stopadh an sioncrónú",
+  "notice.massDelete": "Tá {count} as {total} comhad ar iarraidh anseo — stopadh an sioncronú, níor scriosadh aon rud ar an bhfreastalaí. Más botún é (ceadanna fillteáin, tiomántán dícheangailte), athchóirigh iad agus sioncronaigh arís. Cliceáil chun iad a scriosadh ar gach gléas",
+  "massDelete.confirm": "Scrios {count} comhad atá ar iarraidh ar gach gléas? Fanann siad i gcomhaid scriosta an fhreastalaí ar feadh na tréimhse coinneála.",
+  "massDelete.action": "Scrios ar gach gléas",
   "notice.error": "Sioncrónú: {message}",
   "notice.engineStopped": "selfsync: theip ar an inneall sioncrónaithe {n} uair as a chéile agus stopadh é. Rith “{cmd}” chun triail eile a bhaint as; tá na sonraí i logchomhad an tsioncrónaithe.",
 

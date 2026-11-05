@@ -2,7 +2,7 @@
 //! без случайных сбоев, затем успокоение и проверка инвариантов (ни одна правка не
 //! потеряна, все клиенты совпадают с сервером) и ожидаемого исхода.
 
-use selfsync_core::engine::{Event, Notice};
+use selfsync_core::engine::{Event, Notice, SyncState, UiCommand, UiResult};
 use selfsync_core::path::NameRules;
 use selfsync_sim::{PASSWORD, SimConfig, World, tokens_in};
 
@@ -3497,4 +3497,182 @@ fn diagnose_server_minor_warn_policy() {
     w.deliver(0, Event::Configure { config });
     assert_eq!(version(&mut w, 3), (DiagLevel::Ok, "ok".to_owned()));
     finish(&mut w);
+}
+
+// Страховка от массового удаления: файлы, пропавшие без событий (пустая точка
+// монтирования, нет прав на папку), видит только полный обход.
+
+fn notes(w: &mut World, c: usize, n: usize) {
+    for i in 0..n {
+        base_note(w, c, &format!("n/{i}.md"));
+    }
+}
+
+/// Файлы пропали, пока клиент не работал, — потом перезапуск (полный обход).
+fn vanish_offline(w: &mut World, c: usize, paths: &[String]) {
+    for p in paths {
+        w.clients[c].fs.user_delete(p);
+    }
+    w.kill(c);
+    w.drain(c);
+}
+
+fn names(n: usize) -> Vec<String> {
+    (0..n).map(|i| format!("n/{i}.md")).collect()
+}
+
+fn mass_delete_notice(w: &World, c: usize) -> Option<(u32, u32)> {
+    w.clients[c].notices.iter().find_map(|n| match n {
+        Notice::MassDelete { count, total } => Some((*count, *total)),
+        _ => None,
+    })
+}
+
+fn blocked_reason(w: &World, c: usize) -> Option<String> {
+    let st = w.clients[c].status.as_ref()?;
+    (st.state == SyncState::Blocked)
+        .then(|| st.reason.clone())
+        .flatten()
+}
+
+#[test]
+fn mass_delete_waits_for_confirmation() {
+    let mut w = World::new(quiet(2));
+    notes(&mut w, 0, 60);
+    w.sync(0);
+    w.sync(1);
+    vanish_offline(&mut w, 1, &names(60));
+    assert_eq!(blocked_reason(&w, 1).as_deref(), Some("mass_delete"));
+    assert_eq!(mass_delete_notice(&w, 1), Some((60, 60)));
+    w.sync(0);
+    assert_eq!(w.server_files().len(), 60, "удаления не ушли на сервер");
+    // «Синхронизировать» без возврата файлов — снова остановка.
+    w.sync(1);
+    assert_eq!(blocked_reason(&w, 1).as_deref(), Some("mass_delete"));
+    assert_eq!(w.server_files().len(), 60);
+
+    w.deliver(
+        1,
+        Event::Command {
+            req: 7,
+            command: UiCommand::AllowDeletes,
+        },
+    );
+    w.drain(1);
+    assert!(
+        w.clients[1]
+            .ui_results
+            .iter()
+            .any(|(r, res)| *r == 7 && matches!(res, UiResult::Ok))
+    );
+    finish(&mut w);
+    assert!(w.server_files().is_empty(), "после подтверждения — удалены");
+    assert!(w.clients[0].fs.snapshot().is_empty());
+}
+
+#[test]
+fn mass_delete_resumes_when_files_return() {
+    let mut w = World::new(quiet(2));
+    notes(&mut w, 0, 60);
+    w.sync(0);
+    w.sync(1);
+    let saved: Vec<(String, Vec<u8>)> = names(60)
+        .into_iter()
+        .map(|p| {
+            let d = w.clients[1].fs.read_file(&p).cloned().unwrap();
+            (p, d)
+        })
+        .collect();
+    vanish_offline(&mut w, 1, &names(60));
+    assert_eq!(blocked_reason(&w, 1).as_deref(), Some("mass_delete"));
+    // Диск снова подключён: файлы на месте, синк идёт как обычно.
+    let now = w.client_now(1);
+    for (p, d) in saved {
+        w.clients[1].fs.user_write(&p, d, now);
+    }
+    w.sync(1);
+    assert_eq!(blocked_reason(&w, 1), None);
+    finish(&mut w);
+    assert_eq!(w.server_files().len(), 60);
+}
+
+#[test]
+fn ordinary_deletions_are_not_held() {
+    // Меньше порога: 10 из 60 — обычное удаление.
+    let mut w = World::new(quiet(2));
+    notes(&mut w, 0, 60);
+    w.sync(0);
+    w.sync(1);
+    vanish_offline(&mut w, 1, &names(10));
+    assert_eq!(blocked_reason(&w, 1), None);
+    assert_eq!(mass_delete_notice(&w, 1), None);
+    finish(&mut w);
+    assert_eq!(w.server_files().len(), 50);
+
+    // Пусто, но файлов было меньше 10 — тоже обычное удаление.
+    let mut w = World::new(quiet(2));
+    notes(&mut w, 0, 9);
+    w.sync(0);
+    w.sync(1);
+    vanish_offline(&mut w, 1, &names(9));
+    assert_eq!(blocked_reason(&w, 1), None);
+    finish(&mut w);
+    assert!(w.server_files().is_empty());
+}
+
+#[test]
+fn empty_listing_is_held() {
+    let mut w = World::new(quiet(2));
+    notes(&mut w, 0, 12);
+    w.sync(0);
+    w.sync(1);
+    vanish_offline(&mut w, 1, &names(12));
+    assert_eq!(blocked_reason(&w, 1).as_deref(), Some("mass_delete"));
+    assert_eq!(mass_delete_notice(&w, 1), Some((12, 12)));
+    w.sync(0);
+    assert_eq!(w.server_files().len(), 12);
+}
+
+fn write_failed(w: &World, c: usize, path: &str) -> bool {
+    w.clients[c].notices.iter().any(|n| {
+        matches!(n, Notice::Error { code, message } if code == "write_failed" && message.starts_with(path))
+    })
+}
+
+// Короткая запись: бэкенд сообщил об успехе, а на месте половина файла. Ядро не
+// принимает обрезанный файл за содержимое и не отправляет его как правку.
+
+#[test]
+fn short_write_is_not_synced_back() {
+    let mut w = World::new(quiet(2));
+    shared_note(&mut w, "a.md");
+    let t = edit_line(&mut w, 0, "a.md", 3);
+    w.sync(0);
+    let full = server_text(&w, "a.md");
+    w.short_writes.insert((1, "a.md".into()));
+    w.sync(1);
+    assert!(write_failed(&w, 1, "a.md"), "{:?}", w.clients[1].notices);
+    // Полный обход не принимает обрезанное за правку.
+    w.sync(1);
+    assert_eq!(server_text(&w, "a.md"), full);
+    finish(&mut w);
+    assert_eq!(server_text(&w, "a.md"), full);
+    assert!(full.contains(&t));
+    assert_eq!(
+        w.clients[1].fs.read_file("a.md").cloned().unwrap(),
+        full.as_bytes()
+    );
+
+    // Нового файла здесь не было: обрезанный убирается, скачивается заново.
+    let mut w = World::new(quiet(2));
+    base_note(&mut w, 0, "b.md");
+    w.sync(0);
+    w.short_writes.insert((1, "b.md".into()));
+    w.sync(1);
+    assert!(write_failed(&w, 1, "b.md"), "{:?}", w.clients[1].notices);
+    finish(&mut w);
+    assert_eq!(
+        w.clients[1].fs.read_file("b.md"),
+        w.clients[0].fs.read_file("b.md")
+    );
 }

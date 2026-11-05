@@ -50,6 +50,9 @@ const oc: Dict = {
   "notice.serverRewound": "Lo servidor es estat restaurat a partir d’una salvagarda — conciliacion completa",
   "notice.indexReset": "L’indèx de sincronizacion èra damatjat — una conciliacion completa e segura a començat",
   "notice.encryptionMismatch": "Lo còfre es chifrat aquí mas pas sul servidor — sincronizacion arrestada",
+  "notice.massDelete": "Aicí mancan {count} fichièrs sus {total} — sincronizacion arrestada, res es pas estat suprimit sul servidor. S'es una error (permissions del dorsièr, unitat desconnectada), restablissètz-los e sincronizatz tornamai. Clicatz per los suprimir sus totes los aparelhs",
+  "massDelete.confirm": "Suprimir {count} fichièrs mancants sus totes los aparelhs? Demòran dins los fichièrs suprimits del servidor pendent la durada de conservacion.",
+  "massDelete.action": "Suprimir sus totes los aparelhs",
   "notice.error": "Sincronizacion : {message}",
   "notice.engineStopped": "selfsync : lo motor de sincronizacion a fracassat {n} còps de seguida e es estat arrestat. Executatz « {cmd} » per tornar ensajar ; los detalhs son dins lo jornal de sincronizacion.",
 

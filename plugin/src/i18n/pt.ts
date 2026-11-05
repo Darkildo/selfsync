@@ -50,6 +50,9 @@ const pt: Dict = {
   "notice.serverRewound": "O servidor foi restaurado a partir de uma cópia de segurança — reconciliação completa",
   "notice.indexReset": "O índice de sincronização estava danificado — foi iniciada uma reconciliação completa segura",
   "notice.encryptionMismatch": "O cofre está encriptado aqui, mas não no servidor — sincronização parada",
+  "notice.massDelete": "Faltam aqui {count} de {total} ficheiros — sincronização parada, nada foi eliminado no servidor. Se for um erro (permissões da pasta, unidade desligada), restaure-os e sincronize novamente. Clique para os eliminar em todos os dispositivos",
+  "massDelete.confirm": "Eliminar {count} ficheiros em falta em todos os dispositivos? Ficam nos ficheiros eliminados do servidor durante o período de retenção.",
+  "massDelete.action": "Eliminar em todos os dispositivos",
   "notice.error": "Sincronização: {message}",
   "notice.engineStopped": "selfsync: o motor de sincronização falhou {n} vezes seguidas e foi parado. Execute «{cmd}» para tentar novamente; os detalhes estão no registo de sincronização.",
 

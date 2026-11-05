@@ -50,6 +50,9 @@ const id: Dict = {
   "notice.serverRewound": "Server dipulihkan dari cadangan — rekonsiliasi penuh",
   "notice.indexReset": "Indeks sinkronisasi rusak — rekonsiliasi penuh yang aman dimulai",
   "notice.encryptionMismatch": "Brankas terenkripsi di sini tetapi tidak di server — sinkronisasi dihentikan",
+  "notice.massDelete": "{count} dari {total} file hilang di sini — sinkronisasi dihentikan, tidak ada yang dihapus di server. Jika ini kesalahan (izin folder, drive terputus), pulihkan lalu sinkronkan lagi. Klik untuk menghapusnya di semua perangkat",
+  "massDelete.confirm": "Hapus {count} file yang hilang di semua perangkat? File tetap ada di file terhapus server selama masa penyimpanan.",
+  "massDelete.action": "Hapus di semua perangkat",
   "notice.error": "Sinkronisasi: {message}",
   "notice.engineStopped": "selfsync: mesin sinkronisasi gagal {n} kali berturut-turut dan dihentikan. Jalankan “{cmd}” untuk mencoba lagi; detailnya ada di log sinkronisasi.",
 

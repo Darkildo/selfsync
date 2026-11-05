@@ -574,10 +574,20 @@ export default class SelfsyncPlugin extends Plugin {
       this.migrationNotice?.hide();
       this.migrationNotice = undefined;
     }
-    const shown = new Notice(text, n.kind === "conflict" || n.kind === "wrongPassword" ? 0 : 8000);
+    const sticky = n.kind === "conflict" || n.kind === "wrongPassword" || n.kind === "massDelete";
+    const shown = new Notice(text, sticky ? 0 : 8000);
     if (n.kind === "conflict") shown.messageEl.onClickEvent(() => new ConflictsModal(this.app, this).open());
+    if (n.kind === "massDelete") shown.messageEl.onClickEvent(() => void this.allowDeletes(n.count));
     // На телефоне нет строки состояния: пароль вводят отсюда или из настроек.
     if (n.kind === "needPassword") shown.messageEl.onClickEvent(() => this.askPassword());
+  }
+
+  /** Синк остановился перед массовым удалением: удалить на всех устройствах только
+   *  после явного подтверждения. */
+  private async allowDeletes(count: number): Promise<void> {
+    if (!(await confirm(this.app, t("massDelete.confirm", { count }), t("massDelete.action")))) return;
+    const res = await this.runner?.command({ type: "allowDeletes" });
+    if (res?.type === "error") new Notice(t("notice.error", { message: res.message }));
   }
 
   private addLog(level: LogLevel, message: string): void {

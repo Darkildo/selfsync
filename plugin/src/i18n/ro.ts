@@ -50,6 +50,9 @@ const ro: Dict = {
   "notice.serverRewound": "Serverul a fost restaurat dintr-o copie de rezervă — reconciliere completă",
   "notice.indexReset": "Indexul de sincronizare a fost deteriorat — a început o reconciliere completă sigură",
   "notice.encryptionMismatch": "Seiful este criptat aici, dar nu și pe server — sincronizare oprită",
+  "notice.massDelete": "Aici lipsesc {count} din {total} fișiere — sincronizarea a fost oprită, nimic nu a fost șters pe server. Dacă este o greșeală (permisiunile dosarului, o unitate deconectată), restaurați-le și sincronizați din nou. Faceți clic pentru a le șterge pe toate dispozitivele",
+  "massDelete.confirm": "Ștergeți {count} fișiere lipsă pe toate dispozitivele? Rămân în fișierele șterse ale serverului pe durata de păstrare.",
+  "massDelete.action": "Șterge pe toate dispozitivele",
   "notice.error": "Sincronizare: {message}",
   "notice.engineStopped": "selfsync: motorul de sincronizare a eșuat de {n} ori la rând și a fost oprit. Rulați „{cmd}” pentru a încerca din nou; detaliile sunt în jurnalul de sincronizare.",
 

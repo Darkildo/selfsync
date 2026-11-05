@@ -50,6 +50,9 @@ const uz: Dict = {
   "notice.serverRewound": "Server zaxira nusxadan tiklangan — toʻliq solishtirish",
   "notice.indexReset": "Sinxronizatsiya indeksi shikastlangan edi — xavfsiz toʻliq solishtirish boshlandi",
   "notice.encryptionMismatch": "Ombor bu yerda shifrlangan, serverda esa yoʻq — sinxronizatsiya toʻxtatildi",
+  "notice.massDelete": "Bu yerda {total} ta fayldan {count} tasi yo'q — sinxronlash to'xtatildi, serverda hech narsa o'chirilmadi. Agar bu xato bo'lsa (jild ruxsatlari, ulanmagan disk), ularni tiklab, qayta sinxronlang. Barcha qurilmalarda o'chirish uchun bosing",
+  "massDelete.confirm": "{count} ta yo'qolgan fayl barcha qurilmalarda o'chirilsinmi? Saqlash muddati davomida ular serverning o'chirilgan fayllarida qoladi.",
+  "massDelete.action": "Barcha qurilmalarda o'chirish",
   "notice.error": "Sinxronizatsiya: {message}",
   "notice.engineStopped": "selfsync: sinxronizatsiya dvigateli ketma-ket {n} marta ishdan chiqdi va toʻxtatildi. Qayta urinish uchun “{cmd}” buyrugʻini bajaring; tafsilotlar sinxronizatsiya jurnalida.",
 

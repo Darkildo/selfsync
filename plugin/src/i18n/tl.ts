@@ -50,6 +50,9 @@ const tl: Dict = {
   "notice.serverRewound": "Ibinalik ang server mula sa backup — buong pagtutugma",
   "notice.indexReset": "Nasira ang index ng pag-sync — nagsimula ang isang ligtas na buong pagtutugma",
   "notice.encryptionMismatch": "Naka-encrypt ang vault dito pero hindi sa server — itinigil ang pag-sync",
+  "notice.massDelete": "Nawawala rito ang {count} sa {total} file — itinigil ang pag-sync, walang binura sa server. Kung pagkakamali ito (mga pahintulot ng folder, nakadiskonektang drive), ibalik ang mga ito at mag-sync muli. I-click para burahin ang mga ito sa lahat ng device",
+  "massDelete.confirm": "Burahin ang {count} nawawalang file sa lahat ng device? Mananatili ang mga ito sa mga binurang file ng server sa panahon ng pagtatago.",
+  "massDelete.action": "Burahin sa lahat ng device",
   "notice.error": "Pag-sync: {message}",
   "notice.engineStopped": "selfsync: pumalya ang sync engine nang {n} beses nang sunod-sunod at itinigil na. Patakbuhin ang “{cmd}” para subukang muli; nasa log ng pag-sync ang mga detalye.",
 

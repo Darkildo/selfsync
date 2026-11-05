@@ -50,6 +50,9 @@ const zhTw: Dict = {
   "notice.serverRewound": "伺服器已從備份還原——正在進行完整核對",
   "notice.indexReset": "同步索引已損毀——已開始安全的完整核對",
   "notice.encryptionMismatch": "此處的儲存庫已加密，但伺服器上的沒有——同步已停止",
+  "notice.massDelete": "此處缺少 {total} 個檔案中的 {count} 個 — 已停止同步,伺服器上未刪除任何內容。如果這是錯誤(資料夾權限、磁碟未連接),請還原這些檔案後再次同步。點擊可在所有裝置上刪除它們",
+  "massDelete.confirm": "在所有裝置上刪除 {count} 個遺失的檔案?在保留期間內它們仍保存在伺服器的已刪除檔案中。",
+  "massDelete.action": "在所有裝置上刪除",
   "notice.error": "同步：{message}",
   "notice.engineStopped": "selfsync：同步引擎連續 {n} 次發生錯誤，已停止。執行「{cmd}」再試一次；詳情請見同步紀錄。",
 

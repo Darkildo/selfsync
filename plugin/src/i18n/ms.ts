@@ -50,6 +50,9 @@ const ms: Dict = {
   "notice.serverRewound": "Pelayan dipulihkan daripada sandaran — penyelarasan penuh",
   "notice.indexReset": "Indeks penyegerakan rosak — penyelarasan penuh yang selamat telah dimulakan",
   "notice.encryptionMismatch": "Peti nota disulitkan di sini tetapi tidak di pelayan — penyegerakan dihentikan",
+  "notice.massDelete": "{count} daripada {total} fail tiada di sini — penyegerakan dihentikan, tiada apa-apa dipadam pada pelayan. Jika ini kesilapan (kebenaran folder, pemacu terputus), pulihkannya dan segerakkan semula. Klik untuk memadamnya pada semua peranti",
+  "massDelete.confirm": "Padam {count} fail yang hilang pada semua peranti? Fail kekal dalam fail dipadam pelayan sepanjang tempoh simpanan.",
+  "massDelete.action": "Padam pada semua peranti",
   "notice.error": "Penyegerakan: {message}",
   "notice.engineStopped": "selfsync: enjin penyegerakan gagal {n} kali berturut-turut dan telah dihentikan. Jalankan “{cmd}” untuk mencuba lagi; butirannya ada dalam log penyegerakan.",
 

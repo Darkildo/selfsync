@@ -218,6 +218,8 @@ export function noticeText(n: Notice): string | null {
       return t("notice.indexReset");
     case "encryptionMismatch":
       return t("notice.encryptionMismatch");
+    case "massDelete":
+      return t("notice.massDelete", { count: n.count, total: n.total });
     case "error":
       return t("notice.error", { message: n.code === "read_only" ? t("readOnly.error") : n.message });
   }

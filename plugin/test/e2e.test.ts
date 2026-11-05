@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 
 import { buildRules, DEFAULT_CONFIG_SYNC } from "../src/configsync.ts";
+import { NodeBackend } from "../src/io/node.ts";
 import type { EngineConfig } from "../src/types.ts";
 import { TestClient, TestServer } from "./harness.ts";
 
@@ -553,6 +554,140 @@ describe("настройки Obsidian", () => {
       assert.ok(!names.some((n) => n.includes("(conflict") || n.includes(" (")), names.join(", "));
       assert.ok(!c.notices.some((n) => n.kind === "conflict"));
     }
+    for (const c of [a, b]) await c.stop();
+  });
+});
+
+/** fs, у которого `lstat` пути на `suffix` падает с EIO, пока `fail.on`. */
+function failingLstat(suffix: string, fail: { on: boolean }): typeof fsp {
+  return {
+    ...fsp,
+    lstat: (async (...args: Parameters<typeof fsp.lstat>) => {
+      if (fail.on && String(args[0]).endsWith(suffix)) throw Object.assign(new Error("EIO (тест)"), { code: "EIO" });
+      return fsp.lstat(...args);
+    }) as typeof fsp.lstat,
+  } as typeof fsp;
+}
+
+/** fs, у которого каждый `write` открытого файла пишет не больше половины (и хотя
+ *  бы байт): так ведёт себя запись при заполненном диске или квоте. */
+function shortWrites(): typeof fsp {
+  return {
+    ...fsp,
+    open: (async (...args: Parameters<typeof fsp.open>) => {
+      const h = await fsp.open(...args);
+      return new Proxy(h, {
+        get(t, k) {
+          if (k === "write") {
+            return (buf: Uint8Array, off: number, len: number, pos: number) => t.write(buf, off, Math.max(1, Math.floor(len / 2)), pos);
+          }
+          const v = Reflect.get(t, k) as unknown;
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+    }) as typeof fsp.open,
+  } as typeof fsp;
+}
+
+describe("сбои файловой системы", () => {
+  test("ошибка lstat при полном обходе не превращается в удаление (#8)", async () => {
+    const fail = { on: false };
+    const a = await TestClient.create(server, { name: "a", token: server.token("lstat-eio", "a") });
+    const b = await TestClient.create(server, {
+      name: "b",
+      token: server.token("lstat-eio", "b"),
+      backend: (vault, store) => new NodeBackend(vault, store, failingLstat("/important.md", fail), { caseSensitive: true }),
+    });
+    await a.write("important.md", "very important\n");
+    await a.sync();
+    await b.sync();
+    assert.equal(await b.read("important.md"), "very important\n");
+
+    fail.on = true;
+    const before = b.notices.length;
+    await b.sync();
+    assert.equal(b.status?.state, "error");
+    assert.ok(!b.notices.slice(before).some((n) => n.kind === "synced" && n.pushed.includes("important.md")), JSON.stringify(b.notices));
+    await a.sync();
+    assert.equal(await a.read("important.md"), "very important\n");
+
+    fail.on = false;
+    await b.sync();
+    await a.sync();
+    assert.equal(b.status?.state, "idle");
+    assert.equal(await a.read("important.md"), "very important\n");
+    for (const c of [a, b]) await c.stop();
+  });
+
+  test("папка без права входа (EACCES): ошибка синка, файлы целы на всех устройствах (#8)", { skip: process.getuid?.() === 0 }, async () => {
+    const a = await TestClient.create(server, { name: "a", token: server.token("eacces", "a") });
+    const b = await TestClient.create(server, { name: "b", token: server.token("eacces", "b") });
+    for (let i = 0; i < 5; i++) await a.write(`dir/n${i}.md`, `note ${i}\n`);
+    await a.write("top.md", "top\n");
+    await a.sync();
+    await b.sync();
+
+    const dir = join(b.vault, "dir");
+    await fsp.chmod(dir, 0o644); // чтение есть, входа нет: readdir работает, lstat детей — EACCES
+    try {
+      await b.sync();
+      assert.equal(b.status?.state, "error");
+    } finally {
+      await fsp.chmod(dir, 0o755);
+    }
+    await a.sync();
+    assert.deepEqual([...(await a.files()).keys()].sort(), ["dir/n0.md", "dir/n1.md", "dir/n2.md", "dir/n3.md", "dir/n4.md", "top.md"]);
+    for (const c of [a, b]) await c.stop();
+  });
+
+  test("много исчезнувших файлов: синк стоит до подтверждения, удаления уходят только после него", async () => {
+    const [a, b] = await pair("mass-delete");
+    for (let i = 0; i < 60; i++) await a.write(`n/${i}.md`, `note ${i}\n`);
+    await a.sync();
+    await b.sync();
+    assert.equal((await b.files()).size, 60);
+
+    // Как пустая точка монтирования или папка, пропавшая, пока Obsidian закрыт.
+    b.runner.stop();
+    await fsp.rm(join(b.vault, "n"), { recursive: true });
+    await b.restart();
+    assert.equal(b.status?.state, "blocked");
+    assert.equal(b.status?.reason, "mass_delete");
+    assert.ok(b.notices.some((n) => n.kind === "massDelete" && n.count === 60 && n.total === 60), JSON.stringify(b.notices));
+    await a.sync();
+    assert.equal((await a.files()).size, 60, "до подтверждения удаления не уходят");
+
+    // Подтверждение — удаления на всех устройствах.
+    assert.deepEqual(await b.runner.command({ type: "allowDeletes" }), { type: "ok" });
+    await b.runner.idle();
+    assert.equal(b.status?.state, "idle");
+    await a.sync();
+    assert.equal((await a.files()).size, 0);
+    for (const c of [a, b]) await c.stop();
+  });
+
+  test("короткие записи дописываются: заметка и большой файл приходят целиком (#9)", async () => {
+    const a = await TestClient.create(server, { name: "a", token: server.token("short-write", "a") });
+    const b = await TestClient.create(server, {
+      name: "b",
+      token: server.token("short-write", "b"),
+      backend: (vault, store) => new NodeBackend(vault, store, shortWrites(), { caseSensitive: true }),
+    });
+    const note = "complete replacement content from the server";
+    const big = new Uint8Array(9 * 1024 * 1024 + 123);
+    for (let i = 0; i < big.length; i++) big[i] = (i * 7 + (i >> 13)) & 0xff;
+    await a.write("short.md", note);
+    await a.write("big.bin", big);
+    await a.sync();
+    await b.sync();
+    assert.equal(b.status?.state, "idle");
+    assert.equal(await b.read("short.md"), note);
+    assert.deepEqual(new Uint8Array(await fsp.readFile(join(b.vault, "big.bin"))), big);
+
+    // Полный обход B не находит «правок» и ничего не отправляет обратно.
+    await b.restart();
+    await a.sync();
+    assert.equal(await a.read("short.md"), note);
     for (const c of [a, b]) await c.stop();
   });
 });

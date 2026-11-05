@@ -112,6 +112,7 @@ fn once(password: Option<&str>) -> Options {
         enable_encryption: false,
         hook: None,
         recovery: false,
+        allow_deletes: false,
     }
 }
 
@@ -151,6 +152,39 @@ async fn two_folders_sync_edit_delete() {
     assert_eq!(trash.len(), 1, "удалённое — в корзину, а не стёрто");
     // Служебный каталог не синхронизируется: у b осталась своя конфигурация.
     assert_eq!(Config::load(b.path()).unwrap().token, cb.token);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mass_delete_needs_allow_deletes() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "massdel", "a");
+    let (b, cb) = folder(&srv, "massdel", "b");
+    std::fs::create_dir_all(a.path().join("n")).unwrap();
+    for i in 0..12 {
+        std::fs::write(a.path().join(format!("n/{i}.md")), format!("note {i}\n")).unwrap();
+    }
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+
+    // Папка пропала целиком (не подключён диск): синк стоит, на сервер ничего не ушло.
+    std::fs::remove_dir_all(b.path().join("n")).unwrap();
+    assert_eq!(
+        sync(b.path(), &cb).await,
+        Outcome::Blocked("mass_delete".into())
+    );
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert!(a.path().join("n/3.md").exists());
+
+    let allow = Options {
+        allow_deletes: true,
+        ..once(None)
+    };
+    assert_eq!(
+        runner::run(b.path(), &cb, allow).await.unwrap(),
+        Outcome::Synced
+    );
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert!(!a.path().join("n/3.md").exists());
 }
 
 #[tokio::test(flavor = "multi_thread")]

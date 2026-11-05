@@ -97,6 +97,10 @@ enum Cmd {
         /// Хук дольше этого останавливается (по умолчанию 10m).
         #[arg(long)]
         exec_timeout: Option<String>,
+        /// Отправить удаления, на которых синк остановился: в папке не нашлось
+        /// многих файлов, которые здесь были (страховка от сбоя ФС).
+        #[arg(long)]
+        allow_deletes: bool,
     },
     /// Включить сквозное шифрование vault'а (пароль понадобится всем устройствам).
     Encrypt {
@@ -696,6 +700,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
             no_remember,
             exec,
             exec_timeout,
+            allow_deletes,
         } => {
             let cfg = Config::load(&dir)?;
             let hook = match exec.or_else(|| cfg.exec.clone()) {
@@ -717,6 +722,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 enable_encryption: false,
                 hook,
                 recovery: false,
+                allow_deletes,
             };
             return Ok(outcome(runner::run(&dir, &cfg, opts).await?));
         }
@@ -800,6 +806,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 enable_encryption: false,
                 hook: None,
                 recovery: false,
+                allow_deletes: false,
             };
             return Ok(outcome(runner::run(&dir, &cfg, opts).await?));
         }
@@ -821,6 +828,7 @@ async fn real_main(cli: Cli) -> anyhow::Result<ExitCode> {
                 enable_encryption: true,
                 hook: None,
                 recovery,
+                allow_deletes: false,
             };
             let code = outcome(runner::run(&dir, &cfg, opts).await?);
             if code == ExitCode::SUCCESS {
@@ -1291,6 +1299,13 @@ fn outcome(o: Outcome) -> ExitCode {
         Outcome::NeedPassword => {
             eprintln!("vault зашифрован: нужен пароль (--password-file или SELFSYNC_PASSWORD)");
             ExitCode::from(2)
+        }
+        Outcome::Blocked(r) if r == "mass_delete" => {
+            eprintln!(
+                "синк остановлен: в папке не найдено много файлов, которые здесь были; \
+                 удаления не отправлены. Верните файлы или подтвердите: run --allow-deletes"
+            );
+            ExitCode::from(3)
         }
         Outcome::Blocked(r) => {
             eprintln!("синк остановлен: {r}");

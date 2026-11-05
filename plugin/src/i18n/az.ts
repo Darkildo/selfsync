@@ -50,6 +50,9 @@ const az: Dict = {
   "notice.serverRewound": "Server ehtiyat nüsxədən bərpa olunub — tam tutuşdurma aparılır",
   "notice.indexReset": "Sinxronizasiya indeksi zədələnmişdi — təhlükəsiz tam tutuşdurma başladı",
   "notice.encryptionMismatch": "Anbar burada şifrələnib, serverdə isə yox — sinxronizasiya dayandırıldı",
+  "notice.massDelete": "Burada {total} fayldan {count} tapılmadı — sinxronizasiya dayandırıldı, serverdə heç nə silinmədi. Əgər bu xətadırsa (qovluq icazələri, qoşulmamış disk), onları bərpa edib yenidən sinxronlaşdırın. Bütün cihazlarda silmək üçün klikləyin",
+  "massDelete.confirm": "{count} itmiş fayl bütün cihazlarda silinsin? Saxlama müddəti ərzində serverin silinmiş fayllarında qalacaq.",
+  "massDelete.action": "Bütün cihazlarda sil",
   "notice.error": "Sinxronizasiya: {message}",
   "notice.engineStopped": "selfsync: sinxronizasiya mühərriki ardıcıl {n} dəfə uğursuz oldu və dayandırıldı. Yenidən cəhd etmək üçün «{cmd}» əmrini işə salın; təfərrüatlar sinxronizasiya jurnalındadır.",
 

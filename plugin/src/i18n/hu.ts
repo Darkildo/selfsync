@@ -50,6 +50,9 @@ const hu: Dict = {
   "notice.serverRewound": "A szervert biztonsági mentésből állították vissza — teljes egyeztetés",
   "notice.indexReset": "A szinkronizálási index megsérült — biztonságos teljes egyeztetés indult",
   "notice.encryptionMismatch": "A széf itt titkosított, a szerveren viszont nem — szinkronizálás leállítva",
+  "notice.massDelete": "{total} fájlból {count} hiányzik itt — a szinkronizálás leállt, a szerveren semmi sem törlődött. Ha ez hiba (mappa jogosultságai, leválasztott meghajtó), állítsa vissza őket, és szinkronizáljon újra. Kattintson a törlésükhöz minden eszközön",
+  "massDelete.confirm": "Törli a(z) {count} hiányzó fájlt minden eszközön? A megőrzési időig a szerver törölt fájljai között maradnak.",
+  "massDelete.action": "Törlés minden eszközön",
   "notice.error": "Szinkronizálás: {message}",
   "notice.engineStopped": "selfsync: a szinkronizáló motor egymás után {n} alkalommal hibával leállt, ezért megállítottuk. Az újrapróbáláshoz futtassa a következőt: „{cmd}”; a részletek a szinkronizálási naplóban vannak.",
 
