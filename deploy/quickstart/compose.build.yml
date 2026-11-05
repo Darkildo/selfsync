@@ -1,0 +1,13 @@
+# Сборка образа у себя вместо скачивания из ghcr.io: тот же Dockerfile, что у
+# образа в реестре (бинарь релиза server-X.Y.Z, сверка с SHA256SUMS).
+#
+#   docker compose -f docker-compose.yml -f compose.build.yml up -d --build
+
+services:
+  selfsync:
+    build:
+      context: .
+      args:
+        VERSION: ${SELFSYNC_VERSION:?задайте SELFSYNC_VERSION в .env}
+    image: selfsync-quickstart:${SELFSYNC_VERSION}
+    pull_policy: build

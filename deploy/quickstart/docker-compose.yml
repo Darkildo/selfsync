@@ -5,6 +5,12 @@
 #   docker compose up -d
 #   docker compose run --rm selfsync link --vault notes --name phone
 #
+# Образ — ghcr.io/darkildo/selfsync (amd64, arm64), собран из бинаря релиза
+# server-X.Y.Z. Обновление: новая версия в SELFSYNC_VERSION, затем
+#   docker compose pull && docker compose up -d
+# Собрать тот же образ у себя, без реестра (бинарь релиза, сверка с SHA256SUMS):
+#   docker compose -f docker-compose.yml -f compose.build.yml up -d --build
+#
 # Домен должен указывать на этот сервер, порты 80 и 443 — открыты (Caddy получает
 # сертификат сам). Данные — в ./data (bind mount, а не именованный volume: тот
 # стирается командой `docker compose down -v` вместе с заметками).
@@ -22,11 +28,7 @@ x-hardening: &hardening
 services:
   selfsync:
     <<: *hardening
-    build:
-      context: .
-      args:
-        VERSION: ${SELFSYNC_VERSION:?задайте SELFSYNC_VERSION в .env}
-    image: selfsync-quickstart:${SELFSYNC_VERSION}
+    image: ghcr.io/darkildo/selfsync:${SELFSYNC_VERSION:?задайте SELFSYNC_VERSION в .env}
     restart: unless-stopped
     tmpfs:
       - /tmp

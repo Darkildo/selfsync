@@ -73,7 +73,7 @@ The script:
 
 Run it again to update: the data is archived to `/root` first, and the previous binary stays next to the new one. With `--no-proxy` it skips Caddy, for when you already run your own proxy. Admin commands then go through `selfsync-admin`, which runs them as the service user: `selfsync-admin token list`, `selfsync-admin link --vault notes --name phone`.
 
-**Docker:** take [deploy/quickstart](deploy/quickstart). It builds a small image around the release binary, with no source code or Rust toolchain needed.
+**Docker:** take [deploy/quickstart](deploy/quickstart). It runs the prebuilt image `ghcr.io/darkildo/selfsync:<version>` (amd64 and arm64, from server 0.8.0 on), a small distroless image around the release binary.
 
 ```sh
 cp .env.example .env          # domain, email, version
@@ -81,6 +81,8 @@ mkdir -p data backups && sudo chown 65532:65532 data backups
 docker compose up -d
 docker compose run --rm selfsync link --vault notes --name phone
 ```
+
+To update, set the new version in `SELFSYNC_VERSION` in `.env`, then run `docker compose pull && docker compose up -d`. The image is built by GitHub Actions from the published release binary (checked against `SHA256SUMS`) and carries a provenance attestation: `gh attestation verify oci://ghcr.io/darkildo/selfsync:X.Y.Z --owner Darkildo`. To build the same image yourself instead of pulling it: `docker compose -f docker-compose.yml -f compose.build.yml up -d --build`.
 
 The rest of this section explains the modes and settings in detail.
 
@@ -138,13 +140,13 @@ docker compose --profile always up -d           # or --profile ondemand (Sablier
 docker compose run --rm selfsync token add --vault notes --name laptop
 ```
 
-There is no prebuilt public image: `docker compose` builds it from the source (tag `localhost/selfsync:local`) and never pulls it from a registry. To build from the release binary instead, without Rust, use [deploy/quickstart](deploy/quickstart/).
+This compose file builds the image from the source (tag `localhost/selfsync:local`) and never pulls it from a registry. For the prebuilt image `ghcr.io/darkildo/selfsync`, use [deploy/quickstart](deploy/quickstart/) or put `image: ghcr.io/darkildo/selfsync:X.Y.Z` in place of the `build:` section.
 
 The image is based on distroless/static: no shell, read-only file system, unprivileged process. Data is kept in `./data` through a bind mount rather than a named volume, because `docker compose down -v` deletes named volumes together with all your notes.
 
 ### Podman Quadlet
 
-[deploy/quadlet/](deploy/quadlet/) runs the container with socket activation under rootless Podman. There is no prebuilt public image: build it first from the release binary, then start the units:
+[deploy/quadlet/](deploy/quadlet/) runs the container with socket activation under rootless Podman. It uses the prebuilt image `ghcr.io/darkildo/selfsync` with an explicit version; to update, change the version in `selfsync.container` and run `systemctl --user daemon-reload && systemctl --user restart selfsync.socket`. To build the image yourself instead, see the comment in the unit:
 
 ```sh
 podman build -t localhost/selfsync:local --build-arg VERSION=X.Y.Z deploy/quickstart

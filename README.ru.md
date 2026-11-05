@@ -73,7 +73,7 @@ curl -fsSL https://raw.githubusercontent.com/Darkildo/selfsync/main/deploy/insta
 
 Повторный запуск - обновление: данные сначала архивируются в `/root`, прежний бинарь остаётся рядом с новым. С `--no-proxy` скрипт обходится без Caddy - для тех, у кого уже есть свой прокси. Служебные команды потом идут через `selfsync-admin`, который запускает их от имени сервиса: `selfsync-admin token list`, `selfsync-admin link --vault notes --name phone`.
 
-**Docker** - каталог [deploy/quickstart](deploy/quickstart). Он собирает небольшой образ вокруг бинаря из релиза, без исходников и Rust.
+**Docker** - каталог [deploy/quickstart](deploy/quickstart). Он запускает готовый образ `ghcr.io/darkildo/selfsync:<версия>` (amd64 и arm64, начиная с сервера 0.8.0) - небольшой distroless-образ вокруг бинаря из релиза.
 
 ```sh
 cp .env.example .env          # домен, почта, версия
@@ -81,6 +81,8 @@ mkdir -p data backups && sudo chown 65532:65532 data backups
 docker compose up -d
 docker compose run --rm selfsync link --vault notes --name phone
 ```
+
+Обновление: новая версия в `SELFSYNC_VERSION` в `.env`, затем `docker compose pull && docker compose up -d`. Образ собирает GitHub Actions из бинаря опубликованного релиза (со сверкой по `SHA256SUMS`), у него есть аттестация происхождения: `gh attestation verify oci://ghcr.io/darkildo/selfsync:X.Y.Z --owner Darkildo`. Собрать тот же образ у себя, не скачивая: `docker compose -f docker-compose.yml -f compose.build.yml up -d --build`.
 
 Ниже - режимы и настройки подробно.
 
@@ -138,13 +140,13 @@ docker compose --profile always up -d           # или --profile ondemand (Sab
 docker compose run --rm selfsync token add --vault notes --name laptop
 ```
 
-Готового публичного образа нет: `docker compose` собирает его из исходников (тег `localhost/selfsync:local`) и не скачивает из реестра. Собрать образ из бинаря релиза, без Rust, можно через [deploy/quickstart](deploy/quickstart/).
+Этот compose собирает образ из исходников (тег `localhost/selfsync:local`) и не скачивает его из реестра. Готовый образ `ghcr.io/darkildo/selfsync` - через [deploy/quickstart](deploy/quickstart/) или строкой `image: ghcr.io/darkildo/selfsync:X.Y.Z` вместо раздела `build:`.
 
 Образ основан на distroless/static: в нём нет оболочки, файловая система только для чтения, процесс работает без привилегий. Данные хранятся в `./data` через bind mount, а не в именованном volume: именованный volume стирается командой `docker compose down -v` вместе со всеми заметками.
 
 ### Podman Quadlet
 
-[deploy/quadlet/](deploy/quadlet/) - контейнер с socket activation для rootless Podman. Готового публичного образа нет: сначала соберите его из бинаря релиза, затем запускайте юниты:
+[deploy/quadlet/](deploy/quadlet/) - контейнер с socket activation для rootless Podman. Он берёт готовый образ `ghcr.io/darkildo/selfsync` с явной версией; обновление - поменять версию в `selfsync.container` и выполнить `systemctl --user daemon-reload && systemctl --user restart selfsync.socket`. Собрать образ у себя - см. комментарий в юните:
 
 ```sh
 podman build -t localhost/selfsync:local --build-arg VERSION=X.Y.Z deploy/quickstart
