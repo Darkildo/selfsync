@@ -96,6 +96,11 @@ async fn recover_temp(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
         cx.trash(raw, super::types::Expect::Any).await?;
         return Ok(None);
     }
+    // Вытесненная при атомарной записи версия (`IoResult::Displaced`): процесс убит
+    // до того, как она стала копией конфликта.
+    if let Some(stem) = strip_tag(base, ".aside") {
+        return recover_aside(cx, raw, stem).await;
+    }
     let Some(stem) = strip_tag(base, ".case").or_else(|| strip_tag(base, ".nfc")) else {
         return trash_abandoned(cx, raw).await;
     };
@@ -113,6 +118,51 @@ async fn recover_temp(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
         format!("доведено прерванное переименование: {raw} → {dest}"),
     );
     Ok(cx.rename(raw, &dest).await?.map(|_| dest))
+}
+
+/// Брошенная вытесненная версия `X.aside.selfsync-tmp`: прежнее содержимое X,
+/// отодвинутое атомарной записью. Совпадает с тем, что сейчас в X или в индексе
+/// (запись не успела ничего вытеснить, или вытеснила известную версию), — лишняя
+/// и удаляется; иначе это несохранённая правка — копия конфликта рядом с X.
+async fn recover_aside(cx: &Ctx, raw: &str, stem: &str) -> SyncResult<Option<String>> {
+    let Some(meta) = cx.stat(raw).await? else {
+        return Ok(None);
+    };
+    let Some(aside) = read_local(cx, raw, &meta).await? else {
+        return Ok(None);
+    };
+    let target = target_of(cx, stem).unwrap_or_else(|| stem.to_owned());
+    let known = cx.with(|s| {
+        s.index.files.get(&target).is_some_and(|f| {
+            f.local.map(|l| l.plain) == Some(aside.obs.plain)
+                || f.base_plain == Some(aside.obs.plain)
+        })
+    });
+    let same_as_target = match cx.stat(&target).await? {
+        Some(m) if !m.dir => read_local(cx, &target, &m)
+            .await?
+            .is_some_and(|c| c.obs.plain == aside.obs.plain),
+        _ => false,
+    };
+    if known || same_as_target {
+        cx.log(
+            LogLevel::Info,
+            format!("убрана лишняя вытесненная версия: {raw}"),
+        );
+        cx.delete(raw, super::types::Expect::Any).await?;
+        return Ok(None);
+    }
+    let copy = super::resolve::unique_copy(cx, &target, &super::resolve::conflict_label(cx, false))
+        .await?;
+    cx.log(
+        LogLevel::Warn,
+        format!("вытесненная версия {target} сохранена как {copy}"),
+    );
+    if cx.rename(raw, &copy).await?.is_none() {
+        return Ok(None);
+    }
+    super::resolve::add_conflict(cx, &target, &copy, false);
+    Ok(Some(copy))
 }
 
 async fn trash_abandoned(cx: &Ctx, raw: &str) -> SyncResult<Option<String>> {
@@ -297,12 +347,19 @@ async fn observe(cx: &Ctx, path: &str, meta: &FileMeta, delta: &mut ScanDelta) -
     }
     let (known, unchanged, max) = cx.with(|s| {
         let f = s.index.files.get(path);
-        let unchanged = f
-            .and_then(|f| f.local.as_ref())
-            .is_some_and(|l| l.size == meta.size && l.mtime == meta.mtime);
+        // ctime не восстанавливается вместе с mtime: правка того же размера с
+        // прежним mtime (`touch -r`, `cp -p`, `rsync -t`) видна по нему. Неизвестный
+        // (мобильные, индекс старого формата) — не помеха.
+        let same_ctime =
+            meta.ctime == 0 || s.index.ctimes.get(path).is_none_or(|c| *c == meta.ctime);
+        let unchanged = same_ctime
+            && f.and_then(|f| f.local.as_ref())
+                .is_some_and(|l| l.size == meta.size && l.mtime == meta.mtime);
         (f.is_some(), unchanged, s.max_upload())
     });
     if unchanged {
+        // ctime ещё не запомнен (индекс старого формата): запомнить без перехэширования.
+        note_ctime(cx, path, meta);
         return Ok(());
     }
     if meta.size > max {
@@ -344,10 +401,21 @@ async fn observe(cx: &Ctx, path: &str, meta: &FileMeta, delta: &mut ScanDelta) -
             f.rejected = None;
         }
     });
+    note_ctime(cx, path, meta);
     if !known {
         delta.new.push(path.to_owned());
     }
     Ok(())
+}
+
+/// Запомнить ctime наблюдённого файла (см. `Index::ctimes`).
+pub(crate) fn note_ctime(cx: &Ctx, path: &str, meta: &FileMeta) {
+    if meta.ctime == 0 || cx.with(|s| s.index.ctimes.get(path) == Some(&meta.ctime)) {
+        return;
+    }
+    cx.with_mut(|s| {
+        s.index.ctimes.insert(path.to_owned(), meta.ctime);
+    });
 }
 
 fn mark_gone(cx: &Ctx, path: &str, delta: &mut ScanDelta) {
@@ -620,6 +688,7 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
         for (p, m) in &present {
             observe(cx, p, m, &mut delta).await?;
         }
+        cx.with_mut(|s| s.index.ctimes.retain(|k, _| present.contains_key(k)));
         let tracked: Vec<String> = cx.with(|s| {
             s.index
                 .files

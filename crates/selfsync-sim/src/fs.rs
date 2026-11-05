@@ -4,12 +4,16 @@ use std::collections::BTreeMap;
 
 use selfsync_core::engine::{Expect, FileMeta, IoResult};
 use selfsync_core::path::{MAX_SEGMENT_BYTES, NameRules, VaultPath};
+use selfsync_core::tempname;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Node {
     File {
         data: Vec<u8>,
         mtime: i64,
+        /// Время изменения inode: меняется при каждой записи, даже если mtime потом
+        /// восстановлен (`user_write_keep_mtime`).
+        ctime: i64,
     },
     Dir,
     /// Символическая ссылка за пределы vault'а: что за ней — не видно.
@@ -30,6 +34,9 @@ pub struct FakeFs {
     pub cache: BTreeMap<String, Vec<u8>>,
     /// Попытки изменить что-то через символическую ссылку (за пределами vault'а).
     pub link_writes: u32,
+    /// ФС не сообщает ctime (мобильные): правку с восстановленным mtime видно
+    /// только по содержимому.
+    pub no_ctime: bool,
     clock: i64,
 }
 
@@ -155,7 +162,60 @@ impl FakeFs {
             .get(&k)
             .map(|(n, _)| n.clone())
             .unwrap_or_else(|| p.to_owned());
-        self.nodes.insert(k, (name, Node::File { data, mtime }));
+        self.nodes.insert(
+            k,
+            (
+                name,
+                Node::File {
+                    data,
+                    mtime,
+                    ctime: mtime,
+                },
+            ),
+        );
+    }
+
+    /// Пользователь (`cp -p`, `rsync -t`) меняет содержимое и восстанавливает прежний
+    /// mtime: размер и mtime те же, сменился только ctime.
+    pub fn user_write_keep_mtime(&mut self, p: &str, data: Vec<u8>, now: i64) {
+        let ctime = self.tick(now);
+        let k = self.key(p);
+        if let Some((
+            _,
+            Node::File {
+                data: d, ctime: c, ..
+            },
+        )) = self.nodes.get_mut(&k)
+        {
+            *d = data;
+            *c = ctime;
+        }
+    }
+
+    /// Атомарная запись, во время которой (между проверкой условия и заменой)
+    /// пользователь сохранил в файл `edit`: новый файл на месте, а версия
+    /// пользователя отодвинута под временное имя (`IoResult::Displaced`).
+    pub fn displace_write(
+        &mut self,
+        p: &str,
+        data: Vec<u8>,
+        expect: &Expect,
+        edit: Vec<u8>,
+        now: i64,
+    ) -> IoResult {
+        if self.link_on(p) || self.forbids(p) || !self.check(p, expect) {
+            return self.write(p, data, expect, now);
+        }
+        if matches!(self.get(p), Some(Node::Dir)) {
+            return IoResult::Precondition;
+        }
+        let aside = tempname::aside(p, 1);
+        self.user_write(&aside, edit, now);
+        self.user_write(p, data, now);
+        match self.stat(p) {
+            IoResult::Stat { meta: Some(meta) } => IoResult::Displaced { meta, aside },
+            other => other,
+        }
     }
 
     pub fn user_mkdir(&mut self, p: &str) {
@@ -243,14 +303,23 @@ impl FakeFs {
             .collect()
     }
 
+    fn meta_of(&self, name: &str, node: &Node) -> FileMeta {
+        let mut m = Self::meta(name, node);
+        if self.no_ctime {
+            m.ctime = 0;
+        }
+        m
+    }
+
     fn meta(name: &str, node: &Node) -> FileMeta {
         match node {
-            Node::File { data, mtime } => FileMeta {
+            Node::File { data, mtime, ctime } => FileMeta {
                 path: name.to_owned(),
                 size: data.len() as u64,
                 mtime: *mtime,
                 dir: false,
                 link: false,
+                ctime: *ctime,
             },
             Node::Dir => FileMeta {
                 path: name.to_owned(),
@@ -258,6 +327,7 @@ impl FakeFs {
                 mtime: 0,
                 dir: true,
                 link: false,
+                ctime: 0,
             },
             Node::Link => FileMeta {
                 path: name.to_owned(),
@@ -265,6 +335,7 @@ impl FakeFs {
                 mtime: 0,
                 dir: false,
                 link: true,
+                ctime: 0,
             },
         }
     }
@@ -274,7 +345,7 @@ impl FakeFs {
             (Expect::Any, _) => true,
             (Expect::Absent, None) => true,
             (Expect::Absent, Some(_)) => false,
-            (Expect::Stat { size, mtime }, Some(Node::File { data, mtime: m })) => {
+            (Expect::Stat { size, mtime }, Some(Node::File { data, mtime: m, .. })) => {
                 data.len() as u64 == *size && m == mtime
             }
             (Expect::Stat { .. }, _) => false,
@@ -286,7 +357,7 @@ impl FakeFs {
             files: self
                 .nodes
                 .values()
-                .map(|(n, node)| Self::meta(n, node))
+                .map(|(n, node)| self.meta_of(n, node))
                 .collect(),
         }
     }
@@ -299,7 +370,7 @@ impl FakeFs {
         }
         match self.nodes.get(&self.key(p)) {
             Some((n, node)) => IoResult::Stat {
-                meta: Some(Self::meta(n, node)),
+                meta: Some(self.meta_of(n, node)),
             },
             None => IoResult::Stat { meta: None },
         }

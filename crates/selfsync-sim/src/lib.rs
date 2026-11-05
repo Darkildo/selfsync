@@ -294,6 +294,9 @@ pub struct World {
     /// Короткая запись: следующая запись этого пути клиентом `c` кладёт только
     /// половину данных и сообщает об успехе (диск заполнен, бэкенд не проверил).
     pub short_writes: BTreeSet<(usize, String)>,
+    /// Гонка записи: пока клиент `c` заменяет этот путь (условие уже проверено),
+    /// пользователь сохраняет в него эти байты.
+    pub race_edits: BTreeMap<(usize, String), Vec<u8>>,
 }
 
 /// Номер запроса команды смены ключа в случайных прогонах.
@@ -342,6 +345,7 @@ impl World {
             hide_proto_header: false,
             corrupt_blob_puts: None,
             short_writes: BTreeSet::new(),
+            race_edits: BTreeMap::new(),
         };
         for i in 0..cfg.clients {
             w.add_client(i);
@@ -651,7 +655,15 @@ impl World {
                     data.truncate(data.len() / 2);
                     self.log(format!("c{c} SHORT WRITE {path}"));
                 }
-                let r = self.clients[c].fs.write(&path, data, &expect, now);
+                let r = match self.race_edits.remove(&(c, path.clone())) {
+                    Some(edit) => {
+                        self.log(format!("c{c} RACE EDIT {path}"));
+                        self.clients[c]
+                            .fs
+                            .displace_write(&path, data, &expect, edit, now)
+                    }
+                    None => self.clients[c].fs.write(&path, data, &expect, now),
+                };
                 self.log(format!("c{c} write {path} -> {}", short(&r)));
                 r
             }
@@ -664,7 +676,18 @@ impl World {
             Action::CommitTemp {
                 temp, path, expect, ..
             } => {
-                let r = self.clients[c].fs.commit_temp(&temp, &path, &expect, now);
+                let r = match self.race_edits.remove(&(c, path.clone())) {
+                    Some(edit) => match self.clients[c].fs.temps.remove(&temp) {
+                        Some(data) => {
+                            self.log(format!("c{c} RACE EDIT {path}"));
+                            self.clients[c]
+                                .fs
+                                .displace_write(&path, data, &expect, edit, now)
+                        }
+                        None => IoResult::NotFound,
+                    },
+                    None => self.clients[c].fs.commit_temp(&temp, &path, &expect, now),
+                };
                 self.log(format!("c{c} commit {path} -> {}", short(&r)));
                 r
             }
@@ -814,6 +837,24 @@ impl World {
             return;
         }
         self.deliver(c, ev);
+    }
+
+    /// Правка с восстановленным mtime (`cp -p`, `rsync -t`): размер тот же, mtime
+    /// прежний, сменился только ctime. Событие изменения приходит, как от
+    /// наблюдателя ФС.
+    pub fn user_write_keep_mtime(&mut self, c: usize, path: &str, data: Vec<u8>) {
+        let now = self.client_now(c);
+        self.log(format!(
+            "c{c} USER write (mtime kept) {path} {:?}",
+            tokens_in(&data)
+        ));
+        self.clients[c].fs.user_write_keep_mtime(path, data, now);
+        self.emit(
+            c,
+            Event::Changed {
+                path: path.to_owned(),
+            },
+        );
     }
 
     pub fn user_write(&mut self, c: usize, path: &str, data: Vec<u8>) {

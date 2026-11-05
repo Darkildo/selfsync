@@ -165,6 +165,7 @@ impl Exec {
             Action::Write {
                 path, data, expect, ..
             } => {
+                // Не выполнено уже сейчас — не писать зря.
                 if !self.holds(&path, &expect).await?
                     || self.stat(&path).await?.is_some_and(|m| m.dir)
                 {
@@ -182,10 +183,7 @@ impl Exec {
                     self.abs(&tempname::temp_base(&path)).display()
                 ));
                 write_durable(&tmp, &data).await?;
-                tokio::fs::rename(&tmp, &target).await?;
-                IoResult::Stat {
-                    meta: self.stat(&path).await?,
-                }
+                self.place(&tmp, &path, &expect, true).await?
             }
             Action::WriteTemp {
                 temp, offset, data, ..
@@ -218,7 +216,9 @@ impl Exec {
             Action::CommitTemp {
                 temp, path, expect, ..
             } => {
-                if !self.holds(&path, &expect).await? {
+                if !self.holds(&path, &expect).await?
+                    || self.stat(&path).await?.is_some_and(|m| m.dir)
+                {
                     return Ok(IoResult::Precondition);
                 }
                 self.inside(&path).await?;
@@ -226,10 +226,7 @@ impl Exec {
                 if let Some(parent) = target.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
-                tokio::fs::rename(self.temp(&temp), &target).await?;
-                IoResult::Stat {
-                    meta: self.stat(&path).await?,
-                }
+                self.place(&self.temp(&temp), &path, &expect, false).await?
             }
             Action::DeleteTemp { temp, .. } => {
                 match tokio::fs::remove_file(self.temp(&temp)).await {
@@ -392,6 +389,7 @@ impl Exec {
                         mtime: 0,
                         dir: true,
                         link: false,
+                        ctime: 0,
                     });
                     stack.push(path);
                 } else if ft.is_file() {
@@ -402,6 +400,7 @@ impl Exec {
                         mtime: mtime_ms(&md),
                         dir: false,
                         link: false,
+                        ctime: ctime_ms(&md),
                     });
                 } else if ft.is_symlink() {
                     // Ссылка (на папку или файл) может вести за пределы vault'а: не
@@ -412,6 +411,7 @@ impl Exec {
                         mtime: 0,
                         dir: false,
                         link: true,
+                        ctime: 0,
                     });
                 }
             }
@@ -465,6 +465,7 @@ impl Exec {
                 mtime: 0,
                 dir: false,
                 link: true,
+                ctime: 0,
             }));
         }
         let md = match tokio::fs::symlink_metadata(self.abs(path)).await {
@@ -486,6 +487,7 @@ impl Exec {
                 mtime: 0,
                 dir: true,
                 link: false,
+                ctime: 0,
             }
         } else {
             FileMeta {
@@ -494,6 +496,7 @@ impl Exec {
                 mtime: mtime_ms(&md),
                 dir: false,
                 link: false,
+                ctime: ctime_ms(&md),
             }
         }))
     }
@@ -529,6 +532,104 @@ impl Exec {
         })
     }
 
+    /// Поставить готовый файл `src` на место `path`, если путь всё ещё удовлетворяет
+    /// `expect` (как `place` в плагине, `plugin/src/io/node.ts`). Атомарного «заменить,
+    /// если не изменился» у ФС нет, поэтому заменяемый файл не стирается: на него
+    /// ставится жёсткая ссылка `X.aside.selfsync-tmp`, условие сверяется по ней, а
+    /// после замены видно, не дописали ли в него за это время, — тогда это
+    /// вытесненная правка (`IoResult::Displaced`). `own` — `src` наш и при отказе
+    /// удаляется (временный файл скачивания — нет).
+    async fn place(
+        &self,
+        src: &Path,
+        path: &str,
+        expect: &Expect,
+        own: bool,
+    ) -> std::io::Result<IoResult> {
+        let dst = self.abs(path);
+        let mut displaced = None;
+        match expect {
+            // hard_link не заменяет существующий файл: «создать, только если имени нет».
+            Expect::Absent => match tokio::fs::hard_link(src, &dst).await {
+                Ok(()) => tokio::fs::remove_file(src).await?,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return refuse(src, own).await;
+                }
+                Err(e) if no_links(&e) => {
+                    if tokio::fs::symlink_metadata(&dst).await.is_ok() {
+                        return refuse(src, own).await;
+                    }
+                    tokio::fs::rename(src, &dst).await?;
+                }
+                Err(e) => return Err(e),
+            },
+            Expect::Stat { size, mtime } => {
+                let aside = self.free_aside(path).await?;
+                let aside_abs = self.abs(&aside);
+                let linked = match tokio::fs::hard_link(&dst, &aside_abs).await {
+                    Ok(()) => true,
+                    Err(e) if not_found(&e) => return refuse(src, own).await,
+                    // Без жёстких ссылок (FAT, часть сетевых ФС) прежний файл
+                    // отодвигается переименованием — на миг его нет на месте.
+                    Err(e) if no_links(&e) => match tokio::fs::rename(&dst, &aside_abs).await {
+                        Ok(()) => false,
+                        Err(e) if not_found(&e) => return refuse(src, own).await,
+                        Err(e) => return Err(e),
+                    },
+                    Err(e) => return Err(e),
+                };
+                let before = tokio::fs::symlink_metadata(&aside_abs).await?;
+                if !before.is_file() || before.len() != *size || mtime_ms(&before) != *mtime {
+                    // Изменился ещё до того, как его поймали: остаётся на месте.
+                    if linked {
+                        tokio::fs::remove_file(&aside_abs).await?;
+                    } else if tokio::fs::symlink_metadata(&dst).await.is_err() {
+                        tokio::fs::rename(&aside_abs, &dst).await?;
+                    }
+                    return refuse(src, own).await;
+                }
+                if !linked && tokio::fs::symlink_metadata(&dst).await.is_ok() {
+                    // Пока отодвигали, на месте сохранили новый файл: он остаётся.
+                    let _ = tokio::fs::remove_file(&aside_abs).await;
+                    return refuse(src, own).await;
+                }
+                tokio::fs::rename(src, &dst).await?;
+                // ctime здесь не годится: его меняет и сама замена (у отодвинутого
+                // файла становится меньше имён). mtime — с полной точностью ФС.
+                match tokio::fs::symlink_metadata(&aside_abs).await {
+                    Ok(after)
+                        if after.len() != before.len()
+                            || after.modified().ok() != before.modified().ok() =>
+                    {
+                        displaced = Some(aside);
+                    }
+                    _ => {
+                        let _ = tokio::fs::remove_file(&aside_abs).await;
+                    }
+                }
+            }
+            Expect::Any => tokio::fs::rename(src, &dst).await?,
+        }
+        let meta = self.stat(path).await?;
+        Ok(match (displaced, meta) {
+            (Some(aside), Some(meta)) => IoResult::Displaced { meta, aside },
+            (_, meta) => IoResult::Stat { meta },
+        })
+    }
+
+    /// Свободное имя, под которое отодвигается заменяемый файл.
+    async fn free_aside(&self, path: &str) -> std::io::Result<String> {
+        for n in 1..100 {
+            let name = tempname::aside(path, n);
+            if tokio::fs::symlink_metadata(self.abs(&name)).await.is_err() {
+                return Ok(name);
+            }
+        }
+        Err(std::io::Error::other(format!(
+            "{path}: нет свободного временного имени"
+        )))
+    }
+
     /// В локальную корзину `.trash/` (как делает Obsidian), не стирая.
     async fn trash(&self, path: &str) -> std::io::Result<()> {
         let dir = self.root.join(TRASH_DIR);
@@ -552,6 +653,39 @@ fn matches(m: &FileMeta, e: &Expect) -> bool {
         Expect::Absent => false,
         Expect::Stat { size, mtime } => !m.dir && m.size == *size && m.mtime == *mtime,
     }
+}
+
+/// Условие записи не выполнено; наш временный файл убирается.
+async fn refuse(src: &Path, own: bool) -> std::io::Result<IoResult> {
+    if own {
+        let _ = tokio::fs::remove_file(src).await;
+    }
+    Ok(IoResult::Precondition)
+}
+
+/// ФС не умеет жёстких ссылок (FAT/exFAT, часть сетевых и облачных ФС).
+fn no_links(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind as K;
+    matches!(
+        e.kind(),
+        K::PermissionDenied
+            | K::Unsupported
+            | K::CrossesDevices
+            | K::TooManyLinks
+            | K::InvalidInput
+    )
+}
+
+/// Время изменения inode (мс), 0 — неизвестно (`FileMeta::ctime`).
+#[cfg(unix)]
+fn ctime_ms(md: &std::fs::Metadata) -> i64 {
+    use std::os::unix::fs::MetadataExt;
+    md.ctime() * 1000 + md.ctime_nsec() / 1_000_000
+}
+
+#[cfg(not(unix))]
+fn ctime_ms(_md: &std::fs::Metadata) -> i64 {
+    0
 }
 
 fn mtime_ms(md: &std::fs::Metadata) -> i64 {
@@ -585,4 +719,86 @@ async fn read_range(
     let mut buf = vec![0; usize::try_from(end - start).unwrap_or(0)];
     f.read_exact(&mut buf).await?;
     Ok(Some(buf))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(path: &str, data: &[u8], expect: Expect) -> Action {
+        Action::Write {
+            id: 1,
+            path: path.into(),
+            data: data.to_vec(),
+            expect,
+        }
+    }
+
+    fn stat_of(dir: &Path, p: &str) -> Expect {
+        let md = std::fs::metadata(dir.join(p)).unwrap();
+        Expect::Stat {
+            size: md.len(),
+            mtime: mtime_ms(&md),
+        }
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .filter(|n| n != STATE_DIR)
+            .collect();
+        v.sort();
+        v
+    }
+
+    #[tokio::test]
+    async fn write_checks_condition_and_leaves_no_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let ex = Exec::new(dir.path(), "http://127.0.0.1:9", None).unwrap();
+        std::fs::write(dir.path().join("a.md"), b"old").unwrap();
+        let expect = stat_of(dir.path(), "a.md");
+        // Файл уже есть — «создать» не выйдет и не затрёт его.
+        assert_eq!(
+            ex.perform(write("a.md", b"x", Expect::Absent)).await,
+            IoResult::Precondition
+        );
+        let r = ex.perform(write("a.md", b"remote", expect)).await;
+        let IoResult::Stat { meta: Some(m) } = r else {
+            panic!("{r:?}")
+        };
+        assert_eq!(m.size, 6);
+        assert_ne!(m.ctime, 0);
+        assert_eq!(std::fs::read(dir.path().join("a.md")).unwrap(), b"remote");
+        // Условие на прежнее состояние больше не выполняется.
+        assert_eq!(
+            ex.perform(write("a.md", b"again", expect)).await,
+            IoResult::Precondition
+        );
+        assert_eq!(
+            ex.perform(write("b.md", b"new", Expect::Absent)).await,
+            IoResult::Stat {
+                meta: ex.stat("b.md").await.unwrap()
+            }
+        );
+        assert_eq!(names(dir.path()), vec!["a.md", "b.md"]);
+    }
+
+    #[tokio::test]
+    async fn changed_file_is_not_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let ex = Exec::new(dir.path(), "http://127.0.0.1:9", None).unwrap();
+        std::fs::write(dir.path().join("a.md"), b"old").unwrap();
+        let expect = stat_of(dir.path(), "a.md");
+        std::fs::write(dir.path().join("a.md"), b"user edit").unwrap();
+        assert_eq!(
+            ex.perform(write("a.md", b"remote", expect)).await,
+            IoResult::Precondition
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("a.md")).unwrap(),
+            b"user edit"
+        );
+        assert_eq!(names(dir.path()), vec!["a.md"]);
+    }
 }

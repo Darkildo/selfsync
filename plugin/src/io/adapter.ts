@@ -2,13 +2,26 @@
 //
 // adapter.rename не заменяет существующий файл, поэтому атомарная запись идёт по
 // протоколу из контракта Action::Write: X.selfsync-tmp → X.commit.selfsync-tmp
-// (записан целиком) → удалить X → переименовать в X (для имени, которому не хватает
-// места под суффикс, вместо X — укороченная база, `tempBase`). Прерванную на любом
-// шаге запись ядро доведёт или повторит. readBinary читает файл целиком — отсюда
-// лимит размера файла на мобильных (README) и кэш файла, читаемого по частям.
+// (записан целиком) → отодвинуть X в X.aside.selfsync-tmp → переименовать в X (для
+// имени, которому не хватает места под суффикс, вместо X — укороченная база,
+// `tempBase`). Прерванную на любом шаге запись ядро доведёт или повторит.
+// readBinary читает файл целиком — отсюда лимит размера файла на мобильных (README)
+// и кэш файла, читаемого по частям.
 
-import type { FileMeta } from "../types.ts";
-import { DirNames, type FileBackend, joinPath, nameOf, parentOf, realName, TEMP_SUFFIX, tempBase } from "./backend.ts";
+import type { Expect, FileMeta } from "../types.ts";
+import {
+  asideNames,
+  DirNames,
+  type FileBackend,
+  joinPath,
+  nameOf,
+  parentOf,
+  realName,
+  satisfies,
+  TEMP_SUFFIX,
+  tempBase,
+  type WriteOutcome,
+} from "./backend.ts";
 
 /** То подмножество DataAdapter, которым пользуется бэкенд (удобно подменять в тестах). */
 export interface AdapterLike {
@@ -122,8 +135,10 @@ export class AdapterBackend implements FileBackend {
     this.cached = null;
   }
 
-  async writeAtomic(path: string, data: Uint8Array): Promise<FileMeta> {
+  async writeAtomic(path: string, data: Uint8Array, expect: Expect): Promise<WriteOutcome> {
     this.forget();
+    // Не выполнено уже сейчас — не писать зря (каждый вызов — через мост приложения).
+    if (!satisfies(await this.stat(path), expect)) return { kind: "precondition" };
     await this.ensureDir(parentOf(path));
     // Длинное имя с суффиксом не поместилось бы в 255 байт: база укорачивается, а
     // ядро находит исходный путь по хэшу в укороченном имени (`tempname` в ядре).
@@ -131,9 +146,68 @@ export class AdapterBackend implements FileBackend {
     const commit = tempBase(path) + COMMIT_SUFFIX;
     await this.a.writeBinary(tmp, buffer(data));
     await this.replace(tmp, commit);
-    await this.replace(commit, path);
+    return this.place(commit, path, expect);
+  }
+
+  /**
+   * Поставить готовый `src` (наш временный файл) на место `path`, если путь всё ещё
+   * удовлетворяет `expect`. Заменяемый файл не стирается, а отодвигается
+   * переименованием в `X.aside.selfsync-tmp`: так он «пойман» целиком, и условие
+   * сверяется уже по нему. Изменился — возвращается на место, запись отменяется;
+   * пока его отодвигали, на месте появился новый (пользователь сохранил) — тот
+   * остаётся, adapter.rename его не заменит.
+   */
+  private async place(src: string, path: string, expect: Expect): Promise<WriteOutcome> {
+    const refuse = async (): Promise<WriteOutcome> => {
+      if (await this.a.exists(src)) await this.a.remove(src);
+      return { kind: "precondition" };
+    };
+    let displaced: string | undefined;
+    if (expect.kind !== "absent" && (await this.a.exists(path, true))) {
+      const aside = await this.freeAside(path);
+      await this.a.rename(path, aside);
+      const before = await this.a.stat(aside);
+      const same = before?.type === "file" && (expect.kind === "any" || (before.size === expect.size && Math.trunc(before.mtime) === expect.mtime));
+      if (!same || (await this.a.exists(path))) {
+        // Изменился до того, как его отодвинули, — вернуть на место. Место уже
+        // занято новой версией — отодвинутый подберёт полный обход (ядро).
+        if (!(await this.a.exists(path))) await this.a.rename(aside, path);
+        else if (same && expect.kind === "stat") await this.a.remove(aside);
+        return refuse();
+      }
+      try {
+        await this.a.rename(src, path);
+      } catch (e) {
+        // Пока отодвигали, на месте сохранили новый файл: он остаётся.
+        if (await this.a.exists(path)) {
+          await this.a.remove(aside);
+          return refuse();
+        }
+        throw e;
+      }
+      const after = await this.a.stat(aside);
+      if (expect.kind === "stat" && after && (after.size !== before.size || after.mtime !== before.mtime)) displaced = aside;
+      else await this.a.remove(aside);
+    } else {
+      if (expect.kind === "absent" && (await this.a.exists(path))) return refuse();
+      try {
+        await this.a.rename(src, path);
+      } catch (e) {
+        if (await this.a.exists(path)) return refuse();
+        throw e;
+      }
+    }
     this.names.added(path);
-    return (await this.stat(path)) ?? { path, size: data.length, mtime: 0, dir: false };
+    const meta = (await this.stat(path)) ?? { path, size: 0, mtime: 0, dir: false };
+    return displaced === undefined ? { kind: "written", meta } : { kind: "written", meta, displaced };
+  }
+
+  /** Свободное имя, под которое отодвигается заменяемый файл. */
+  private async freeAside(path: string): Promise<string> {
+    for (const name of asideNames(path)) {
+      if (!(await this.a.exists(name))) return name;
+    }
+    throw new Error(`${path}: нет свободного временного имени`);
   }
 
   /** Переименование с заменой существующего (два шага, не атомарно). */
@@ -216,14 +290,13 @@ export class AdapterBackend implements FileBackend {
     if (await this.a.exists(f)) await this.a.remove(f);
   }
 
-  async tempCommit(name: string, path: string): Promise<FileMeta> {
+  async tempCommit(name: string, path: string, expect: Expect): Promise<WriteOutcome> {
     this.forget();
+    if (!satisfies(await this.stat(path), expect)) return { kind: "precondition" };
     await this.ensureDir(parentOf(path));
     const commit = tempBase(path) + COMMIT_SUFFIX;
     await this.replace(this.stored(`tmp/${name}`), commit);
-    await this.replace(commit, path);
-    this.names.added(path);
-    return (await this.stat(path)) ?? { path, size: 0, mtime: 0, dir: false };
+    return this.place(commit, path, expect);
   }
 
   async storeRead(name: string): Promise<Uint8Array | null> {

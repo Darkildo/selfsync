@@ -7,8 +7,22 @@
 
 type FsPromises = typeof import("node:fs/promises");
 
-import type { FileMeta } from "../types.ts";
-import { DirNames, type FileBackend, joinPath, nameOf, parentOf, realName, TEMP_SUFFIX, tempBase } from "./backend.ts";
+import type { Expect, FileMeta } from "../types.ts";
+import {
+  asideNames,
+  DirNames,
+  type FileBackend,
+  joinPath,
+  nameOf,
+  parentOf,
+  realName,
+  satisfies,
+  TEMP_SUFFIX,
+  tempBase,
+  type WriteOutcome,
+} from "./backend.ts";
+
+type Stats = import("node:fs").Stats;
 
 export interface NodeBackendOptions {
   /** ФС различает регистр (Linux): настоящее имя можно не искать в каталоге. */
@@ -55,7 +69,7 @@ export class NodeBackend implements FileBackend {
             // Пропасть из листинга может только исчезнувший файл: любая другая ошибка
             // (нет прав, EIO) обрывает обход, иначе ядро сочтёт файл удалённым.
             const st = await this.fsp.lstat(this.abs(path)).catch(missing);
-            if (st) out.push({ path, size: st.size, mtime: Math.trunc(st.mtimeMs), dir: false });
+            if (st) out.push(fileMeta(path, st));
           } else if (e.isSymbolicLink()) {
             // Ссылка (на папку или файл) может вести за пределы vault'а: не
             // синхронизируется, ядро исключает её вместе со всем под ней.
@@ -110,9 +124,7 @@ export class NodeBackend implements FileBackend {
       const entries = await this.names.get(parent, async () => (await this.fsp.readdir(this.abs(parent)).catch(missing)) ?? []);
       real = joinPath(parent, realName(entries, nameOf(path)) ?? nameOf(path));
     }
-    return st.isDirectory()
-      ? { path: real, size: 0, mtime: 0, dir: true }
-      : { path: real, size: st.size, mtime: Math.trunc(st.mtimeMs), dir: false };
+    return st.isDirectory() ? { path: real, size: 0, mtime: 0, dir: true } : fileMeta(real, st);
   }
 
   async read(path: string, offset: number, len?: number): Promise<Uint8Array | null> {
@@ -121,16 +133,101 @@ export class NodeBackend implements FileBackend {
     return readRange(this.fsp, this.abs(path), offset, len);
   }
 
-  async writeAtomic(path: string, data: Uint8Array): Promise<FileMeta> {
+  async writeAtomic(path: string, data: Uint8Array, expect: Expect): Promise<WriteOutcome> {
     await this.inside(path);
+    // Не выполнено уже сейчас — не писать зря.
+    if (!satisfies(await this.stat(path), expect)) return { kind: "precondition" };
     await this.fsp.mkdir(this.abs(parentOf(path)), { recursive: true });
     // Рядом с файлом: rename в пределах каталога атомарен. Длинное имя (до 255 байт)
     // с суффиксом не поместилось бы — тогда база временного имени укорочена.
     const tmp = this.abs(tempBase(path)) + TEMP_SUFFIX;
     await writeDurable(this.fsp, tmp, data);
-    await this.fsp.rename(tmp, this.abs(path));
+    return this.place(tmp, path, expect, true);
+  }
+
+  /**
+   * Поставить готовый файл `src` на место `path`, если путь всё ещё удовлетворяет
+   * `expect`. Проверки и замены здесь — в несколько вызовов (атомарного «заменить,
+   * если не изменился» у ФС нет), поэтому заменяемый файл не стирается: на него
+   * ставится жёсткая ссылка `X.aside.selfsync-tmp` (сам X при этом не пропадает ни на
+   * миг). По ней условие сверяется уже после того, как файл «пойман», и после замены
+   * видно, не дописали ли в него за это время — тогда это вытесненная правка.
+   * `own` — `src` наш и при отказе удаляется (временный файл скачивания — нет).
+   */
+  private async place(src: string, path: string, expect: Expect, own: boolean): Promise<WriteOutcome> {
+    const dst = this.abs(path);
+    const refuse = async (): Promise<WriteOutcome> => {
+      if (own) await this.fsp.rm(src, { force: true });
+      return { kind: "precondition" };
+    };
+    let displaced: string | undefined;
+    if (expect.kind === "absent") {
+      // link не заменяет существующий файл: «создать, только если имени нет».
+      try {
+        await this.fsp.link(src, dst);
+        await this.fsp.unlink(src);
+      } catch (e) {
+        if (code(e) === "EEXIST") return refuse();
+        if (!noLinks(e)) throw e;
+        if (await this.fsp.lstat(dst).catch(missing)) return refuse();
+        await this.fsp.rename(src, dst);
+      }
+    } else if (expect.kind === "stat") {
+      const aside = await this.freeAside(path);
+      const asideAbs = this.abs(aside);
+      let linked = true;
+      try {
+        await this.fsp.link(dst, asideAbs);
+      } catch (e) {
+        if (code(e) === "ENOENT") return refuse();
+        if (!noLinks(e)) throw e;
+        linked = false;
+        // Без жёстких ссылок (FAT, часть сетевых ФС) прежний файл отодвигается
+        // переименованием — на миг его нет на месте.
+        try {
+          await this.fsp.rename(dst, asideAbs);
+        } catch (e2) {
+          if (code(e2) === "ENOENT") return refuse();
+          throw e2;
+        }
+      }
+      const before = await this.fsp.lstat(asideAbs, { bigint: true });
+      if (Number(before.size) !== expect.size || Number(before.mtimeMs) !== expect.mtime || !before.isFile()) {
+        // Изменился ещё до того, как его поймали: остаётся на месте, запись — нет.
+        if (linked) await this.fsp.unlink(asideAbs);
+        else if (!(await this.fsp.lstat(dst).catch(missing))) await this.fsp.rename(asideAbs, dst);
+        // Иначе на месте уже новый файл, а этот подберёт полный обход (ядро).
+        return refuse();
+      }
+      if (!linked && (await this.fsp.lstat(dst).catch(missing))) {
+        // Пока отодвигали, на месте сохранили новый файл: он остаётся, а отодвинутый
+        // — известная версия, его не жалко.
+        await this.fsp.rm(asideAbs, { force: true });
+        return refuse();
+      }
+      await this.fsp.rename(src, dst);
+      // ctime здесь не годится: его меняет и сама замена (у отодвинутого файла
+      // становится меньше имён). mtime — с полной точностью ФС.
+      const after = await this.fsp.lstat(asideAbs, { bigint: true }).catch(missing);
+      if (after && (after.size !== before.size || after.mtimeNs !== before.mtimeNs)) {
+        displaced = aside;
+      } else {
+        await this.fsp.rm(asideAbs, { force: true });
+      }
+    } else {
+      await this.fsp.rename(src, dst);
+    }
     this.names.added(path);
-    return (await this.stat(path)) ?? { path, size: data.length, mtime: 0, dir: false };
+    const meta = (await this.stat(path)) ?? { path, size: 0, mtime: 0, dir: false };
+    return displaced === undefined ? { kind: "written", meta } : { kind: "written", meta, displaced };
+  }
+
+  /** Свободное имя, под которое отодвигается заменяемый файл. */
+  private async freeAside(path: string): Promise<string> {
+    for (const name of asideNames(path)) {
+      if (!(await this.fsp.lstat(this.abs(name)).catch(missing))) return name;
+    }
+    throw new Error(`${path}: нет свободного временного имени`);
   }
 
   async rename(from: string, to: string): Promise<void> {
@@ -209,12 +306,11 @@ export class NodeBackend implements FileBackend {
     await this.fsp.rm(this.stored(`tmp/${name}`), { force: true });
   }
 
-  async tempCommit(name: string, path: string): Promise<FileMeta> {
+  async tempCommit(name: string, path: string, expect: Expect): Promise<WriteOutcome> {
     await this.inside(path);
+    if (!satisfies(await this.stat(path), expect)) return { kind: "precondition" };
     await this.fsp.mkdir(this.abs(parentOf(path)), { recursive: true });
-    await this.fsp.rename(this.stored(`tmp/${name}`), this.abs(path));
-    this.names.added(path);
-    return (await this.stat(path)) ?? { path, size: 0, mtime: 0, dir: false };
+    return this.place(this.stored(`tmp/${name}`), path, expect, false);
   }
 
   async storeRead(name: string): Promise<Uint8Array | null> {
@@ -266,9 +362,22 @@ class RealDirs {
 
 /** Файла (или пути к нему) нет — `null`, остальные ошибки пробрасываются. */
 function missing(e: unknown): null {
-  const code = (e as { code?: string }).code;
-  if (code === "ENOENT" || code === "ENOTDIR") return null;
+  const c = code(e);
+  if (c === "ENOENT" || c === "ENOTDIR") return null;
   throw e;
+}
+
+function code(e: unknown): string | undefined {
+  return (e as { code?: string }).code;
+}
+
+/** ФС не умеет жёстких ссылок (FAT/exFAT, часть сетевых и облачных ФС). */
+function noLinks(e: unknown): boolean {
+  return ["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "EMLINK", "ENOSYS", "EINVAL", "EACCES"].includes(code(e) ?? "");
+}
+
+function fileMeta(path: string, st: Stats): FileMeta {
+  return { path, size: st.size, mtime: Math.trunc(st.mtimeMs), dir: false, ctime: Math.trunc(st.ctimeMs) };
 }
 
 /** Запись с fsync: после rename поверх старого файла не останется пустышки. */

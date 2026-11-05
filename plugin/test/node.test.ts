@@ -12,6 +12,8 @@ import { Executor } from "../src/executor.ts";
 import { NodeBackend } from "../src/io/node.ts";
 import type { IoAction, IoResult } from "../src/types.ts";
 
+const ANY = { kind: "any" } as const;
+
 const bytes = (s: string): Uint8Array => new TextEncoder().encode(s);
 
 /** Действие без `id` (по каждому варианту объединения). */
@@ -81,7 +83,7 @@ test("Node: запись дописывается при коротких write,
     const fs = new NodeBackend(join(root, "vault"), join(root, "store"), fsp, { caseSensitive: true });
 
     // По байту за вызов: файл и временный файл частями — целиком.
-    await fs.writeAtomic("note.md", bytes("полное содержимое"));
+    await fs.writeAtomic("note.md", bytes("полное содержимое"), ANY);
     assert.equal(await realFsp.readFile(join(root, "vault", "note.md"), "utf8"), "полное содержимое");
     await fs.tempWrite("t", 0, bytes("0123"));
     await fs.tempWrite("t", 4, bytes("4567"));
@@ -89,7 +91,7 @@ test("Node: запись дописывается при коротких write,
 
     // Запись не продвигается — ошибка, прежний файл на месте.
     limit = 0;
-    await assert.rejects(fs.writeAtomic("note.md", bytes("новое")));
+    await assert.rejects(fs.writeAtomic("note.md", bytes("новое"), ANY));
     assert.equal(await realFsp.readFile(join(root, "vault", "note.md"), "utf8"), "полное содержимое");
   });
 });

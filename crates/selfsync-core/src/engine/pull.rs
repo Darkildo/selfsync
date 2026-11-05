@@ -13,7 +13,7 @@ use selfsync_proto::v1 as pb;
 
 use super::api;
 use super::crypto_flow::{check_state, rebaseline};
-use super::ctx::{Ctx, SyncError, SyncResult};
+use super::ctx::{Ctx, SMALL_BLOB, SyncError, SyncResult};
 use super::resolve::{
     Remote, case_twin, rename_local, resolve_content, resolve_delete, split_case,
 };
@@ -532,6 +532,12 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
     let Some(hash) = r.hash else {
         return Err(SyncError::Protocol("живая запись без хэша".into()));
     };
+    let f = match f {
+        Some(c) if c.clean() && edited_unnoticed(cx, key, c.local).await? => {
+            cx.with(|s| s.index.files.get(key.as_str()).cloned())
+        }
+        f => f,
+    };
     match f {
         Some(f) if f.delete_pending() => {
             // Удалено здесь, изменено там: правка побеждает удаление.
@@ -634,6 +640,44 @@ async fn apply_file(cx: &Ctx, it: &Item) -> SyncResult<bool> {
             }
         }
     }
+}
+
+/// Перед тем как молча перезаписать «чистый» файл серверной версией: размер и mtime
+/// совпали с наблюдением, но содержимое могли изменить, сохранив их (`cp -p`,
+/// `rsync -t`, ФС с грубым mtime, мобильные без ctime). Небольшой файл сверяется по
+/// хэшу; отличается — это локальная правка: наблюдение обновляется, и дальше
+/// расхождение разрешается как обычно, а не затирается.
+async fn edited_unnoticed(cx: &Ctx, key: &str, local: Option<LocalObs>) -> SyncResult<bool> {
+    let Some(local) = local else {
+        return Ok(false);
+    };
+    if local.size > SMALL_BLOB {
+        return Ok(false);
+    }
+    let Some(meta) = cx.stat(key).await? else {
+        return Ok(false);
+    };
+    // Размер или время другие — запись не пройдёт по условию, правку заметит скан.
+    if meta.dir || meta.size != local.size || meta.mtime != local.mtime {
+        return Ok(false);
+    }
+    let Some(content) = read_local(cx, key, &meta).await? else {
+        return Ok(false);
+    };
+    if content.obs.plain == local.plain {
+        return Ok(false);
+    }
+    cx.log(
+        LogLevel::Warn,
+        format!("{key}: содержимое изменилось без смены размера и времени — локальная правка"),
+    );
+    cx.with_mut(|s| {
+        if let Some(f) = s.index.files.get_mut(key) {
+            f.local = Some(content.obs);
+        }
+    });
+    super::scan::note_ctime(cx, key, &meta);
+    Ok(true)
 }
 
 /// Разрешение расхождения не довелось до конца (файл меняли посреди записи и т.п.),
