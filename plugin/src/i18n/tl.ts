@@ -54,6 +54,7 @@ const tl: Dict = {
   "massDelete.confirm": "Burahin ang {count} nawawalang file sa lahat ng device? Mananatili ang mga ito sa mga binurang file ng server sa panahon ng pagtatago.",
   "massDelete.action": "Burahin sa lahat ng device",
   "notice.settingsOverwritten": "Binago ang mga setting dito at sa ibang device: {paths}. Itinago ang mas huling bersyon (ayon sa orasan ng mga device); ang isa ay nasa basurahan o sa kasaysayan ng file sa server.",
+  "notice.linksSkipped": "Hindi sini-sync ang mga symbolic link — walang anumang nasa loob nito ang dina-download, binubura o ina-upload: {paths}",
   "notice.error": "Pag-sync: {message}",
   "notice.engineStopped": "selfsync: pumalya ang sync engine nang {n} beses nang sunod-sunod at itinigil na. Patakbuhin ang “{cmd}” para subukang muli; nasa log ng pag-sync ang mga detalye.",
 

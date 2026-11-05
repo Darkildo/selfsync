@@ -22,6 +22,8 @@ export interface NodeBackendOptions {
 export class NodeBackend implements FileBackend {
   /** Листинги каталогов для настоящего имени (регистронезависимые ФС). */
   private names = new DirNames();
+  /** Каталоги vault'а, которые недавно были обычными папками (не ссылками). */
+  private realDirs = new RealDirs();
 
   constructor(
     /** Абсолютный путь к vault'у. */
@@ -56,16 +58,52 @@ export class NodeBackend implements FileBackend {
             // (нет прав, EIO) обрывает обход, иначе ядро сочтёт файл удалённым.
             const st = await this.fsp.lstat(this.abs(path)).catch(missing);
             if (st) out.push({ path, size: st.size, mtime: Math.trunc(st.mtimeMs), dir: false });
+          } else if (e.isSymbolicLink()) {
+            // Ссылка (на папку или файл) может вести за пределы vault'а: не
+            // синхронизируется, ядро исключает её вместе со всем под ней.
+            out.push({ path, size: 0, mtime: 0, dir: false, link: true });
           }
-          // Символические ссылки не синхронизируются.
         }),
       );
     };
+    this.realDirs.clear();
     await walk("");
+    for (const m of out) if (m.dir) this.realDirs.mark(m.path);
     return out;
   }
 
+  /**
+   * Первая символическая ссылка на пути — сама запись или папка выше (корень vault'а
+   * не в счёт). Путь через ссылку уходит за пределы vault'а: такие пути не читаются
+   * и не меняются. Проверяется по `lstat` каждой папки на пути; недавно проверенные
+   * обычные папки помнятся (`RealDirs`).
+   */
+  private async linkOn(path: string): Promise<string | null> {
+    let cur = "";
+    for (const part of path.split("/")) {
+      if (part === "") continue;
+      cur = cur ? `${cur}/${part}` : part;
+      if (this.realDirs.known(cur)) continue;
+      const st = await this.fsp.lstat(this.abs(cur)).catch(missing);
+      // Дальше ничего нет — и ссылок тоже.
+      if (!st) return null;
+      if (st.isSymbolicLink()) return cur;
+      if (!st.isDirectory()) return null;
+      this.realDirs.mark(cur);
+    }
+    return null;
+  }
+
+  /** Изменять можно только пути без символических ссылок. */
+  private async inside(...paths: string[]): Promise<void> {
+    for (const path of paths) {
+      const link = await this.linkOn(path);
+      if (link !== null) throw new Error(`${path}: путь ведёт через символическую ссылку ${link} — вне vault'а не пишем`);
+    }
+  }
+
   async stat(path: string): Promise<FileMeta | null> {
+    if ((await this.linkOn(path)) !== null) return { path, size: 0, mtime: 0, dir: false, link: true };
     const st = await this.fsp.lstat(this.abs(path)).catch(missing);
     if (!st) return null;
     let real = path;
@@ -80,10 +118,13 @@ export class NodeBackend implements FileBackend {
   }
 
   async read(path: string, offset: number, len?: number): Promise<Uint8Array | null> {
+    // Через ссылку — чужой файл, не из vault'а: его здесь нет.
+    if ((await this.linkOn(path)) !== null) return null;
     return readRange(this.fsp, this.abs(path), offset, len);
   }
 
   async writeAtomic(path: string, data: Uint8Array): Promise<FileMeta> {
+    await this.inside(path);
     await this.fsp.mkdir(this.abs(parentOf(path)), { recursive: true });
     await writeDurable(this.fsp, this.abs(path) + TEMP_SUFFIX, data);
     await this.fsp.rename(this.abs(path) + TEMP_SUFFIX, this.abs(path));
@@ -92,26 +133,32 @@ export class NodeBackend implements FileBackend {
   }
 
   async rename(from: string, to: string): Promise<void> {
+    await this.inside(from, to);
     await this.fsp.mkdir(this.abs(parentOf(to)), { recursive: true });
     await this.fsp.rename(this.abs(from), this.abs(to));
     this.names.removed(from);
+    this.realDirs.removed(from);
     this.names.added(to);
   }
 
   async mkdir(path: string): Promise<void> {
+    await this.inside(path);
     await this.fsp.mkdir(this.abs(path), { recursive: true });
     this.names.added(path);
   }
 
   async rmdir(path: string): Promise<boolean> {
+    await this.inside(path);
     try {
       await this.fsp.rmdir(this.abs(path));
       this.names.removed(path);
+      this.realDirs.removed(path);
       return true;
     } catch (e) {
       const code = (e as { code?: string }).code;
       if (code === "ENOENT") {
         this.names.removed(path);
+        this.realDirs.removed(path);
         return true;
       }
       if (code === "ENOTEMPTY" || code === "EEXIST") return false;
@@ -120,11 +167,13 @@ export class NodeBackend implements FileBackend {
   }
 
   async remove(path: string): Promise<void> {
+    await this.inside(path);
     await this.fsp.unlink(this.abs(path));
     this.names.removed(path);
   }
 
   async trash(path: string): Promise<void> {
+    await this.inside(path);
     this.names.removed(path);
     if (this.opts.trash) return this.opts.trash(path);
     const dir = this.stored("trash");
@@ -160,6 +209,7 @@ export class NodeBackend implements FileBackend {
   }
 
   async tempCommit(name: string, path: string): Promise<FileMeta> {
+    await this.inside(path);
     await this.fsp.mkdir(this.abs(parentOf(path)), { recursive: true });
     await this.fsp.rename(this.stored(`tmp/${name}`), this.abs(path));
     this.names.added(path);
@@ -179,6 +229,37 @@ export class NodeBackend implements FileBackend {
 
   async storeDelete(name: string): Promise<void> {
     await this.fsp.rm(this.stored(name), { force: true });
+  }
+}
+
+/**
+ * Папки vault'а, которые недавно были обычными (не символическими ссылками), — чтобы
+ * не проверять каждую папку пути на каждой операции. Свои удаления и переименования
+ * вносятся сразу; чужая замена папки ссылкой видна не позже чем через `ttlMs`.
+ */
+class RealDirs {
+  private dirs = new Map<string, number>();
+
+  constructor(
+    private ttlMs = 2000,
+    private now: () => number = Date.now,
+  ) {}
+
+  known(dir: string): boolean {
+    const at = this.dirs.get(dir);
+    return at !== undefined && this.now() - at < this.ttlMs;
+  }
+
+  mark(dir: string): void {
+    this.dirs.set(dir, this.now());
+  }
+
+  removed(path: string): void {
+    for (const d of [...this.dirs.keys()]) if (d === path || d.startsWith(`${path}/`)) this.dirs.delete(d);
+  }
+
+  clear(): void {
+    this.dirs.clear();
   }
 }
 

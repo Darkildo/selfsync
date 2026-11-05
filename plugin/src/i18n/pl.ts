@@ -54,6 +54,7 @@ const pl: Dict = {
   "massDelete.confirm": "Usunąć {count} brakujących plików na wszystkich urządzeniach? Pozostaną w usuniętych plikach serwera przez okres przechowywania.",
   "massDelete.action": "Usuń na wszystkich urządzeniach",
   "notice.settingsOverwritten": "Ustawienia zmieniono zarówno tutaj, jak i na innym urządzeniu: {paths}. Zachowano późniejszą wersję (według zegarów urządzeń); druga jest w koszu lub w historii pliku na serwerze.",
+  "notice.linksSkipped": "Dowiązania symboliczne nie są synchronizowane — nic w nich nie jest pobierane, usuwane ani wysyłane: {paths}",
   "notice.error": "Synchronizacja: {message}",
   "notice.engineStopped": "selfsync: silnik synchronizacji zawiódł {n} razy z rzędu i został zatrzymany. Uruchom „{cmd}”, aby spróbować ponownie; szczegóły są w dzienniku synchronizacji.",
 

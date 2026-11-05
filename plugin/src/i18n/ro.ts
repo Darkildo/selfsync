@@ -54,6 +54,7 @@ const ro: Dict = {
   "massDelete.confirm": "Ștergeți {count} fișiere lipsă pe toate dispozitivele? Rămân în fișierele șterse ale serverului pe durata de păstrare.",
   "massDelete.action": "Șterge pe toate dispozitivele",
   "notice.settingsOverwritten": "Setările au fost modificate atât aici, cât și pe alt dispozitiv: {paths}. A fost păstrată versiunea mai recentă (după ceasurile dispozitivelor); cealaltă este în coșul de gunoi sau în istoricul fișierului de pe server.",
+  "notice.linksSkipped": "Legăturile simbolice nu sunt sincronizate — nimic din interiorul lor nu este descărcat, șters sau încărcat: {paths}",
   "notice.error": "Sincronizare: {message}",
   "notice.engineStopped": "selfsync: motorul de sincronizare a eșuat de {n} ori la rând și a fost oprit. Rulați „{cmd}” pentru a încerca din nou; detaliile sunt în jurnalul de sincronizare.",
 

@@ -7,8 +7,13 @@ use selfsync_core::path::{NameRules, VaultPath};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Node {
-    File { data: Vec<u8>, mtime: i64 },
+    File {
+        data: Vec<u8>,
+        mtime: i64,
+    },
     Dir,
+    /// Символическая ссылка за пределы vault'а: что за ней — не видно.
+    Link,
 }
 
 /// ФС vault'а. На регистронезависимой ФС ключ — путь в нижнем регистре, а
@@ -23,6 +28,8 @@ pub struct FakeFs {
     pub trash: Vec<(String, Vec<u8>)>,
     pub temps: BTreeMap<String, Vec<u8>>,
     pub cache: BTreeMap<String, Vec<u8>>,
+    /// Попытки изменить что-то через символическую ссылку (за пределами vault'а).
+    pub link_writes: u32,
     clock: i64,
 }
 
@@ -77,6 +84,49 @@ impl FakeFs {
         match self.get(p) {
             Some(Node::File { data, .. }) => Some(data),
             _ => None,
+        }
+    }
+
+    /// Путь — ссылка или лежит под ней.
+    pub fn link_on(&self, p: &str) -> bool {
+        let mut cur = p;
+        loop {
+            if matches!(self.get(cur), Some(Node::Link)) {
+                return true;
+            }
+            match parent(cur) {
+                Some(par) => cur = par,
+                None => return false,
+            }
+        }
+    }
+
+    /// Изменение через ссылку: учесть попытку и отказать.
+    fn through_link(&mut self, paths: &[&str]) -> Option<IoResult> {
+        if paths.iter().any(|p| self.link_on(p)) {
+            self.link_writes += 1;
+            return Some(IoResult::Failed {
+                message: "path goes through a symbolic link".into(),
+            });
+        }
+        None
+    }
+
+    /// Пользователь заменил папку ссылкой на папку за пределами vault'а (перенёс
+    /// её наружу и оставил ссылку): содержимое из vault'а пропало, но не удалено.
+    pub fn user_link(&mut self, p: &str) {
+        let k = self.key(p);
+        let prefix = format!("{k}/");
+        self.nodes.retain(|x, _| *x != k && !x.starts_with(&prefix));
+        self.ensure_parents(p);
+        self.nodes.insert(k, (p.to_owned(), Node::Link));
+    }
+
+    /// Ссылку убрали.
+    pub fn user_unlink(&mut self, p: &str) {
+        let k = self.key(p);
+        if matches!(self.get(p), Some(Node::Link)) {
+            self.nodes.remove(&k);
         }
     }
 
@@ -178,7 +228,7 @@ impl FakeFs {
             .values()
             .filter_map(|(n, node)| match node {
                 Node::File { data, .. } => Some((n.clone(), data.clone())),
-                Node::Dir => None,
+                Node::Dir | Node::Link => None,
             })
             .collect()
     }
@@ -198,12 +248,21 @@ impl FakeFs {
                 size: data.len() as u64,
                 mtime: *mtime,
                 dir: false,
+                link: false,
             },
             Node::Dir => FileMeta {
                 path: name.to_owned(),
                 size: 0,
                 mtime: 0,
                 dir: true,
+                link: false,
+            },
+            Node::Link => FileMeta {
+                path: name.to_owned(),
+                size: 0,
+                mtime: 0,
+                dir: false,
+                link: true,
             },
         }
     }
@@ -231,6 +290,11 @@ impl FakeFs {
     }
 
     pub fn stat(&self, p: &str) -> IoResult {
+        if self.link_on(p) {
+            return IoResult::Stat {
+                meta: Some(Self::meta(p, &Node::Link)),
+            };
+        }
         match self.nodes.get(&self.key(p)) {
             Some((n, node)) => IoResult::Stat {
                 meta: Some(Self::meta(n, node)),
@@ -240,6 +304,9 @@ impl FakeFs {
     }
 
     pub fn read(&self, p: &str, offset: u64, len: Option<u64>) -> IoResult {
+        if self.link_on(p) {
+            return IoResult::NotFound;
+        }
         match self.get(p) {
             Some(Node::File { data, .. }) => {
                 let start = usize::try_from(offset)
@@ -258,11 +325,14 @@ impl FakeFs {
             Some(Node::Dir) => IoResult::Failed {
                 message: "is a directory".into(),
             },
-            None => IoResult::NotFound,
+            Some(Node::Link) | None => IoResult::NotFound,
         }
     }
 
     pub fn write(&mut self, p: &str, data: Vec<u8>, expect: &Expect, now: i64) -> IoResult {
+        if let Some(r) = self.through_link(&[p]) {
+            return r;
+        }
         if self.forbids(p) {
             return Self::bad_name();
         }
@@ -305,6 +375,9 @@ impl FakeFs {
     }
 
     pub fn commit_temp(&mut self, t: &str, p: &str, expect: &Expect, now: i64) -> IoResult {
+        if let Some(r) = self.through_link(&[p]) {
+            return r;
+        }
         if self.forbids(p) {
             return Self::bad_name();
         }
@@ -320,6 +393,9 @@ impl FakeFs {
 
     /// Удалить насовсем (освобождение места под исключённым путём).
     pub fn delete(&mut self, p: &str, expect: &Expect) -> IoResult {
+        if let Some(r) = self.through_link(&[p]) {
+            return r;
+        }
         if self.get(p).is_none() {
             return IoResult::NotFound;
         }
@@ -336,6 +412,9 @@ impl FakeFs {
     }
 
     pub fn trash(&mut self, p: &str, expect: &Expect) -> IoResult {
+        if let Some(r) = self.through_link(&[p]) {
+            return r;
+        }
         if self.get(p).is_none() {
             return IoResult::NotFound;
         }
@@ -349,12 +428,15 @@ impl FakeFs {
                 self.trash.push((name, data));
                 IoResult::Done
             }
-            Some(Node::Dir) => IoResult::Precondition,
+            Some(Node::Dir | Node::Link) => IoResult::Precondition,
             None => IoResult::NotFound,
         }
     }
 
     pub fn rename_io(&mut self, from: &str, to: &str, now: i64) -> IoResult {
+        if let Some(r) = self.through_link(&[from, to]) {
+            return r;
+        }
         if self.get(from).is_none() {
             return IoResult::NotFound;
         }
@@ -369,6 +451,9 @@ impl FakeFs {
     }
 
     pub fn mkdir(&mut self, p: &str) -> IoResult {
+        if let Some(r) = self.through_link(&[p]) {
+            return r;
+        }
         if self.forbids(p) {
             return Self::bad_name();
         }
@@ -382,6 +467,9 @@ impl FakeFs {
     }
 
     pub fn rmdir(&mut self, p: &str) -> IoResult {
+        if let Some(r) = self.through_link(&[p]) {
+            return r;
+        }
         let k = self.key(p);
         let prefix = format!("{k}/");
         if !self.nodes.contains_key(&k) {

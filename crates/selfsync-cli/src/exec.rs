@@ -152,10 +152,16 @@ impl Exec {
             },
             Action::Read {
                 path, offset, len, ..
-            } => match read_range(&self.abs(&path), offset, len).await? {
-                Some(data) => IoResult::Data { data },
-                None => IoResult::NotFound,
-            },
+            } => {
+                // Через ссылку — чужой файл, не из vault'а: его здесь нет.
+                if self.link_on(&path).await?.is_some() {
+                    return Ok(IoResult::NotFound);
+                }
+                match read_range(&self.abs(&path), offset, len).await? {
+                    Some(data) => IoResult::Data { data },
+                    None => IoResult::NotFound,
+                }
+            }
             Action::Write {
                 path, data, expect, ..
             } => {
@@ -164,6 +170,7 @@ impl Exec {
                 {
                     return Ok(IoResult::Precondition);
                 }
+                self.inside(&path).await?;
                 let target = self.abs(&path);
                 if let Some(parent) = target.parent() {
                     tokio::fs::create_dir_all(parent).await?;
@@ -209,6 +216,7 @@ impl Exec {
                 if !self.holds(&path, &expect).await? {
                     return Ok(IoResult::Precondition);
                 }
+                self.inside(&path).await?;
                 let target = self.abs(&path);
                 if let Some(parent) = target.parent() {
                     tokio::fs::create_dir_all(parent).await?;
@@ -232,6 +240,7 @@ impl Exec {
                 if cur.dir || !matches(&cur, &expect) {
                     return Ok(IoResult::Precondition);
                 }
+                self.inside(&cur.path).await?;
                 tokio::fs::remove_file(self.abs(&cur.path)).await?;
                 IoResult::Done
             }
@@ -242,6 +251,7 @@ impl Exec {
                 if cur.dir || !matches(&cur, &expect) {
                     return Ok(IoResult::Precondition);
                 }
+                self.inside(&cur.path).await?;
                 self.trash(&cur.path).await?;
                 IoResult::Done
             }
@@ -252,6 +262,8 @@ impl Exec {
                 if self.stat(&to).await?.is_some_and(|d| d.path != src.path) {
                     return Ok(IoResult::Precondition);
                 }
+                self.inside(&src.path).await?;
+                self.inside(&to).await?;
                 let target = self.abs(&to);
                 if let Some(parent) = target.parent() {
                     tokio::fs::create_dir_all(parent).await?;
@@ -262,17 +274,21 @@ impl Exec {
                 }
             }
             Action::Mkdir { path, .. } => {
+                self.inside(&path).await?;
                 tokio::fs::create_dir_all(self.abs(&path)).await?;
                 IoResult::Done
             }
-            Action::Rmdir { path, .. } => match tokio::fs::remove_dir(self.abs(&path)).await {
-                Ok(()) => IoResult::Done,
-                Err(e) if not_found(&e) => IoResult::NotFound,
-                Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
-                    IoResult::Precondition
+            Action::Rmdir { path, .. } => {
+                self.inside(&path).await?;
+                match tokio::fs::remove_dir(self.abs(&path)).await {
+                    Ok(()) => IoResult::Done,
+                    Err(e) if not_found(&e) => IoResult::NotFound,
+                    Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
+                        IoResult::Precondition
+                    }
+                    Err(e) => return Err(e),
                 }
-                Err(e) => return Err(e),
-            },
+            }
             Action::SaveIndex { id, data } => {
                 // Задача синка и, например, решение конфликта сохраняют индекс
                 // параллельно: без замка второй rename не находит временный файл.
@@ -370,6 +386,7 @@ impl Exec {
                         size: 0,
                         mtime: 0,
                         dir: true,
+                        link: false,
                     });
                     stack.push(path);
                 } else if ft.is_file() {
@@ -379,17 +396,72 @@ impl Exec {
                         size: md.len(),
                         mtime: mtime_ms(&md),
                         dir: false,
+                        link: false,
+                    });
+                } else if ft.is_symlink() {
+                    // Ссылка (на папку или файл) может вести за пределы vault'а: не
+                    // синхронизируется, ядро исключает её вместе со всем под ней.
+                    out.push(FileMeta {
+                        path,
+                        size: 0,
+                        mtime: 0,
+                        dir: false,
+                        link: true,
                     });
                 }
-                // Символические ссылки не синхронизируются.
             }
         }
         Ok(out)
     }
 
+    /// Первая символическая ссылка на пути — сама запись или папка выше (корень
+    /// vault'а не в счёт). Путь через ссылку уходит за пределы vault'а: такие пути не
+    /// читаются и не меняются.
+    async fn link_on(&self, path: &str) -> std::io::Result<Option<String>> {
+        let mut cur = String::new();
+        for part in path.split('/').filter(|p| !p.is_empty()) {
+            if !cur.is_empty() {
+                cur.push('/');
+            }
+            cur.push_str(part);
+            let md = match tokio::fs::symlink_metadata(self.abs(&cur)).await {
+                Ok(m) => m,
+                // Дальше ничего нет — и ссылок тоже.
+                Err(e) if not_found(&e) => return Ok(None),
+                Err(e) => return Err(e),
+            };
+            if md.file_type().is_symlink() {
+                return Ok(Some(cur));
+            }
+            if !md.is_dir() {
+                return Ok(None);
+            }
+        }
+        Ok(None)
+    }
+
+    /// Изменять можно только пути без символических ссылок.
+    async fn inside(&self, path: &str) -> std::io::Result<()> {
+        match self.link_on(path).await? {
+            Some(link) => Err(std::io::Error::other(format!(
+                "{path}: путь ведёт через символическую ссылку {link} — вне vault'а не пишем"
+            ))),
+            None => Ok(()),
+        }
+    }
+
     /// Метаданные с настоящим именем: на регистронезависимой ФС «Note.md» может
     /// оказаться «note.md» — ядро обязано это видеть.
     async fn stat(&self, path: &str) -> std::io::Result<Option<FileMeta>> {
+        if self.link_on(path).await?.is_some() {
+            return Ok(Some(FileMeta {
+                path: path.to_owned(),
+                size: 0,
+                mtime: 0,
+                dir: false,
+                link: true,
+            }));
+        }
         let md = match tokio::fs::symlink_metadata(self.abs(path)).await {
             Ok(m) => m,
             Err(e) if not_found(&e) => return Ok(None),
@@ -408,6 +480,7 @@ impl Exec {
                 size: 0,
                 mtime: 0,
                 dir: true,
+                link: false,
             }
         } else {
             FileMeta {
@@ -415,6 +488,7 @@ impl Exec {
                 size: md.len(),
                 mtime: mtime_ms(&md),
                 dir: false,
+                link: false,
             }
         }))
     }

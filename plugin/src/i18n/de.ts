@@ -54,6 +54,7 @@ const de: Dict = {
   "massDelete.confirm": "{count} fehlende Dateien auf allen Geräten löschen? Sie bleiben für die Aufbewahrungsdauer in den gelöschten Dateien des Servers.",
   "massDelete.action": "Auf allen Geräten löschen",
   "notice.settingsOverwritten": "Die Einstellungen wurden hier und auf einem anderen Gerät geändert: {paths}. Die spätere Version wurde behalten (nach den Uhren der Geräte); die andere liegt im Papierkorb oder im Dateiverlauf auf dem Server.",
+  "notice.linksSkipped": "Symbolische Links werden nicht synchronisiert — darin wird nichts heruntergeladen, gelöscht oder hochgeladen: {paths}",
   "notice.error": "Synchronisierung: {message}",
   "notice.engineStopped": "selfsync: Die Synchronisierung ist {n}-mal hintereinander abgestürzt und wurde angehalten. Führen Sie „{cmd}“ aus, um es erneut zu versuchen; Details stehen im Synchronisierungsprotokoll.",
 

@@ -54,6 +54,7 @@ const eo: Dict = {
   "massDelete.confirm": "Ĉu forigi {count} mankantajn dosierojn en ĉiuj aparatoj? Ili restas en la forigitaj dosieroj de la servilo dum la konserva periodo.",
   "massDelete.action": "Forigi en ĉiuj aparatoj",
   "notice.settingsOverwritten": "La agordoj ŝanĝiĝis kaj ĉi tie kaj en alia aparato: {paths}. La pli posta versio estis konservita (laŭ la horloĝoj de la aparatoj); la alia estas en la rubujo aŭ en la historio de la dosiero en la servilo.",
+  "notice.linksSkipped": "Simbolaj ligiloj ne estas sinkronigataj — nenio en ili estas elŝutata, forigata aŭ alŝutata: {paths}",
   "notice.error": "Sinkronigo: {message}",
   "notice.engineStopped": "selfsync: la sinkroniga motoro malsukcesis {n} fojojn sinsekve kaj estis haltigita. Rulu “{cmd}” por reprovi; detaloj estas en la sinkroniga protokolo.",
 

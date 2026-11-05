@@ -54,6 +54,7 @@ const id: Dict = {
   "massDelete.confirm": "Hapus {count} file yang hilang di semua perangkat? File tetap ada di file terhapus server selama masa penyimpanan.",
   "massDelete.action": "Hapus di semua perangkat",
   "notice.settingsOverwritten": "Pengaturan diubah di sini dan di perangkat lain: {paths}. Versi yang lebih baru disimpan (menurut jam perangkat); yang lain ada di tempat sampah atau di riwayat berkas di server.",
+  "notice.linksSkipped": "Tautan simbolik tidak disinkronkan — tidak ada isi di dalamnya yang diunduh, dihapus, atau diunggah: {paths}",
   "notice.error": "Sinkronisasi: {message}",
   "notice.engineStopped": "selfsync: mesin sinkronisasi gagal {n} kali berturut-turut dan dihentikan. Jalankan “{cmd}” untuk mencoba lagi; detailnya ada di log sinkronisasi.",
 

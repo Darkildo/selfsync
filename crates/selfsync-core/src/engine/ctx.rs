@@ -199,6 +199,9 @@ pub(crate) struct State {
     pub device_id: u32,
     /// О каких путях уже предупредили (не повторять уведомление).
     pub notified: BTreeSet<String>,
+    /// Ссылки, которые нашёл `stat` после последнего полного обхода: о них ещё не
+    /// сообщали (сообщит полный обход).
+    pub link_hits: BTreeSet<String>,
     /// Запись, отложенная по временной причине: курсор не уходит дальше неё.
     pub hold_seq: Option<u64>,
     /// Временные файлы забытых передач (путь стал исключённым) — удалить в цикле.
@@ -287,6 +290,7 @@ impl State {
             verified_version: 0,
             device_id: 0,
             notified: BTreeSet::new(),
+            link_hits: BTreeSet::new(),
             hold_seq: None,
             stale_temps: Vec::new(),
             rules_changed: false,
@@ -360,7 +364,9 @@ impl State {
         for k in &gone {
             if let Some(f) = self.index.files.remove(k) {
                 // Совпадает с сервером — локальную копию можно удалить без потерь.
+                // Под ссылкой — нет: удалять там нечего, файлы не в vault'е.
                 if !f.folder
+                    && !self.under_link(k)
                     && f.base_rev > 0
                     && f.clean()
                     && let Some(l) = f.local
@@ -431,7 +437,38 @@ impl State {
     }
 
     pub fn is_excluded(&self, path: &str) -> bool {
-        self.excludes.is_excluded(path) || path.ends_with(TEMP_SUFFIX)
+        self.excludes.is_excluded(path) || path.ends_with(TEMP_SUFFIX) || self.under_link(path)
+    }
+
+    /// `stat` нашёл символическую ссылку на пути (сам путь или папка выше): путь
+    /// исключается, записи индекса под ним забываются без удаления на сервере, а
+    /// следующий полный обход найдёт саму ссылку.
+    pub fn link_found(&mut self, path: &str) -> Vec<String> {
+        self.index.links.insert(path.to_owned());
+        self.link_hits.insert(path.to_owned());
+        self.need_full_scan = true;
+        self.forget_excluded()
+    }
+
+    /// Путь — символическая ссылка из `index.links` (по последнему полному обходу и
+    /// пути, где `stat` нашёл ссылку) или лежит под ней. Такие пути исключены, пока
+    /// ссылка на месте: ничего не скачивается, записи индекса забываются без
+    /// удаления на сервере.
+    pub fn under_link(&self, path: &str) -> bool {
+        let links = &self.index.links;
+        if links.is_empty() {
+            return false;
+        }
+        let mut p = path;
+        loop {
+            if links.contains(p) {
+                return true;
+            }
+            match p.rfind('/') {
+                Some(i) => p = &p[..i],
+                None => return false,
+            }
+        }
     }
 
     /// Ключи для содержимого текущего режима.
@@ -619,9 +656,22 @@ impl Ctx {
         }
     }
 
+    /// Метаданные пути. Путь под символической ссылкой (или сама ссылка, см.
+    /// `FileMeta::link`) исключается до следующего полного обхода, а цикл
+    /// начинается заново — уже с полным обходом, который найдёт саму ссылку.
     pub async fn stat(&self, path: &str) -> SyncResult<Option<FileMeta>> {
-        let path = path.to_owned();
-        match self.hub.submit(|id| Action::Stat { id, path }).await {
+        let raw = path.to_owned();
+        match self.hub.submit(|id| Action::Stat { id, path: raw }).await {
+            IoResult::Stat { meta: Some(m) } if m.link => {
+                let key = crate::path::VaultPath::normalize(path)
+                    .map_or_else(|_| path.to_owned(), |p| p.as_str().to_owned());
+                let forgot = self.with_mut(|s| s.link_found(&key));
+                self.log(
+                    LogLevel::Info,
+                    format!("{key}: символическая ссылка на пути — не синхронизируется, забыто {forgot:?}"),
+                );
+                Err(SyncError::Restart)
+            }
             IoResult::Stat { meta } => Ok(meta),
             IoResult::NotFound => Ok(None),
             other => Err(io_err("stat", other)),
@@ -739,6 +789,7 @@ impl Ctx {
                     size: 0,
                     mtime: 0,
                     dir: false,
+                    link: false,
                 })
             })),
             IoResult::Done => Ok(Some(FileMeta {
@@ -746,6 +797,7 @@ impl Ctx {
                 size: 0,
                 mtime: 0,
                 dir: false,
+                link: false,
             })),
             IoResult::Precondition => Ok(None),
             other => Err(io_err("write", other)),
@@ -831,6 +883,7 @@ impl Ctx {
                     size: 0,
                     mtime: 0,
                     dir: false,
+                    link: false,
                 })
             })),
             IoResult::Done => Ok(Some(FileMeta {
@@ -838,6 +891,7 @@ impl Ctx {
                 size: 0,
                 mtime: 0,
                 dir: false,
+                link: false,
             })),
             IoResult::Precondition => Ok(None),
             other => Err(io_err("commit_temp", other)),
@@ -947,6 +1001,7 @@ impl Ctx {
                     size: 0,
                     mtime: 0,
                     dir: false,
+                    link: false,
                 })
             })),
             IoResult::Done => Ok(Some(FileMeta {
@@ -954,6 +1009,7 @@ impl Ctx {
                 size: 0,
                 mtime: 0,
                 dir: false,
+                link: false,
             })),
             IoResult::Precondition | IoResult::NotFound => Ok(None),
             other => Err(io_err("rename", other)),

@@ -54,6 +54,7 @@ const sq: Dict = {
   "massDelete.confirm": "Të fshihen {count} skedarë që mungojnë në të gjitha pajisjet? Ata mbeten te skedarët e fshirë të serverit gjatë periudhës së ruajtjes.",
   "massDelete.action": "Fshi në të gjitha pajisjet",
   "notice.settingsOverwritten": "Cilësimet u ndryshuan si këtu ashtu edhe në një pajisje tjetër: {paths}. U mbajt versioni më i vonë (sipas orëve të pajisjeve); tjetri është në kosh ose në historikun e skedarit në server.",
+  "notice.linksSkipped": "Lidhjet simbolike nuk sinkronizohen — asgjë brenda tyre nuk shkarkohet, fshihet ose ngarkohet: {paths}",
   "notice.error": "Sinkronizimi: {message}",
   "notice.engineStopped": "selfsync: motori i sinkronizimit dështoi {n} herë radhazi dhe u ndal. Ekzekutoni «{cmd}» për të provuar përsëri; hollësitë janë në regjistrin e sinkronizimit.",
 

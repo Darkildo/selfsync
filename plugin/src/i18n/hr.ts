@@ -54,6 +54,7 @@ const hr: Dict = {
   "massDelete.confirm": "Izbrisati {count} datoteka koje nedostaju na svim uređajima? Ostaju u izbrisanim datotekama poslužitelja tijekom razdoblja čuvanja.",
   "massDelete.action": "Izbriši na svim uređajima",
   "notice.settingsOverwritten": "Postavke su promijenjene i ovdje i na drugom uređaju: {paths}. Zadržana je kasnija verzija (prema satovima uređaja); druga je u smeću ili u povijesti datoteke na poslužitelju.",
+  "notice.linksSkipped": "Simboličke poveznice se ne sinkroniziraju — ništa se u njima ne preuzima, ne briše niti prenosi: {paths}",
   "notice.error": "Sinkronizacija: {message}",
   "notice.engineStopped": "selfsync: mehanizam sinkronizacije zakazao je {n} puta zaredom i zaustavljen je. Pokrenite „{cmd}” za novi pokušaj; pojedinosti su u zapisniku sinkronizacije.",
 

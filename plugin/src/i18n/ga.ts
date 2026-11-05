@@ -54,6 +54,7 @@ const ga: Dict = {
   "massDelete.confirm": "Scrios {count} comhad atá ar iarraidh ar gach gléas? Fanann siad i gcomhaid scriosta an fhreastalaí ar feadh na tréimhse coinneála.",
   "massDelete.action": "Scrios ar gach gléas",
   "notice.settingsOverwritten": "Athraíodh na socruithe anseo agus ar ghléas eile: {paths}. Coinníodh an leagan is déanaí (de réir chloig na ngléasanna); tá an ceann eile sa bhruscar nó i stair an chomhaid ar an bhfreastalaí.",
+  "notice.linksSkipped": "Ní shioncronaítear naisc shiombalacha — ní íoslódáiltear, ní scriostar agus ní uaslódáiltear aon rud iontu: {paths}",
   "notice.error": "Sioncrónú: {message}",
   "notice.engineStopped": "selfsync: theip ar an inneall sioncrónaithe {n} uair as a chéile agus stopadh é. Rith “{cmd}” chun triail eile a bhaint as; tá na sonraí i logchomhad an tsioncrónaithe.",
 

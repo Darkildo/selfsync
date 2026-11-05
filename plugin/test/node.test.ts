@@ -1,5 +1,6 @@
-// Бэкенд на Node fs: сбои ФС не должны выглядеть как отсутствие файла (#8), а
-// короткая запись — как записанный файл (#9).
+// Бэкенд на Node fs: сбои ФС не должны выглядеть как отсутствие файла (#8),
+// короткая запись — как записанный файл (#9), а символическая ссылка не выводит за
+// пределы vault'а (#10).
 
 import assert from "node:assert/strict";
 import * as realFsp from "node:fs/promises";
@@ -7,9 +8,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { Executor } from "../src/executor.ts";
 import { NodeBackend } from "../src/io/node.ts";
+import type { IoAction, IoResult } from "../src/types.ts";
 
 const bytes = (s: string): Uint8Array => new TextEncoder().encode(s);
+
+/** Действие без `id` (по каждому варианту объединения). */
+type WithoutId<A> = A extends unknown ? Omit<A, "id"> : never;
 
 async function withVault(run: (root: string) => Promise<void>): Promise<void> {
   const root = await realFsp.mkdtemp(join(tmpdir(), "selfsync-node-"));
@@ -85,5 +91,56 @@ test("Node: запись дописывается при коротких write,
     limit = 0;
     await assert.rejects(fs.writeAtomic("note.md", bytes("новое")));
     assert.equal(await realFsp.readFile(join(root, "vault", "note.md"), "utf8"), "полное содержимое");
+  });
+});
+
+test("Node: через символическую ссылку ничего не читается и не меняется (#10)", async () => {
+  await withVault(async (root) => {
+    const vault = join(root, "vault");
+    const ext = join(root, "external");
+    await realFsp.mkdir(ext);
+    await realFsp.writeFile(join(ext, "w.md"), "outside");
+    await realFsp.symlink(ext, join(vault, "linked"), "dir");
+    await realFsp.symlink(join(ext, "w.md"), join(vault, "leaf.md"));
+    await realFsp.writeFile(join(vault, "inside.md"), "inside");
+    await realFsp.mkdir(join(root, "store", "tmp"), { recursive: true });
+    await realFsp.writeFile(join(root, "store", "tmp", "dl-x"), "big");
+    const fs = new NodeBackend(vault, join(root, "store"), realFsp, { caseSensitive: true });
+    const ex = new Executor(fs, { request: () => Promise.reject(new Error("без сети")) }, { server: "" });
+    let id = 0;
+    const run = (a: WithoutId<IoAction>) => ex.perform({ id: ++id, ...a } as IoAction);
+
+    // Листинг отдаёт ссылки признаком и не заходит в них.
+    const listed = await fs.list();
+    assert.deepEqual(
+      listed.filter((m) => m.link).map((m) => m.path).sort(),
+      ["leaf.md", "linked"],
+    );
+    assert.ok(!listed.some((m) => m.path.startsWith("linked/")));
+
+    for (const path of ["linked", "linked/w.md", "leaf.md"]) {
+      assert.deepEqual(await run({ type: "stat", path }), { type: "stat", meta: { path, size: 0, mtime: 0, dir: false, link: true } });
+    }
+    assert.deepEqual(await run({ type: "read", path: "linked/w.md", offset: 0, len: null }), { type: "notFound" });
+    assert.deepEqual(await run({ type: "read", path: "leaf.md", offset: 0, len: null }), { type: "notFound" });
+
+    const failed = (r: IoResult) => r.type === "failed" || r.type === "precondition";
+    const data = bytes("remote");
+    assert.ok(failed(await run({ type: "write", path: "linked/new.md", data, expect: { kind: "absent" } })));
+    assert.ok(failed(await run({ type: "write", path: "linked/new.md", data, expect: { kind: "any" } })));
+    assert.ok(failed(await run({ type: "write", path: "leaf.md", data, expect: { kind: "any" } })));
+    assert.ok(failed(await run({ type: "commitTemp", temp: "dl-x", path: "linked/big.md", expect: { kind: "any" } })));
+    assert.ok(failed(await run({ type: "mkdir", path: "linked/sub" })));
+    assert.ok(failed(await run({ type: "rmdir", path: "linked" })));
+    assert.ok(failed(await run({ type: "trash", path: "linked/w.md", expect: { kind: "any" } })));
+    assert.ok(failed(await run({ type: "delete", path: "linked/w.md", expect: { kind: "any" } })));
+    assert.ok(failed(await run({ type: "rename", from: "inside.md", to: "linked/inside.md" })));
+    assert.ok(failed(await run({ type: "rename", from: "linked/w.md", to: "out.md" })));
+
+    assert.deepEqual(await realFsp.readdir(ext), ["w.md"]);
+    assert.equal(await realFsp.readFile(join(ext, "w.md"), "utf8"), "outside");
+    assert.ok((await realFsp.lstat(join(vault, "linked"))).isSymbolicLink());
+    assert.ok((await realFsp.lstat(join(vault, "leaf.md"))).isSymbolicLink());
+    assert.equal(await realFsp.readFile(join(vault, "inside.md"), "utf8"), "inside");
   });
 });

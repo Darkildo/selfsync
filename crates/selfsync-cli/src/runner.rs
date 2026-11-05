@@ -337,6 +337,11 @@ fn notify_user(n: &Notice) {
                 );
             }
         }
+        Notice::LinksSkipped { paths } => tracing::warn!(
+            "символические ссылки не синхронизируются (под ними ничего не скачивается и не \
+             удаляется, их содержимое не уходит на сервер): {}",
+            paths.join(", ")
+        ),
         other => tracing::info!("{other:?}"),
     }
 }

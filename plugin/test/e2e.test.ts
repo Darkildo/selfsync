@@ -695,3 +695,98 @@ describe("сбои файловой системы", () => {
     for (const c of [a, b]) await c.stop();
   });
 });
+
+describe("символические ссылки (#10)", () => {
+  /** Внешний каталог рядом с vault'ом B (удаляется вместе с клиентом) и ссылка
+   *  на него `linked` внутри vault'а. */
+  async function linkOut(c: TestClient, name = "linked"): Promise<string> {
+    const ext = join(c.vault, "..", "external");
+    await fsp.mkdir(ext, { recursive: true });
+    await fsp.symlink(ext, join(c.vault, name), "dir");
+    return ext;
+  }
+
+  const linkNotices = (c: TestClient) => c.notices.flatMap((n) => (n.kind === "linksSkipped" ? [n.paths] : []));
+
+  test("под ссылку на папку ничего не скачивается, и файл не удаляется на других устройствах", async () => {
+    const [a, b] = await pair("link-out");
+    const ext = await linkOut(b);
+    await a.write("linked/new.md", "from A\n");
+    await a.write("top.md", "top\n");
+    await a.sync();
+    await b.sync();
+    assert.deepEqual(await fsp.readdir(ext), [], "за пределы vault'а ничего не записано");
+    assert.equal(await b.read("top.md"), "top\n");
+    assert.deepEqual(linkNotices(b), [["linked"]]);
+    assert.equal(b.status?.state, "idle");
+
+    // Полный обход B после перезапуска: ссылка известна — без повторного
+    // уведомления, и файл под ней не считается удалённым.
+    await b.restart();
+    await b.sync();
+    await a.sync();
+    assert.equal(await a.read("linked/new.md"), "from A\n");
+    assert.deepEqual(linkNotices(b), [["linked"]]);
+    assert.deepEqual(await fsp.readdir(ext), []);
+    for (const c of [a, b]) await c.stop();
+  });
+
+  test("файл во внешнем каталоге не перезаписывается и не уходит на сервер", async () => {
+    const [a, b] = await pair("link-pre");
+    const ext = await linkOut(b);
+    await fsp.writeFile(join(ext, "pre.md"), "external original\n");
+    await a.write("linked/pre.md", "remote version\n");
+    await a.sync();
+    await b.sync();
+    await a.sync();
+    assert.deepEqual(await fsp.readdir(ext), ["pre.md"]);
+    assert.equal(await fsp.readFile(join(ext, "pre.md"), "utf8"), "external original\n");
+    assert.deepEqual([...(await a.files()).keys()], ["linked/pre.md"], "копия внешнего файла не появилась");
+    assert.equal(await a.read("linked/pre.md"), "remote version\n");
+    for (const c of [a, b]) await c.stop();
+  });
+
+  test("папку заменили ссылкой: удаления не уходят; ссылку убрали — файлы приходят снова", async () => {
+    const [a, b] = await pair("link-replace");
+    await a.write("linked/x.md", "x\n");
+    await a.write("linked/y.md", "y\n");
+    await a.sync();
+    await b.sync();
+    assert.equal(await b.read("linked/x.md"), "x\n");
+
+    // Папку на B перенесли наружу и оставили ссылку.
+    const ext = join(b.vault, "..", "external");
+    await fsp.rename(join(b.vault, "linked"), ext);
+    await fsp.symlink(ext, join(b.vault, "linked"), "dir");
+    await b.restart();
+    await b.sync();
+    await a.write("linked/z.md", "z\n");
+    await a.sync();
+    await b.sync();
+    assert.deepEqual([...(await a.files()).keys()].sort(), ["linked/x.md", "linked/y.md", "linked/z.md"]);
+    assert.deepEqual((await fsp.readdir(ext)).sort(), ["x.md", "y.md"], "внешний каталог не тронут");
+
+    // Ссылку убрали: всё, что пропущено под ней, приходит с сервера.
+    await fsp.unlink(join(b.vault, "linked"));
+    await b.restart();
+    await b.sync();
+    assert.deepEqual([...(await b.files()).keys()].sort(), ["linked/x.md", "linked/y.md", "linked/z.md"]);
+    assert.equal(await b.read("linked/z.md"), "z\n");
+    for (const c of [a, b]) await c.stop();
+  });
+
+  test("на месте файла ссылка: внешний файл не читается и не отправляется", async () => {
+    const [a, b] = await pair("link-leaf");
+    const ext = join(b.vault, "..", "external");
+    await fsp.mkdir(ext, { recursive: true });
+    await fsp.writeFile(join(ext, "secret.md"), "secret\n");
+    await b.write("plain.md", "plain\n");
+    await fsp.symlink(join(ext, "secret.md"), join(b.vault, "leaf.md"));
+    await b.sync();
+    await a.sync();
+    assert.deepEqual([...(await a.files()).keys()], ["plain.md"]);
+    assert.deepEqual(linkNotices(b), [["leaf.md"]]);
+    assert.equal(await fsp.readFile(join(ext, "secret.md"), "utf8"), "secret\n");
+    for (const c of [a, b]) await c.stop();
+  });
+});

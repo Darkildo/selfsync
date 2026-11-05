@@ -460,6 +460,61 @@ fn hold_mass_delete(
     Err(SyncError::Blocked("mass_delete".into()))
 }
 
+/// Символические ссылки из листинга полного обхода: они и всё под ними не
+/// синхронизируются (ссылка может вести за пределы vault'а), записи индекса под
+/// ними забываются без удаления на сервере. О новых — уведомление.
+/// Ссылка исчезла (на её месте обычная папка или ничего) — журнал перечитывается
+/// с начала, чтобы скачать пропущенное под ней (как при сужении исключений).
+/// Возвращает листинг без ссылок.
+fn take_links(cx: &Ctx, listing: Vec<FileMeta>) -> Vec<FileMeta> {
+    let (links, files): (Vec<FileMeta>, Vec<FileMeta>) = listing.into_iter().partition(|m| m.link);
+    let found: BTreeSet<String> = links
+        .iter()
+        .filter_map(|m| VaultPath::normalize(&m.path).ok())
+        .map(|p| p.as_str().to_owned())
+        .collect();
+    let (fresh, replay, forgot) = cx.with_mut(|s| {
+        let old = std::mem::replace(&mut s.index.links, found);
+        let freed = old.iter().any(|l| !s.under_link(l));
+        let replay = freed && s.index.initial_done && s.index.last_seq > 0;
+        if replay {
+            s.index.last_seq = 0;
+        }
+        // О ссылке — один раз, когда её нашёл полный обход (найденные `stat` ещё
+        // не объявлены). Ссылки в исключённом (папка плагина в разработке и т.п.) —
+        // не новость.
+        let hits = std::mem::take(&mut s.link_hits);
+        let fresh: Vec<String> = s
+            .index
+            .links
+            .iter()
+            .filter(|l| (!old.contains(*l) || hits.contains(*l)) && !s.excludes.is_excluded(l))
+            .cloned()
+            .collect();
+        (fresh, replay, s.forget_excluded())
+    });
+    if !forgot.is_empty() {
+        cx.log(
+            LogLevel::Info,
+            format!("пути под символическими ссылками забыты (на сервере ничего не меняется): {forgot:?}"),
+        );
+    }
+    if replay {
+        cx.log(
+            LogLevel::Info,
+            "символическая ссылка исчезла: журнал перечитывается с начала".to_owned(),
+        );
+    }
+    if !fresh.is_empty() {
+        cx.log(
+            LogLevel::Warn,
+            format!("символические ссылки не синхронизируются: {fresh:?}"),
+        );
+        cx.notify(Notice::LinksSkipped { paths: fresh });
+    }
+    files
+}
+
 /// Сканирование: полный обход или пути из событий.
 pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
     let ev = cx.with(|s| s.renames.clone());
@@ -483,7 +538,7 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
                 format!("забыты исключённые пути: {forgot:?}"),
             );
         }
-        let listing = cx.list().await?;
+        let listing = take_links(cx, cx.list().await?);
         cx.with_mut(|s| {
             s.need_full_scan = false;
             s.last_full_scan = s.now;

@@ -54,6 +54,7 @@ const zhTw: Dict = {
   "massDelete.confirm": "在所有裝置上刪除 {count} 個遺失的檔案?在保留期間內它們仍保存在伺服器的已刪除檔案中。",
   "massDelete.action": "在所有裝置上刪除",
   "notice.settingsOverwritten": "設定在此裝置和另一台裝置上都被修改了：{paths}。已保留較晚的版本（依裝置時鐘）；另一個版本在垃圾桶或伺服器上的檔案歷史中。",
+  "notice.linksSkipped": "符號連結不會同步——其中的內容不會被下載、刪除或上傳：{paths}",
   "notice.error": "同步：{message}",
   "notice.engineStopped": "selfsync：同步引擎連續 {n} 次發生錯誤，已停止。執行「{cmd}」再試一次；詳情請見同步紀錄。",
 

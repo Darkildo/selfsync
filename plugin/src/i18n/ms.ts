@@ -54,6 +54,7 @@ const ms: Dict = {
   "massDelete.confirm": "Padam {count} fail yang hilang pada semua peranti? Fail kekal dalam fail dipadam pelayan sepanjang tempoh simpanan.",
   "massDelete.action": "Padam pada semua peranti",
   "notice.settingsOverwritten": "Tetapan telah diubah di sini dan pada peranti lain: {paths}. Versi yang lebih lewat dikekalkan (mengikut jam peranti); yang satu lagi berada dalam tong sampah atau dalam sejarah fail pada pelayan.",
+  "notice.linksSkipped": "Pautan simbolik tidak disegerakkan — tiada apa-apa di dalamnya dimuat turun, dipadam atau dimuat naik: {paths}",
   "notice.error": "Penyegerakan: {message}",
   "notice.engineStopped": "selfsync: enjin penyegerakan gagal {n} kali berturut-turut dan telah dihentikan. Jalankan “{cmd}” untuk mencuba lagi; butirannya ada dalam log penyegerakan.",
 

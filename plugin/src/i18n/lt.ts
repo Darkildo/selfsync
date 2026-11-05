@@ -54,6 +54,7 @@ const lt: Dict = {
   "massDelete.confirm": "Ištrinti {count} trūkstamus failus visuose įrenginiuose? Saugojimo laikotarpį jie liks serverio ištrintuose failuose.",
   "massDelete.action": "Ištrinti visuose įrenginiuose",
   "notice.settingsOverwritten": "Nustatymai pakeisti ir čia, ir kitame įrenginyje: {paths}. Palikta vėlesnė versija (pagal įrenginių laikrodžius); kita yra šiukšlinėje arba failo istorijoje serveryje.",
+  "notice.linksSkipped": "Simbolinės nuorodos nesinchronizuojamos — jose niekas neatsisiunčiama, netrinama ir neįkeliama: {paths}",
   "notice.error": "Sinchronizavimas: {message}",
   "notice.engineStopped": "selfsync: sinchronizavimo variklis {n} kartus iš eilės sutriko ir buvo sustabdytas. Paleiskite „{cmd}“, kad bandytumėte dar kartą; išsami informacija – sinchronizavimo žurnale.",
 

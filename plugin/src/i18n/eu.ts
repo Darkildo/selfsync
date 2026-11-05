@@ -54,6 +54,7 @@ const eu: Dict = {
   "massDelete.confirm": "Falta diren {count} fitxategi gailu guztietan ezabatu? Zerbitzariko ezabatutako fitxategietan geratzen dira gordetze-epean.",
   "massDelete.action": "Ezabatu gailu guztietan",
   "notice.settingsOverwritten": "Ezarpenak hemen eta beste gailu batean aldatu dira: {paths}. Geroagoko bertsioa gorde da (gailuen erlojuen arabera); bestea zakarrontzian edo zerbitzariko fitxategiaren historian dago.",
+  "notice.linksSkipped": "Esteka sinbolikoak ez dira sinkronizatzen — barruan ez da ezer deskargatzen, ezabatzen edo igotzen: {paths}",
   "notice.error": "Sinkronizazioa: {message}",
   "notice.engineStopped": "selfsync: sinkronizazio-motorrak {n} aldiz jarraian huts egin du eta gelditu egin da. Exekutatu «{cmd}» berriro saiatzeko; xehetasunak sinkronizazio-erregistroan daude.",
 

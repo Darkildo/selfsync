@@ -54,6 +54,7 @@ const sv: Dict = {
   "massDelete.confirm": "Ta bort {count} saknade filer på alla enheter? De finns kvar bland serverns borttagna filer under lagringstiden.",
   "massDelete.action": "Ta bort på alla enheter",
   "notice.settingsOverwritten": "Inställningarna har ändrats både här och på en annan enhet: {paths}. Den senare versionen behölls (enligt enheternas klockor); den andra finns i papperskorgen eller i filens historik på servern.",
+  "notice.linksSkipped": "Symboliska länkar synkroniseras inte — inget i dem laddas ned, tas bort eller laddas upp: {paths}",
   "notice.error": "Synkronisering: {message}",
   "notice.engineStopped": "selfsync: synkroniseringsmotorn misslyckades {n} gånger i rad och har stoppats. Kör ”{cmd}” för att försöka igen; detaljerna finns i synkroniseringsloggen.",
 

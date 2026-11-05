@@ -53,6 +53,7 @@ export const en = {
   "massDelete.confirm": "Delete {count} missing files on all devices? They stay in the server's deleted files for the retention period.",
   "massDelete.action": "Delete on all devices",
   "notice.settingsOverwritten": "Settings were changed both here and on another device: {paths}. The later version was kept (by device clocks); the other one is in the trash or in the file's history on the server.",
+  "notice.linksSkipped": "Symbolic links are not synced — nothing inside them is downloaded, deleted or uploaded: {paths}",
   "notice.error": "Sync: {message}",
   "notice.engineStopped": "selfsync: the sync engine failed {n} times in a row and was stopped. Run “{cmd}” to try again; the details are in the sync log.",
 
