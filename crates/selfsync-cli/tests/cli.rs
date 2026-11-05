@@ -228,6 +228,42 @@ async fn symlinked_folder_is_not_synced() {
     assert_eq!(copies, 2, "внешний файл не ушёл на сервер копией");
 }
 
+// Имена на пределе 255 байт (#11): временное имя записи и имя в `.trash` (весь путь
+// в одном имени) укладываются в предел ФС.
+#[tokio::test(flavor = "multi_thread")]
+async fn names_at_255_bytes_download_and_go_to_trash() {
+    let srv = server().await;
+    let (a, ca) = folder(&srv, "longnames", "a");
+    let (b, cb) = folder(&srv, "longnames", "b");
+    let names = [
+        format!("{}.md", "a".repeat(252)),
+        format!("dir/{}.md", "я".repeat(126)),
+    ];
+    std::fs::create_dir_all(a.path().join("dir")).unwrap();
+    for n in &names {
+        std::fs::write(a.path().join(n), format!("{}\n", n.len())).unwrap();
+    }
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    for n in &names {
+        assert_eq!(
+            std::fs::read_to_string(b.path().join(n)).unwrap(),
+            format!("{}\n", n.len())
+        );
+    }
+
+    for n in &names {
+        std::fs::remove_file(a.path().join(n)).unwrap();
+    }
+    assert_eq!(sync(a.path(), &ca).await, Outcome::Synced);
+    assert_eq!(sync(b.path(), &cb).await, Outcome::Synced);
+    for n in &names {
+        assert!(!b.path().join(n).exists(), "{n}");
+    }
+    let trashed = std::fs::read_dir(b.path().join(".trash")).unwrap().count();
+    assert_eq!(trashed, 2);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn connect_by_code() {
     let srv = server().await;

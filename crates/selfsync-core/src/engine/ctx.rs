@@ -540,8 +540,7 @@ pub(crate) fn build_excludes(cfg: &EngineConfig) -> Excludes {
     e
 }
 
-/// Суффикс временных файлов атомарной записи (исключается всегда).
-pub const TEMP_SUFFIX: &str = ".selfsync-tmp";
+pub use crate::tempname::TEMP_SUFFIX;
 
 /// Порог «маленького» блоба: одним запросом, целиком в памяти.
 pub const SMALL_BLOB: u64 = 8 * 1024 * 1024;
@@ -957,9 +956,11 @@ impl Ctx {
     }
 
     /// Свободное временное имя `{base}.{tag}.selfsync-tmp` для двухшагового
-    /// переименования. Занято (в том числе файлом, отличающимся только регистром) —
-    /// `{base}.{tag}-N.selfsync-tmp`.
-    pub async fn free_temp(&self, base: &str, tag: &str) -> SyncResult<String> {
+    /// переименования в `to`. Занято (в том числе файлом, отличающимся только
+    /// регистром) — `{base}.{tag}-N.selfsync-tmp`. `base` — `to` или, если имя не
+    /// оставляет места для хвоста, укороченное (`tempname::temp_base`).
+    pub async fn free_temp(&self, to: &str, tag: &str) -> SyncResult<String> {
+        let base = crate::tempname::temp_base(to);
         let mut name = format!("{base}.{tag}{TEMP_SUFFIX}");
         for n in 2..100 {
             if self.stat(&name).await?.is_none() {
