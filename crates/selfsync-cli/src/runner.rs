@@ -34,6 +34,8 @@ pub struct Options {
     pub hook: Option<HookConfig>,
     /// С `enable_encryption`: создать и фразу восстановления (печатается в stdout).
     pub recovery: bool,
+    /// Подтвердить массовое удаление, на котором остановился прошлый запуск.
+    pub allow_deletes: bool,
 }
 
 /// Чем закончился запуск.
@@ -310,6 +312,11 @@ fn notify_user(n: &Notice) {
         Notice::MigrationProgress { done, total } => {
             tracing::info!("шифрование vault'а: {done}/{total}")
         }
+        Notice::MassDelete { count, total } => tracing::error!(
+            "в папке не найдено {count} из {total} файлов: синк остановлен, удаления на сервер \
+             не отправлены. Если файлы пропали из-за сбоя (права, не подключён диск) — верните \
+             их; если удалены намеренно — selfsync-cli run --allow-deletes"
+        ),
         other => tracing::info!("{other:?}"),
     }
 }
@@ -411,6 +418,7 @@ pub async fn with_vault(
         enable_encryption: false,
         hook: None,
         recovery: false,
+        allow_deletes: false,
     };
     let end = run_loop(dir, cfg, opts, None, Some(cmd)).await?;
     Ok((end.outcome, end.result))
@@ -433,6 +441,7 @@ enum Stage {
 }
 
 const COMMAND_REQ: u64 = 1;
+const ALLOW_DELETES_REQ: u64 = 2;
 
 async fn run_loop(
     dir: &Path,
@@ -466,6 +475,12 @@ async fn run_loop(
     };
 
     lp.feed(Event::Start { key });
+    if opts.allow_deletes {
+        lp.feed(Event::Command {
+            req: ALLOW_DELETES_REQ,
+            command: UiCommand::AllowDeletes,
+        });
+    }
     if opts.enable_encryption {
         let password = opts
             .password

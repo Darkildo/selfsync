@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::ctx::{Ctx, SyncResult};
+use super::ctx::{Ctx, SyncError, SyncResult};
 use super::transfer::read_local;
 use super::types::{FileMeta, LogLevel, Notice};
 use crate::hash::Hash;
@@ -399,6 +399,67 @@ fn detect_renames(cx: &Ctx, delta: &ScanDelta) {
     });
 }
 
+/// Страховка от массового удаления: если полный обход не нашёл столько файлов,
+/// это скорее сбой (нет прав на папку, не подключён диск, ошибка ФС), чем работа
+/// пользователя — удаления не отправляются, синк останавливается.
+const MASS_DELETE_MIN: usize = 50;
+/// ...и не меньше этой доли (1/4) файлов, которые здесь были.
+const MASS_DELETE_SHARE: usize = 4;
+/// Листинг без единого файла при стольких исчезнувших — тоже сбой (пустая точка
+/// монтирования).
+const EMPTY_LISTING_MIN: usize = 10;
+
+/// Исчезло `gone` файлов из `total`, в листинге осталось `present`: похоже на сбой.
+pub(crate) fn mass_delete(gone: usize, total: usize, present: usize) -> bool {
+    (gone >= MASS_DELETE_MIN && gone * MASS_DELETE_SHARE >= total)
+        || (present == 0 && gone >= EMPTY_LISTING_MIN)
+}
+
+/// Останавливает синк перед массовым удалением, если пользователь его не
+/// подтвердил (`UiCommand::AllowDeletes`). Следующий цикл — снова полный обход:
+/// вернулись файлы — синк идёт дальше как обычно.
+fn hold_mass_delete(
+    cx: &Ctx,
+    present: &BTreeMap<String, FileMeta>,
+    gone: &[String],
+) -> SyncResult<()> {
+    let allowed = cx.with_mut(|s| std::mem::take(&mut s.allow_deletes));
+    let (files, total) = cx.with(|s| {
+        let file = |p: &String| s.index.files.get(p).is_some_and(|f| !f.folder);
+        let files = gone.iter().filter(|p| file(p)).count();
+        let total = s
+            .index
+            .files
+            .values()
+            .filter(|f| f.local.is_some() && !f.folder)
+            .count();
+        (files, total)
+    });
+    let left = present.values().filter(|m| !m.dir).count();
+    if !mass_delete(files, total, left) {
+        return Ok(());
+    }
+    if allowed {
+        cx.log(
+            LogLevel::Info,
+            format!("удаление {files} из {total} файлов подтверждено"),
+        );
+        return Ok(());
+    }
+    cx.with_mut(|s| s.need_full_scan = true);
+    cx.log(
+        LogLevel::Warn,
+        format!(
+            "полный обход не нашёл {files} из {total} файлов: удаления не отправлены, синк остановлен"
+        ),
+    );
+    cx.notify(Notice::MassDelete {
+        count: u32::try_from(files).unwrap_or(u32::MAX),
+        total: u32::try_from(total).unwrap_or(u32::MAX),
+    });
+    Err(SyncError::Blocked("mass_delete".into()))
+}
+
 /// Сканирование: полный обход или пути из событий.
 pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
     let ev = cx.with(|s| s.renames.clone());
@@ -453,10 +514,13 @@ pub(crate) async fn scan(cx: &Ctx) -> SyncResult<()> {
                 .map(|(k, _)| k.clone())
                 .collect()
         });
-        for p in tracked {
-            if !present.contains_key(&p) && !cx.with(|s| s.is_excluded(&p)) {
-                mark_gone(cx, &p, &mut delta);
-            }
+        let gone: Vec<String> = tracked
+            .into_iter()
+            .filter(|p| !present.contains_key(p) && !cx.with(|s| s.is_excluded(p)))
+            .collect();
+        hold_mass_delete(cx, &present, &gone)?;
+        for p in gone {
+            mark_gone(cx, &p, &mut delta);
         }
     } else {
         let dirty: BTreeSet<String> = cx.with_mut(|s| std::mem::take(&mut s.dirty));

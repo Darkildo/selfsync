@@ -291,6 +291,9 @@ pub struct World {
     /// Портить тело `PUT /v1/blobs/…` не короче стольких байт (сервер ответит
     /// `hash_mismatch`): тело по дороге подменили.
     pub corrupt_blob_puts: Option<usize>,
+    /// Короткая запись: следующая запись этого пути клиентом `c` кладёт только
+    /// половину данных и сообщает об успехе (диск заполнен, бэкенд не проверил).
+    pub short_writes: BTreeSet<(usize, String)>,
 }
 
 /// Номер запроса команды смены ключа в случайных прогонах.
@@ -338,6 +341,7 @@ impl World {
             hide_read_only: false,
             hide_proto_header: false,
             corrupt_blob_puts: None,
+            short_writes: BTreeSet::new(),
         };
         for i in 0..cfg.clients {
             w.add_client(i);
@@ -638,8 +642,15 @@ impl World {
                 path, offset, len, ..
             } => self.clients[c].fs.read(&path, offset, len),
             Action::Write {
-                path, data, expect, ..
+                path,
+                mut data,
+                expect,
+                ..
             } => {
+                if self.short_writes.remove(&(c, path.clone())) {
+                    data.truncate(data.len() / 2);
+                    self.log(format!("c{c} SHORT WRITE {path}"));
+                }
                 let r = self.clients[c].fs.write(&path, data, &expect, now);
                 self.log(format!("c{c} write {path} -> {}", short(&r)));
                 r

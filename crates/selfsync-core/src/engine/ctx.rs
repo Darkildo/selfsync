@@ -14,7 +14,7 @@ use super::types::*;
 use crate::crypto::{MasterKey, VaultKeys};
 use crate::exclude::Excludes;
 use crate::hash::Hash;
-use crate::index::{Index, VaultMode};
+use crate::index::{Index, LocalObs, Transfer, VaultMode};
 use crate::path::VaultPath;
 
 /// Ошибка цикла синка.
@@ -169,6 +169,9 @@ pub(crate) struct State {
     pub blocked: Option<String>,
     /// Синк приостановлен (ждём пароль или окончания чужой миграции).
     pub paused: Option<String>,
+    /// Пользователь подтвердил массовое удаление (`UiCommand::AllowDeletes`):
+    /// действует на один полный обход.
+    pub allow_deletes: bool,
     pub server_state: Option<pb::VaultState>,
 
     // Запросы пользователя к задаче синка.
@@ -267,6 +270,7 @@ impl State {
             pushed: BTreeSet::new(),
             blocked: None,
             paused: None,
+            allow_deletes: false,
             server_state: None,
             enable: None,
             rekey: None,
@@ -657,11 +661,50 @@ impl Ctx {
         data: Vec<u8>,
         expect: Expect,
     ) -> SyncResult<Option<FileMeta>> {
+        let size = data.len() as u64;
         let r = self.write_inner(path, data, expect).await;
-        if matches!(r, Ok(Some(_))) {
+        if let Ok(Some(meta)) = &r {
             self.touched(path);
+            self.check_written(path, meta, size).await?;
         }
         r
+    }
+
+    /// Бэкенд сообщил о записи, а файл на месте другого размера (короткая запись
+    /// при заполненном диске): ошибка цикла, обрезанный файл не принимается за
+    /// содержимое. Был локальный файл — наблюдение прежнего содержимого с новыми
+    /// размером и временем: скан не отправит обрезанное как правку, а повтор
+    /// скачивания перезапишет его. Файла не было — созданный убирается.
+    async fn check_written(&self, path: &str, meta: &FileMeta, size: u64) -> SyncResult<()> {
+        // `size: 0` без времени — бэкенд не прислал stat (`Done`): сверять не с чем.
+        if meta.size == size || (meta.size == 0 && meta.mtime == 0) {
+            return Ok(());
+        }
+        let had = self.with_mut(|s| {
+            let f = s.index.files.get_mut(path)?;
+            if let Some(Transfer::Download { .. }) = f.transfer {
+                f.transfer = None;
+            }
+            let prev = f.local?;
+            f.local = Some(LocalObs {
+                size: meta.size,
+                mtime: meta.mtime,
+                plain: prev.plain,
+            });
+            Some(())
+        });
+        if had.is_none() {
+            let expect = Expect::Stat {
+                size: meta.size,
+                mtime: meta.mtime,
+            };
+            if let Err(e) = self.trash(path, expect).await {
+                self.log(LogLevel::Warn, format!("{path}: не удалось убрать обрезанный файл: {e}"));
+            }
+        }
+        let message = format!("{path}: записано {} байт из {size}", meta.size);
+        self.log(LogLevel::Error, format!("неполная запись {message}"));
+        Err(SyncError::Io(format!("write: {message}")))
     }
 
     async fn write_inner(
@@ -740,15 +783,18 @@ impl Ctx {
         }
     }
 
+    /// `size` — сколько записано во временный файл (сверяется после переноса).
     pub async fn commit_temp(
         &self,
         temp: &str,
         path: &str,
         expect: Expect,
+        size: u64,
     ) -> SyncResult<Option<FileMeta>> {
         let r = self.commit_temp_inner(temp, path, expect).await;
-        if matches!(r, Ok(Some(_))) {
+        if let Ok(Some(meta)) = &r {
             self.touched(path);
+            self.check_written(path, meta, size).await?;
         }
         r
     }

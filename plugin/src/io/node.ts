@@ -52,7 +52,9 @@ export class NodeBackend implements FileBackend {
             out.push({ path, size: 0, mtime: 0, dir: true });
             await walk(path);
           } else if (e.isFile()) {
-            const st = await this.fsp.lstat(this.abs(path)).catch(() => null);
+            // Пропасть из листинга может только исчезнувший файл: любая другая ошибка
+            // (нет прав, EIO) обрывает обход, иначе ядро сочтёт файл удалённым.
+            const st = await this.fsp.lstat(this.abs(path)).catch(missing);
             if (st) out.push({ path, size: st.size, mtime: Math.trunc(st.mtimeMs), dir: false });
           }
           // Символические ссылки не синхронизируются.
@@ -69,7 +71,7 @@ export class NodeBackend implements FileBackend {
     let real = path;
     if (!this.opts.caseSensitive && path !== "") {
       const parent = parentOf(path);
-      const entries = await this.names.get(parent, () => this.fsp.readdir(this.abs(parent)).catch(() => [] as string[]));
+      const entries = await this.names.get(parent, async () => (await this.fsp.readdir(this.abs(parent)).catch(missing)) ?? []);
       real = joinPath(parent, realName(entries, nameOf(path)) ?? nameOf(path));
     }
     return st.isDirectory()
@@ -142,7 +144,7 @@ export class NodeBackend implements FileBackend {
       const { size } = await fh.stat();
       if (size < offset) throw new Error(`разрыв во временном файле ${name}: ${size} < ${offset}`);
       await fh.truncate(offset);
-      await fh.write(data, 0, data.length, offset);
+      await writeFully(fh, data, offset);
       await fh.sync();
     } finally {
       await fh.close();
@@ -191,10 +193,23 @@ function missing(e: unknown): null {
 async function writeDurable(fsp: FsPromises, file: string, data: Uint8Array): Promise<void> {
   const fh = await fsp.open(file, "w");
   try {
-    await fh.write(data, 0, data.length, 0);
+    await writeFully(fh, data, 0);
     await fh.sync();
   } finally {
     await fh.close();
+  }
+}
+
+type FileHandle = Awaited<ReturnType<FsPromises["open"]>>;
+
+/** Весь буфер с позиции `pos`: один `write` может записать меньше (диск или квота
+ *  заполнены, сетевая ФС) и не сообщить об ошибке — дописывать до конца. */
+async function writeFully(fh: FileHandle, data: Uint8Array, pos: number): Promise<void> {
+  let off = 0;
+  while (off < data.length) {
+    const { bytesWritten } = await fh.write(data, off, data.length - off, pos + off);
+    if (bytesWritten <= 0) throw new Error(`запись не продвигается: ${off} из ${data.length} байт`);
+    off += bytesWritten;
   }
 }
 

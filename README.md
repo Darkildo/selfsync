@@ -290,6 +290,7 @@ From Obsidian's community plugins (search for "Selfsync"), or by hand: copy `mai
 - **Sync** runs 2–3 seconds after the last edit, on startup, when Obsidian returns to the foreground, and on a polling schedule. When Obsidian goes to the background, pending changes are sent right away.
 - **Conflicts** raise a notice; the "Unresolved conflicts" window lets you keep both versions, yours or the server's.
 - **Deleted files** - the "Restore deleted files" command opens the server's trash.
+- **Many files missing at once** - if a full scan does not find at least 50 files that were there (and at least a quarter of them), or finds no files at all when 10 or more were there, sync stops and nothing is deleted on the server: this usually means a disconnected drive or a folder the plugin cannot read, not a cleanup. Bring the files back and click the status bar to sync again, or click the notice to delete them on all devices. Files removed while Obsidian is running are deleted as usual.
 - **File history** - from the file context menu or a command. With server 0.4.0+, "Delete old versions" there frees space on the server; the current version stays.
 - **Space on the server** (server 0.4.0+): the settings show how much the vault takes and its limits, if the server has [quotas](#configuration). When the vault is out of space, new files wait on the device (the status bar shows how many) and are sent as soon as there is room; everything else keeps syncing.
 
@@ -344,7 +345,8 @@ Linux and macOS allow `? : * " < > |` in file names, Windows and Android storage
 ```sh
 selfsync-cli connect --dir ~/notes --server https://notes.example.com --code CODE
 selfsync-cli run --dir ~/notes            # watch the folder until Ctrl-C
-selfsync-cli run --dir ~/notes --once     # one cycle (cron); exit codes: 1 network, 2 password needed, 3 device revoked
+selfsync-cli run --dir ~/notes --once     # one cycle (cron); exit codes: 1 network, 2 password needed, 3 sync stopped (device revoked, many files missing)
+selfsync-cli run --dir ~/notes --once --allow-deletes   # many files are missing on purpose: delete them on the server too
 selfsync-cli encrypt --dir ~/notes --password-file ~/.notes-pass
 selfsync-cli rekey --dir ~/notes --password-file ~/.notes-pass
 selfsync-cli status --dir ~/notes

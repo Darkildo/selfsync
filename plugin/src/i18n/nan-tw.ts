@@ -50,6 +50,9 @@ const nanTw: Dict = {
   "notice.serverRewound": "Sū-ho̍k-khì í-king tuì pī-hūn ho̍k-guân — tsuân-bīn tuì-tsiàu",
   "notice.indexReset": "Tông-pōo sik-ín phāinn--khì — í-king khai-sí an-tsuân ê tsuân-bīn tuì-tsiàu",
   "notice.encryptionMismatch": "Vault tī tsia ū ka-bi̍t, m̄-koh tī sū-ho̍k-khì bô — tông-pōo thîng--ah",
+  "notice.massDelete": "Tsia ū {total} ê tóng-àn, kî-tiong {count} ê bô--khì — tông-pōo thîng--leh, sū-hōo-khì tíng bô thâi tiāu siánn-mih. Nā-sī tshò-ngōo (tóng-àn-kah ê khuân-hān, bô liân-tsiap ê tshoo-tsûn-khì), tshiánn kā in hîng--tńg-lâi koh tông-pōo. Tshiah--loh-khì tī só͘-ū ê siat-pī thâi tiāu",
+  "massDelete.confirm": "Beh tī só͘-ū ê siat-pī thâi tiāu {count} ê bô--khì ê tóng-àn bô? Pó-liû kî-kan in ē lâu tī sū-hōo-khì ê í thâi tóng-àn.",
+  "massDelete.action": "Tī só͘-ū ê siat-pī thâi tiāu",
   "notice.error": "Tông-pōo: {message}",
   "notice.engineStopped": "selfsync: tông-pōo ián-jín liân-sòa {n} pái tshut-tshò, í-king thîng--khì. Tsò “{cmd}” tsài tshì tsi̍t-pái; siông-sè tī tông-pōo kì-lo̍k.",
 

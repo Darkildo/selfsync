@@ -50,6 +50,9 @@ const zh: Dict = {
   "notice.serverRewound": "服务器已从备份恢复——正在进行完整核对",
   "notice.indexReset": "同步索引已损坏——已开始安全的完整核对",
   "notice.encryptionMismatch": "此处的仓库已加密，但服务器上的未加密——同步已停止",
+  "notice.massDelete": "此处缺少 {total} 个文件中的 {count} 个 — 已停止同步,服务器上未删除任何内容。如果这是错误(文件夹权限、驱动器未连接),请恢复这些文件后再次同步。点击可在所有设备上删除它们",
+  "massDelete.confirm": "在所有设备上删除 {count} 个缺失的文件?在保留期内它们仍保存在服务器的已删除文件中。",
+  "massDelete.action": "在所有设备上删除",
   "notice.error": "同步：{message}",
   "notice.engineStopped": "selfsync：同步引擎连续 {n} 次出错，已停止。运行“{cmd}”重试；详情见同步日志。",
 

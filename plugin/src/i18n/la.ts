@@ -50,6 +50,9 @@ const la: Dict = {
   "notice.serverRewound": "Servitrum ex exemplari tutelari restitutum est — plena reconciliatio",
   "notice.indexReset": "Index synchronizationis corruptus erat — tuta plena reconciliatio incepit",
   "notice.encryptionMismatch": "Arca hic cryptata est sed non in servitro — synchronizatio intermissa",
+  "notice.massDelete": "Hic desunt {count} ex {total} fasciculis — synchronizatio intermissa est, nihil in servitore deletum est. Si error est (permissiones scrinii, discus disiunctus), eos restitue et iterum synchroniza. Preme ut eos in omnibus machinis deleas",
+  "massDelete.confirm": "Delerene {count} fasciculos deficientes in omnibus machinis? In fasciculis deletis servitoris manent per tempus retentionis.",
+  "massDelete.action": "Dele in omnibus machinis",
   "notice.error": "Synchronizatio: {message}",
   "notice.engineStopped": "selfsync: machina synchronizationis {n} vicibus continuis defecit et sistitur. Exsequere “{cmd}” ut iterum coneris; singula in actis synchronizationis sunt.",
 

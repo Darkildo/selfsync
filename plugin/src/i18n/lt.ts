@@ -50,6 +50,9 @@ const lt: Dict = {
   "notice.serverRewound": "Serveris atkurtas iš atsarginės kopijos — visiškas suderinimas",
   "notice.indexReset": "Sinchronizavimo indeksas buvo sugadintas — pradėtas saugus visiškas suderinimas",
   "notice.encryptionMismatch": "Saugykla čia užšifruota, o serveryje — ne; sinchronizavimas sustabdytas",
+  "notice.massDelete": "Čia trūksta {count} iš {total} failų — sinchronizavimas sustabdytas, serveryje nieko neištrinta. Jei tai klaida (aplanko leidimai, atjungtas diskas), atkurkite juos ir sinchronizuokite dar kartą. Spustelėkite, kad ištrintumėte juos visuose įrenginiuose",
+  "massDelete.confirm": "Ištrinti {count} trūkstamus failus visuose įrenginiuose? Saugojimo laikotarpį jie liks serverio ištrintuose failuose.",
+  "massDelete.action": "Ištrinti visuose įrenginiuose",
   "notice.error": "Sinchronizavimas: {message}",
   "notice.engineStopped": "selfsync: sinchronizavimo variklis {n} kartus iš eilės sutriko ir buvo sustabdytas. Paleiskite „{cmd}“, kad bandytumėte dar kartą; išsami informacija – sinchronizavimo žurnale.",
 

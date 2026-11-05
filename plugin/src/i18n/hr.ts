@@ -50,6 +50,9 @@ const hr: Dict = {
   "notice.serverRewound": "Poslužitelj je vraćen iz sigurnosne kopije — potpuno usklađivanje",
   "notice.indexReset": "Indeks sinkronizacije bio je oštećen — pokrenuto je sigurno potpuno usklađivanje",
   "notice.encryptionMismatch": "Trezor je šifriran ovdje, ali ne i na poslužitelju — sinkronizacija je zaustavljena",
+  "notice.massDelete": "Ovdje nedostaje {count} od {total} datoteka — sinkronizacija zaustavljena, na poslužitelju ništa nije izbrisano. Ako je riječ o pogrešci (dozvole mape, odspojen disk), vratite ih i ponovno sinkronizirajte. Kliknite da ih izbrišete na svim uređajima",
+  "massDelete.confirm": "Izbrisati {count} datoteka koje nedostaju na svim uređajima? Ostaju u izbrisanim datotekama poslužitelja tijekom razdoblja čuvanja.",
+  "massDelete.action": "Izbriši na svim uređajima",
   "notice.error": "Sinkronizacija: {message}",
   "notice.engineStopped": "selfsync: mehanizam sinkronizacije zakazao je {n} puta zaredom i zaustavljen je. Pokrenite „{cmd}” za novi pokušaj; pojedinosti su u zapisniku sinkronizacije.",
 

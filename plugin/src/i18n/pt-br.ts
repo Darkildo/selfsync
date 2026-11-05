@@ -50,6 +50,9 @@ const ptBr: Dict = {
   "notice.serverRewound": "O servidor foi restaurado de um backup — reconciliação completa",
   "notice.indexReset": "O índice de sincronização estava danificado — iniciada uma reconciliação completa segura",
   "notice.encryptionMismatch": "O cofre está criptografado aqui, mas não no servidor — sincronização interrompida",
+  "notice.massDelete": "Faltam aqui {count} de {total} arquivos — sincronização interrompida, nada foi excluído no servidor. Se for um erro (permissões da pasta, unidade desconectada), restaure-os e sincronize novamente. Clique para excluí-los em todos os dispositivos",
+  "massDelete.confirm": "Excluir {count} arquivos ausentes em todos os dispositivos? Eles ficam nos arquivos excluídos do servidor durante o período de retenção.",
+  "massDelete.action": "Excluir em todos os dispositivos",
   "notice.error": "Sincronização: {message}",
   "notice.engineStopped": "selfsync: o mecanismo de sincronização falhou {n} vezes seguidas e foi parado. Execute “{cmd}” para tentar de novo; os detalhes estão no registro de sincronização.",
 

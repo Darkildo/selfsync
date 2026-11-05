@@ -50,6 +50,9 @@ const it: Dict = {
   "notice.serverRewound": "Il server è stato ripristinato da un backup — riconciliazione completa",
   "notice.indexReset": "L'indice di sincronizzazione era danneggiato — è iniziata una riconciliazione completa sicura",
   "notice.encryptionMismatch": "Il vault è crittografato qui ma non sul server — sincronizzazione interrotta",
+  "notice.massDelete": "Qui mancano {count} file su {total} — sincronizzazione interrotta, nulla è stato eliminato sul server. Se è un errore (permessi della cartella, unità scollegata), ripristinali e sincronizza di nuovo. Fai clic per eliminarli su tutti i dispositivi",
+  "massDelete.confirm": "Eliminare {count} file mancanti su tutti i dispositivi? Restano nei file eliminati del server per il periodo di conservazione.",
+  "massDelete.action": "Elimina su tutti i dispositivi",
   "notice.error": "Sincronizzazione: {message}",
   "notice.engineStopped": "selfsync: il motore di sincronizzazione è andato in errore {n} volte di seguito ed è stato fermato. Esegui «{cmd}» per riprovare; i dettagli sono nel registro di sincronizzazione.",
 

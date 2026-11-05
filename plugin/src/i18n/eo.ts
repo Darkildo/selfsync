@@ -50,6 +50,9 @@ const eo: Dict = {
   "notice.serverRewound": "La servilo estis restaŭrita el sekurkopio — plena reakordigo",
   "notice.indexReset": "La sinkroniga indekso estis difektita — sekura plena reakordigo komenciĝis",
   "notice.encryptionMismatch": "La trezorejo estas ĉifrita ĉi tie sed ne en la servilo — sinkronigo haltis",
+  "notice.massDelete": "Ĉi tie mankas {count} el {total} dosieroj — sinkronigo haltis, nenio estis forigita ĉe la servilo. Se tio estas eraro (permesoj de dosierujo, malkonektita disko), restarigu ilin kaj sinkronigu denove. Alklaku por forigi ilin en ĉiuj aparatoj",
+  "massDelete.confirm": "Ĉu forigi {count} mankantajn dosierojn en ĉiuj aparatoj? Ili restas en la forigitaj dosieroj de la servilo dum la konserva periodo.",
+  "massDelete.action": "Forigi en ĉiuj aparatoj",
   "notice.error": "Sinkronigo: {message}",
   "notice.engineStopped": "selfsync: la sinkroniga motoro malsukcesis {n} fojojn sinsekve kaj estis haltigita. Rulu “{cmd}” por reprovi; detaloj estas en la sinkroniga protokolo.",
 

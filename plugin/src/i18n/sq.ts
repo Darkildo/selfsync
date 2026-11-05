@@ -50,6 +50,9 @@ const sq: Dict = {
   "notice.serverRewound": "Serveri u rikthye nga një kopje rezervë — rakordim i plotë",
   "notice.indexReset": "Indeksi i sinkronizimit ishte i dëmtuar — nisi një rakordim i plotë i sigurt",
   "notice.encryptionMismatch": "Kasaforta është e enkriptuar këtu, por jo në server — sinkronizimi u ndal",
+  "notice.massDelete": "Këtu mungojnë {count} nga {total} skedarë — sinkronizimi u ndal, asgjë nuk u fshi në server. Nëse është gabim (lejet e dosjes, një disk i shkëputur), rikthejini dhe sinkronizoni përsëri. Klikoni për t'i fshirë në të gjitha pajisjet",
+  "massDelete.confirm": "Të fshihen {count} skedarë që mungojnë në të gjitha pajisjet? Ata mbeten te skedarët e fshirë të serverit gjatë periudhës së ruajtjes.",
+  "massDelete.action": "Fshi në të gjitha pajisjet",
   "notice.error": "Sinkronizimi: {message}",
   "notice.engineStopped": "selfsync: motori i sinkronizimit dështoi {n} herë radhazi dhe u ndal. Ekzekutoni «{cmd}» për të provuar përsëri; hollësitë janë në regjistrin e sinkronizimit.",
 

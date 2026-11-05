@@ -50,6 +50,9 @@ const lv: Dict = {
   "notice.serverRewound": "Serveris tika atjaunots no rezerves kopijas — pilna salīdzināšana",
   "notice.indexReset": "Sinhronizācijas indekss bija bojāts — sākta droša pilna salīdzināšana",
   "notice.encryptionMismatch": "Šeit krātuve ir šifrēta, bet serverī nav — sinhronizācija apturēta",
+  "notice.massDelete": "Šeit trūkst {count} no {total} failiem — sinhronizācija apturēta, serverī nekas nav dzēsts. Ja tā ir kļūda (mapes atļaujas, atvienots disks), atjaunojiet tos un sinhronizējiet vēlreiz. Noklikšķiniet, lai tos dzēstu visās ierīcēs",
+  "massDelete.confirm": "Dzēst {count} trūkstošos failus visās ierīcēs? Glabāšanas periodā tie paliek servera dzēstajos failos.",
+  "massDelete.action": "Dzēst visās ierīcēs",
   "notice.error": "Sinhronizācija: {message}",
   "notice.engineStopped": "selfsync: sinhronizācijas dzinējs {n} reizes pēc kārtas avarēja un ir apturēts. Izpildiet „{cmd}“, lai mēģinātu vēlreiz; sīkāka informācija ir sinhronizācijas žurnālā.",
 

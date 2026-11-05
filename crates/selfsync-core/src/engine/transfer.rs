@@ -538,7 +538,7 @@ async fn download_big(
             plain,
         }));
     };
-    let Some(meta) = cx.commit_temp(&temp, key, expect).await? else {
+    let Some(meta) = cx.commit_temp(&temp, key, expect, plain_off).await? else {
         return Ok(None);
     };
     cx.with_mut(|s| {

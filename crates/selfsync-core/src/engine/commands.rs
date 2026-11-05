@@ -454,6 +454,18 @@ async fn exec(cx: &Ctx, cmd: UiCommand) -> SyncResult<UiResult> {
             Ok(UiResult::Ok)
         }
         UiCommand::RemoveLocal { path } => remove_local(cx, &path).await,
+        UiCommand::AllowDeletes => {
+            cx.with_mut(|s| {
+                s.allow_deletes = true;
+                if s.blocked.as_deref() == Some("mass_delete") {
+                    s.blocked = None;
+                }
+                s.need_full_scan = true;
+                s.sync_due = Some(s.now);
+            });
+            cx.log(LogLevel::Info, "удаления подтверждены: полный обход");
+            Ok(UiResult::Ok)
+        }
         UiCommand::Conflicts => Ok(UiResult::Conflicts {
             items: cx.with(|s| s.index.conflicts.clone()),
         }),

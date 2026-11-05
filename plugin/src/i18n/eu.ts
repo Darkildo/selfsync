@@ -50,6 +50,9 @@ const eu: Dict = {
   "notice.serverRewound": "Zerbitzaria babeskopia batetik leheneratu da — bateratze osoa",
   "notice.indexReset": "Sinkronizazio-indizea hondatuta zegoen — bateratze oso eta seguru bat hasi da",
   "notice.encryptionMismatch": "Kutxa-gordailua hemen zifratuta dago, baina ez zerbitzarian — sinkronizazioa geldituta",
+  "notice.massDelete": "Hemen {total} fitxategitik {count} falta dira — sinkronizazioa geldituta, zerbitzarian ez da ezer ezabatu. Akatsa bada (karpetaren baimenak, deskonektatutako unitatea), berreskuratu eta sinkronizatu berriro. Egin klik gailu guztietan ezabatzeko",
+  "massDelete.confirm": "Falta diren {count} fitxategi gailu guztietan ezabatu? Zerbitzariko ezabatutako fitxategietan geratzen dira gordetze-epean.",
+  "massDelete.action": "Ezabatu gailu guztietan",
   "notice.error": "Sinkronizazioa: {message}",
   "notice.engineStopped": "selfsync: sinkronizazio-motorrak {n} aldiz jarraian huts egin du eta gelditu egin da. Exekutatu «{cmd}» berriro saiatzeko; xehetasunak sinkronizazio-erregistroan daude.",
 

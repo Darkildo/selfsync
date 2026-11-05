@@ -50,6 +50,9 @@ const de: Dict = {
   "notice.serverRewound": "Der Server wurde aus einer Sicherung wiederhergestellt — vollständiger Abgleich",
   "notice.indexReset": "Der Synchronisierungsindex war beschädigt — ein sicherer vollständiger Abgleich wurde gestartet",
   "notice.encryptionMismatch": "Der Vault ist hier verschlüsselt, auf dem Server aber nicht — Synchronisierung gestoppt",
+  "notice.massDelete": "{count} von {total} Dateien fehlen hier — Synchronisierung angehalten, auf dem Server wurde nichts gelöscht. Falls das ein Fehler ist (Ordnerberechtigungen, ein getrenntes Laufwerk), stelle sie wieder her und synchronisiere erneut. Klicken, um sie auf allen Geräten zu löschen",
+  "massDelete.confirm": "{count} fehlende Dateien auf allen Geräten löschen? Sie bleiben für die Aufbewahrungsdauer in den gelöschten Dateien des Servers.",
+  "massDelete.action": "Auf allen Geräten löschen",
   "notice.error": "Synchronisierung: {message}",
   "notice.engineStopped": "selfsync: Die Synchronisierung ist {n}-mal hintereinander abgestürzt und wurde angehalten. Führen Sie „{cmd}“ aus, um es erneut zu versuchen; Details stehen im Synchronisierungsprotokoll.",
 

@@ -132,6 +132,9 @@ export type Notice =
   | { kind: "serverRewound" }
   | { kind: "indexReset" }
   | { kind: "encryptionMismatch" }
+  /** Полный обход не нашёл `count` из `total` файлов: синк остановлен, удаления не
+   *  отправлены — до возврата файлов и «Синхронизировать» или `allowDeletes`. */
+  | { kind: "massDelete"; count: number; total: number }
   | { kind: "error"; code: string; message: string };
 
 export interface ConflictRecord {
@@ -254,7 +257,8 @@ export type UiCommand =
   | { type: "diagnose" }
   | { type: "skipped" }
   | { type: "download"; path: string }
-  | { type: "removeLocal"; path: string };
+  | { type: "removeLocal"; path: string }
+  | { type: "allowDeletes" };
 
 export type ConflictChoice = "keepBoth" | "keepMine" | "keepServer";
 

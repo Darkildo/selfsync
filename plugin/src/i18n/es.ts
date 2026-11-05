@@ -50,6 +50,9 @@ const es: Dict = {
   "notice.serverRewound": "El servidor se restauró desde una copia de seguridad — conciliación completa",
   "notice.indexReset": "El índice de sincronización estaba dañado — se inició una conciliación completa segura",
   "notice.encryptionMismatch": "La bóveda está cifrada aquí pero no en el servidor — sincronización detenida",
+  "notice.massDelete": "Faltan aquí {count} de {total} archivos — sincronización detenida, no se borró nada en el servidor. Si es un error (permisos de la carpeta, una unidad desconectada), restáuralos y vuelve a sincronizar. Haz clic para eliminarlos en todos los dispositivos",
+  "massDelete.confirm": "¿Eliminar {count} archivos que faltan en todos los dispositivos? Se conservan en los archivos eliminados del servidor durante el periodo de retención.",
+  "massDelete.action": "Eliminar en todos los dispositivos",
   "notice.error": "Sincronización: {message}",
   "notice.engineStopped": "selfsync: el motor de sincronización falló {n} veces seguidas y se detuvo. Ejecuta «{cmd}» para volver a intentarlo; los detalles están en el registro de sincronización.",
 

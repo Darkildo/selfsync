@@ -50,6 +50,9 @@ const gl: Dict = {
   "notice.serverRewound": "O servidor restaurouse desde unha copia de seguranza — conciliación completa",
   "notice.indexReset": "O índice de sincronización estaba danado — iniciouse unha conciliación completa segura",
   "notice.encryptionMismatch": "O almacén está cifrado aquí pero non no servidor — sincronización detida",
+  "notice.massDelete": "Aquí faltan {count} de {total} ficheiros — sincronización detida, non se eliminou nada no servidor. Se é un erro (permisos do cartafol, unha unidade desconectada), restáuraos e sincroniza de novo. Preme para eliminalos en todos os dispositivos",
+  "massDelete.confirm": "Eliminar {count} ficheiros que faltan en todos os dispositivos? Quedan nos ficheiros eliminados do servidor durante o período de retención.",
+  "massDelete.action": "Eliminar en todos os dispositivos",
   "notice.error": "Sincronización: {message}",
   "notice.engineStopped": "selfsync: o motor de sincronización fallou {n} veces seguidas e detívose. Executa «{cmd}» para tentalo de novo; os detalles están no rexistro de sincronización.",
 

@@ -50,6 +50,9 @@ const no: Dict = {
   "notice.serverRewound": "Serveren ble gjenopprettet fra en sikkerhetskopi — full avstemming",
   "notice.indexReset": "Synkroniseringsindeksen var skadet — en sikker full avstemming er startet",
   "notice.encryptionMismatch": "Hvelvet er kryptert her, men ikke på serveren — synkronisering stoppet",
+  "notice.massDelete": "{count} av {total} filer mangler her — synkroniseringen er stoppet, ingenting er slettet på serveren. Hvis dette er en feil (mappetillatelser, en frakoblet disk), gjenopprett dem og synkroniser på nytt. Klikk for å slette dem på alle enheter",
+  "massDelete.confirm": "Slette {count} manglende filer på alle enheter? De blir værende i serverens slettede filer i oppbevaringsperioden.",
+  "massDelete.action": "Slett på alle enheter",
   "notice.error": "Synkronisering: {message}",
   "notice.engineStopped": "selfsync: synkroniseringsmotoren feilet {n} ganger på rad og er stoppet. Kjør «{cmd}» for å prøve igjen; detaljene står i synkroniseringsloggen.",
 

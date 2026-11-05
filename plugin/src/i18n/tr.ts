@@ -50,6 +50,9 @@ const tr: Dict = {
   "notice.serverRewound": "Sunucu bir yedekten geri yüklendi — tam karşılaştırma yapılıyor",
   "notice.indexReset": "Senkronizasyon dizini bozulmuştu — güvenli bir tam karşılaştırma başlatıldı",
   "notice.encryptionMismatch": "Kasa burada şifreli ama sunucuda değil — senkronizasyon durduruldu",
+  "notice.massDelete": "Burada {total} dosyadan {count} tanesi eksik — eşitleme durduruldu, sunucuda hiçbir şey silinmedi. Bu bir hataysa (klasör izinleri, bağlı olmayan bir sürücü), dosyaları geri getirip yeniden eşitleyin. Tüm cihazlarda silmek için tıklayın",
+  "massDelete.confirm": "{count} eksik dosya tüm cihazlarda silinsin mi? Saklama süresi boyunca sunucunun silinen dosyalarında kalırlar.",
+  "massDelete.action": "Tüm cihazlarda sil",
   "notice.error": "Senkronizasyon: {message}",
   "notice.engineStopped": "selfsync: senkronizasyon motoru art arda {n} kez çöktü ve durduruldu. Yeniden denemek için “{cmd}” komutunu çalıştırın; ayrıntılar senkronizasyon günlüğünde.",
 
