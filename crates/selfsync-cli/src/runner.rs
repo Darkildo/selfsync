@@ -484,12 +484,10 @@ async fn run_loop(
     let index = std::fs::read(exec.index_path()).ok();
     let key = std::fs::read(exec.key_path()).ok();
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut lp = Loop::new(
-        cfg.engine(),
-        index.as_deref(),
-        Arc::clone(&exec),
-        tx.clone(),
-    );
+    let mut ecfg = cfg.engine();
+    // Long-poll идёт в `inflight` и не кончается: один цикл без него, иначе не выйти.
+    ecfg.use_wait &= !opts.once;
+    let mut lp = Loop::new(ecfg, index.as_deref(), Arc::clone(&exec), tx.clone());
     lp.hook = hook;
     let _watcher = if opts.watch && !opts.once {
         Some(watch(dir, tx.clone())?)

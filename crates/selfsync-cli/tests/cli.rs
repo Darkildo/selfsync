@@ -679,6 +679,29 @@ async fn history_and_revert() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn once_exits_with_use_wait() {
+    let srv = server().await;
+    let (a, mut ca) = folder(&srv, "wait", "a");
+    ca.use_wait = true;
+    ca.save(a.path()).unwrap();
+    std::fs::write(a.path().join("w.md"), "w\n").unwrap();
+    let limit = Duration::from_secs(30);
+    let o = tokio::time::timeout(limit, sync(a.path(), &ca))
+        .await
+        .expect("run --once с use_wait не завершился");
+    assert_eq!(o, Outcome::Synced);
+    // Команды на движке папки тоже идут циклом `once`.
+    let cmd = VaultCommand::Ui(UiCommand::History {
+        path: "w.md".into(),
+    });
+    let (o, r) = tokio::time::timeout(limit, vault_cmd(a.path(), &ca, None, cmd))
+        .await
+        .expect("команда с use_wait не завершилась");
+    assert_eq!(o, Outcome::Synced);
+    assert!(matches!(r, Some(UiResult::History { .. })), "{r:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn trash_restore_and_purge() {
     let srv = server().await;
     let (a, ca) = folder(&srv, "trash", "a");

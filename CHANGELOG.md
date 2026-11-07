@@ -2,6 +2,10 @@
 
 Release notes for each version; earlier versions are described on the [releases page](https://github.com/Darkildo/selfsync/releases).
 
+## Unreleased
+
+- **CLI, fix** ([#24](https://github.com/Darkildo/selfsync/issues/24)). With `use_wait = true` in the folder's config, `selfsync-cli run --once` synced and reported `Idle` but never exited, and commands that sync first (`history`, `revert`, `trash`, `conflicts`, `rekey` and the like) hung the same way: the long-poll request kept the cycle busy. A single cycle now runs without long polling; the saved setting is unchanged and still applies to `run` without `--once`.
+
 ## 0.10.0
 
 - **Plugin, mobile, fix.** A file that the mobile file system lists but whose metadata cannot be read (Obsidian answers "no such file") is no longer taken for deleted: the plugin asks again and checks the folder listing; if the file is still there it is skipped until the next scan instead of being deleted on every device. For extensions: `FileMeta.unreadable`.
