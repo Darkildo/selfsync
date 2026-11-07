@@ -10,7 +10,7 @@ After=selfsync.socket
 # Собрать тот же образ у себя, без реестра (из корня репозитория):
 #   podman build -t localhost/selfsync:local --build-arg VERSION=X.Y.Z deploy/quickstart
 # и указать Image=localhost/selfsync:local, Pull=never.
-Image=ghcr.io/darkildo/selfsync:0.10.0
+Image=ghcr.io/darkildo/selfsync:0.10.1
 Pull=missing
 Exec=socket --idle-timeout 10m
 Volume=%h/selfsync-data:/data:Z
