@@ -2,7 +2,7 @@
 
 Release notes for each version; earlier versions are described on the [releases page](https://github.com/Darkildo/selfsync/releases).
 
-## Unreleased
+## 0.10.1
 
 - **CLI, fix** ([#24](https://github.com/Darkildo/selfsync/issues/24)). With `use_wait = true` in the folder's config, `selfsync-cli run --once` synced and reported `Idle` but never exited, and commands that sync first (`history`, `revert`, `trash`, `conflicts`, `rekey` and the like) hung the same way: the long-poll request kept the cycle busy. A single cycle now runs without long polling; the saved setting is unchanged and still applies to `run` without `--once`.
 
